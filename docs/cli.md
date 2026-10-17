@@ -668,7 +668,8 @@ takes an ID from `hey timetrack categories`.
 want `YYYY-MM-DDTHH:MM` in your own time zone, or a full RFC 3339 instant when the zone
 matters. A category is given as a title, and HEY creates the category if it has none by
 that title — on `edit` and on `stop --category` alike. There is no clearing a category that
-way: a blank title leaves the track filed where it was. Editing a track completes it, so
+way: a blank title is refused with a usage error, since a filed track can only be moved to
+another category. Editing a track completes it, so
 `edit` is for tracks that have already finished.
 
 The time tracking export contains every completed entry, newest first, with Start, End, Duration, Category, and Notes columns. Ongoing time tracking is excluded. `--output` preserves an existing file unless `--force` is set.

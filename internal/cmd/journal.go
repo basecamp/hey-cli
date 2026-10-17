@@ -49,6 +49,9 @@ func newJournalListCommand() *journalListCommand {
 	journalListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List journal entries",
+		Annotations: map[string]string{
+			"agent_notes": "Reads the personal calendar unless --calendar names another. " + personalWindowNotes,
+		},
 		Example: `  hey journal list
   hey journal list --limit 10
   hey journal list --starts-on 2026-01-01 --ends-on 2026-01-31 --json`,
@@ -140,7 +143,11 @@ Markdown; and content_markdown_lossless, which says whether that Markdown holds 
 the entry. Write content_markdown back with hey journal write only when
 content_markdown_lossless is true. When it is false, the entry holds an attachment, an image
 or other markup Markdown cannot carry, and writing the Markdown would drop it: change content
-and write it back with hey journal write --content-html instead.`,
+and write it back with hey journal write --content-html instead.
+
+A day with no entry is not an error: JSON answers ok with the summary "No journal entry for
+<date>" and no data, so --jq '.data.content' prints null. Guard a read that feeds a write
+with --jq '.data.content // error("no journal entry for this day")'.`,
 		Example: `  hey journal read
   hey journal read 2026-03-15
   hey journal read --html > entry.html
@@ -243,9 +250,10 @@ Content that trims to nothing — whitespace-only, or an emptied $EDITOR buffer 
 day's entry, and the command says "removed" rather than "saved". Omitting content reads
 stdin when it is not a terminal, and otherwise opens $EDITOR on the day's existing entry as
 Markdown; if that entry cannot be read the command stops rather than opening a blank buffer
-over it. An entry holding an attachment, an image or other content Markdown cannot carry is
-not opened in $EDITOR, since saving it would drop that content: change the entry's HTML
-(content in hey journal read --json) and write it back with --content-html.`,
+over it. A literal "" argument counts as omitted content and does the same. An entry
+holding an attachment, an image or other content Markdown cannot carry is not opened in
+$EDITOR, since saving it would drop that content: change the entry's HTML (content in hey
+journal read --json) and write it back with --content-html.`,
 		Example: `  hey journal write "Shipped the pagination fix and paired with Jane on the cover art."
   hey journal write 2026-03-15 "Retrospective: the migration took two days longer than planned."
   hey journal write -c "Reviewed the Q3 numbers with Alice."

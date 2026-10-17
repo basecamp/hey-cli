@@ -32,6 +32,9 @@ func newCalendarsCommand() *calendarsCommand {
 	calendarsCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List calendars",
+		Annotations: map[string]string{
+			"agent_notes": "JSON answers each calendar's id and kind, and its name except on the personal calendar, which has none; owned, personal and external appear only when true.",
+		},
 		Example: `  hey calendar list
   hey calendar list --json`,
 		RunE: calendarsCommand.run,

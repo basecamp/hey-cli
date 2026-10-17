@@ -33,7 +33,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY; without a date they, and list's window, start from today in the HEY account's time zone. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series. add and edit read clock times, and today when --starts-on is left out, in the HEY account's time zone unless --time-zone names one, and refuse when they need it and the account has none; an edit keeps a zoned event's zone and leaves a zoneless event zoneless.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY; without a date they, and list's window, start from today in the HEY account's time zone. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series. add and edit read clock times, and today when --starts-on is left out, in the HEY account's time zone unless --time-zone names one, and refuse when they need it and the account has none; an edit keeps a zoned event's zone and leaves a zoneless event zoneless. list, day and week answer a flat array of events in data. Each event has id, title, starts_at, ends_at and calendar; all_day and recurring appear only when true, starts_at_time_zone and ends_at_time_zone only on a zoned timed event, and description (the notes, as plain text), location, url, attached_entry and reminders only when set.",
 		},
 	}
 
@@ -64,12 +64,16 @@ func newEventsListCommand() *eventsListCommand {
 		Long: `List the events calendars hold over a date window.
 
 A repeating event is stored once, so it lists once, as its series, on the day the series
-began. For the events of a day or a week as HEY draws them — occurrences of a repeating
+began, plus a row for each day HEY has written out on its own (its own id, the series in
+parent_id). For the events of a day or a week as HEY draws them — occurrences of a repeating
 series expanded into the days they fall on — read 'hey event day' or 'hey event week'.
 
 Without --starts-on the window is the 30 days from today, today in your HEY account's time
 zone, whatever this machine's is. An account with no time zone set reads this machine's
 today, and says so on stderr.`,
+		Annotations: map[string]string{
+			"agent_notes": "list carries no countdowns; day and week do. " + recordingWindowNotes,
+		},
 		Example: `  hey event list
   hey event list --starts-on 2026-01-01 --ends-on 2026-01-31
   hey event list --calendar 123 --limit 5 --json`,
@@ -141,14 +145,16 @@ func newEventsAddCommand() *eventsAddCommand {
 		Long: `Create an event.
 
 An event with no --start-time is an all-day event. A --start-time with no --end-time runs
-for an hour, unless --ends-on names a later day; a default end in the hour the clocks repeat
-is refused, so pass --end-time there. Clock times are read in your HEY account's time zone, the one HEY's web app
-uses, and so is today when --starts-on is left out, for an all-day event too; --time-zone
-names another. If one of those needs the account's zone and the account has none, the
-command refuses and asks for --time-zone; an all-day event on a named date needs no zone.
+for an hour, unless --ends-on names a later day, when it ends on that day at the start's
+clock time plus an hour; a default end in the hour the clocks repeat is refused, so pass
+--end-time there. Clock times are read in your HEY account's time zone, the one HEY's web
+app uses, and so is today when --starts-on is left out, for an all-day event too;
+--time-zone names another. If one of those needs the account's zone and the account has
+none, the command refuses and asks for --time-zone; an all-day event on a named date needs
+no zone.
 
-Without --calendar the event goes where HEY puts one by default: the first ordinary calendar
-you own that is not a subscription — never Maybe or the personal calendar.`,
+Without --calendar the event goes where HEY puts one by default: the first ordinary
+calendar you own that is not a subscription — never Maybe or the personal calendar.`,
 		Example: `  hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
   hey event add "Sarah's birthday" --starts-on 2026-09-02
   hey event add "Standup" --start-time 09:15 --repeat every_weekday --calendar 123
@@ -256,8 +262,8 @@ func newEventsEditCommand() *eventsEditCommand {
 	eventsEditCommand.cmd = &cobra.Command{
 		Use:   "edit <id> [date]",
 		Short: "Change an event",
-		Long: `Change an event. Only the flags you name change; the rest of the event is read and
-sent back, because HEY clears whatever a write leaves out.
+		Long: `Change an event. Only the flags you name change; the rest of the event is read and sent
+back, because HEY clears whatever a write leaves out.
 
 Two things cannot survive that round trip, and both are HEY's doing rather than this
 command's. Notes are served back as plain text, so saving flattens their formatting. A
@@ -267,23 +273,25 @@ one unless --countdown names it again.
 Clock times you type are read in the event's own time zone. An event saved without one
 stays without one: typed times are read in your HEY account's zone and sent as the moment
 they name, and the times you do not type keep theirs. --time-zone gives the event that
-zone, keeping the moment of every time you do not type. An all-day event given a time
-takes the account's zone. If a zone is needed and the account has none, the edit refuses
-and asks for --time-zone. HEY is sent a clock time and a zone, and a clock time in the hour
-the clocks repeat as they go back names two moments, of which HEY takes the daylight-saving
-one, or the later where neither is; a time you keep at the other, or with seconds, cannot
-be sent, so the edit refuses until you retype it. All of this holds for an --occurrence edit too.
+zone, keeping the moment of every time you do not type. An all-day event given a time takes
+the account's zone, starts at 09:00 unless --start-time says otherwise, and runs the
+default hour. If a zone is needed and the account has none, the edit refuses and asks for
+--time-zone. HEY is sent a clock time and a zone, and a clock time in the hour the clocks
+repeat as they go back names two moments, of which HEY takes the daylight-saving one, or
+the later where neither is; a time you keep at the other, or with seconds, cannot be sent,
+so the edit refuses until you retype it. All of this holds for an --occurrence edit too.
 
 The event is found by reading every calendar it might be on, which is one request each and
 covers the pages HEY answers with. Give the day it starts as [date] to look on that day
-alone.
+alone. Without [date] it is looked for within a year either side of today, and an event not
+found there is refused as not_found rather than written blind.
 
---calendar moves the event to that calendar, which has to be one you own or share: not
-your personal calendar and not a subscription. An event you cannot edit, such as an
-invitation, moves only onto a calendar nobody else is on, and an event on a subscription
-does not move at all; HEY keeps it where it is otherwise, and the edit says so rather than
-reporting it updated. HEY still saves the circle, countdown and reminders of an event it
-does not move.
+--calendar moves the event to that calendar, which has to be one you own or share: not your
+personal calendar and not a subscription, for which HEY answers not_found. An event you
+cannot edit, such as an invitation, moves only onto a calendar nobody else is on, and an
+event on a subscription does not move at all; HEY keeps it where it is otherwise, and the
+edit fails with forbidden rather than reporting it updated. HEY still saves the circle,
+countdown and reminders of an event it does not move.
 
 An id alone changes the whole event, a repeating series included. One day of a series is
 changed with --occurrence, which takes the occurrence_id 'hey event day' and 'hey event
@@ -291,38 +299,52 @@ week' serve (<series id>_<YYYY-MM-DD>, and the series must be the id given), and
 --apply-to, which is required with it: 'current' changes that day alone and 'future'
 changes it and every day after it, the two choices HEY's own form offers. The day is read
 on its own date, so [date] can be left out or must name it. A change to --repeat,
---repeat-until or --repeat-times cannot apply to one day, so 'current' refuses those
-flags. 'future' starts a new series and requires --repeat to state its complete schedule:
-combine a preset with --repeat-times or --repeat-until for a finite series, use a preset
-alone for one that continues forever, or use --repeat custom to copy an existing opaque
-schedule. A custom count-based rule can restart its full count on the replacement. HEY
-accepts the replacement's submitted start even when it overlaps an earlier occurrence, so
-choose its date and time deliberately. A virtual day of an opaque custom schedule takes its exact time from HEY's Day view and is
-refused if that view no longer serves it. A realized day of a custom schedule cannot be split
-safely, because HEY does not serve the rule's occurrence boundary; use a virtual occurrence,
-edit that day alone, or edit the whole series. A realized preset occurrence moved
-away from its series time must be moved back with a current-only edit before it can be split
-safely. The days from this one on
-get a new series id.
+--repeat-until or --repeat-times cannot apply to one day, so 'current' refuses those flags.
+Those flags with 'current', --apply-to without --occurrence, an --apply-to other than
+current or future, and an occurrence_id that is malformed or names another series are usage
+errors, refused before anything is read. 'future' starts a new series and requires --repeat
+to state its complete schedule: combine a preset with --repeat-times or --repeat-until for
+a finite series, both naming what remains from the edited day; use a preset alone for one
+that continues forever; or use --repeat custom, which takes neither limit, to copy an
+existing opaque schedule. A custom count-based rule can restart its full count on the
+replacement. HEY accepts the replacement's submitted start even when it overlaps an earlier
+occurrence, so choose its date and time deliberately; its last day cannot precede its first
+day, and a --repeat-until before it is a usage error. A virtual day of an opaque custom
+schedule takes its exact time from HEY's Day view and is refused if that view no longer
+serves it. A realized day of a custom schedule cannot be split safely, because HEY does not
+serve the rule's occurrence boundary; use a virtual occurrence, edit that day alone, or
+edit the whole series. A realized preset occurrence moved away from its series time must be
+moved back with a current-only edit before it can be split safely. HEY cancels the
+written-out days from the moved day's actual start but truncates the series at its
+occurrence date, so a split from a moved day can take an earlier edited day with it or
+leave a later one behind. The days from this one on get a new series id, but the answer is
+still the day edited, so read 'hey event day' or 'hey event week' again before editing the
+new series further.
 
-An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
-keep. A countdown owned by the day is read back and sent again; an inherited series
-countdown is left inherited on a current-only edit and copied to the replacement series on
-a future edit. It survives unless --countdown 0 removes it — and one day of a series with
-a countdown cannot lose it alone, since HEY shows a day the series' countdown whenever it
-has none of its own, so that is refused. Notes are still only served as plain text, so an
-occurrence edit that would send
-formatted notes back as text refuses unless --allow-plain-notes accepts that or --notes
-replaces them. A 'future' edit records the new series from the series' own guest list,
-so a day that had come to have guests of its own is refused until --invite names the new
-series' list. The day is read over every calendar, so here --calendar is only where the
-day is moved to; a day already moved elsewhere stays there. A virtual occurrence lists
-its series in id and parent_id; a day HEY has written out on its own keeps its own event id
-in id and recording_id, with the series in parent_id. That own id edits the day alone; it
-is deleted with 'hey event delete <series id> --occurrence <occurrence_id> --apply-to
-current'. One thing no edit can keep: an attached email you cannot read is not served, so
-it is detached by any edit, whole event
-or one day.`,
+An occurrence edit keeps everything it is not told to change — that day's own schedule,
+zones, notes, location, link, attached email, reminders, circle and countdown, taken from
+the day itself where HEY has already written it out — and refuses what it cannot keep. A
+countdown owned by the day is read back and sent again; an inherited series countdown is
+left inherited on a current-only edit and copied to the replacement series on a future
+edit. It survives unless --countdown 0 removes it — and one day of a series with a
+countdown cannot lose it alone, since HEY shows a day the series' countdown whenever it has
+none of its own, so that is refused. Notes are still only served as plain text, so an
+occurrence edit that would send formatted notes back as text refuses unless
+--allow-plain-notes accepts that or --notes replaces them. A 'future' edit builds the new
+series from the series' own guest list and sends invitations, so a day that had come to
+have guests of its own is refused until --invite names the new series' list. The day is
+read over every calendar, so here --calendar is only where the day is moved to; a day
+already moved elsewhere stays there. A virtual occurrence lists its series in id and
+parent_id; a day HEY has written out on its own keeps its own event id in id and
+recording_id, with the series in parent_id. That own id edits the day alone; it is deleted
+with 'hey event delete <series id> --occurrence <occurrence_id> --apply-to current'. One
+thing no edit can keep: an attached email you cannot read is not served, so it is detached
+by any edit, whole event or one day.
+
+HEY answers not_found alike for a date that is not a day of the series and for a series you
+cannot edit. An occurrence edit answers with the summary "Occurrence updated" ('current')
+or "Occurrence and the following updated" ('future'), and data holding the recording HEY
+answered.`,
 		Example: `  hey event edit 4821 --title "Design review (moved)"
   hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00
   hey event edit 4821 2026-09-02 --location "Studio, 3rd floor"
@@ -624,26 +646,27 @@ func newEventsDeleteCommand() *eventsDeleteCommand {
 	eventsDeleteCommand.cmd = &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete an event",
-		Long: `Delete an event. An id alone deletes the whole event, a repeating series included, and
-an event on a shared calendar is deleted for everybody on it.
+		Long: `Delete an event. An id alone deletes the whole event, a repeating series included, and an
+event on a shared calendar is deleted for everybody on it.
 
 One day of a series is deleted with --occurrence, which takes the occurrence_id 'hey event
 day' and 'hey event week' serve (<series id>_<YYYY-MM-DD>, and the series must be the id
-given), and --apply-to, which is required with it: 'current' deletes that day alone and
-HEY keeps the rest of the series by writing the day into its exceptions; 'future' deletes
-it and every day after it, stopping the series the day before — from the series' first
-day, that is the whole series. A day HEY has written out on its own and a day it has not
-are deleted the same way.
+given), and --apply-to, which is required with it: 'current' deletes that day alone and HEY
+keeps the rest of the series by writing the day into its exceptions; 'future' deletes it
+and every day after it, stopping the series the day before — from the series' first day,
+that is the whole series. A day HEY has written out on its own and a day it has not are
+deleted the same way.
 
-A day HEY has written out on its own — after an edit of that day alone, or a reminder —
-has an id of its own, but that id is refused here: deleting it would remove only HEY's
-copy of the day, and HEY would draw the day again from the series. The refusal names the
-command that deletes the day. To tell, the event is read first, over every calendar and a
-year either side of today; an id that read does not find is deleted as given.
+A day HEY has written out on its own — after an edit of that day alone, or a reminder — has
+an id of its own, but that id is refused here: deleting it would remove only HEY's copy of
+the day, and HEY would draw the day again from the series. The refusal is a usage error
+naming the command that deletes the day. To tell, the event is read first, over every
+calendar and a year either side of today; an id that read does not find is deleted as
+given.
 
 A 'future' delete from a written-out day is refused where its boundary cannot be trusted,
-as a 'future' edit is: a day moved off its series time, or any written-out day of an
-opaque custom schedule. Delete that day alone first, then from the next day.`,
+as a 'future' edit is: a day moved off its series time, or any written-out day of an opaque
+custom schedule. Delete that day alone first, then from the next day.`,
 		Annotations: map[string]string{
 			"agent_notes": "delete <id> deletes the whole event, recurring series included, for everybody on a shared calendar. One day of a series is delete <series id> --occurrence <occurrence_id from day/week> --apply-to current|future: current deletes that day alone; future deletes it and every day after, and from the series' first day that is the whole series. A day HEY wrote out on its own (own id in id/recording_id, series in parent_id) is refused by its own id, because deleting that id lets HEY draw the day again from the series; use the occurrence form. future is refused from a written-out day moved off its series time or on an opaque custom schedule.",
 		},

@@ -60,8 +60,8 @@ func newEventsDayCommand() *eventsPeriodCommand {
 
 A calendar stores a repeating event once, so 'hey event list' answers a standing Monday
 standup on the day the series began and on no other. A day is HEY's own expansion: every
-event that falls on it, occurrences of a repeating series included, and nothing from
-outside it.
+event that falls on it, occurrences of a repeating series included, each with that day's
+own starts_at and ends_at and an occurrence_id, and nothing from outside it.
 
 Without a date the day is today in your HEY account's time zone, whatever this machine's
 is. An account with no time zone set reads this machine's today, and says so on stderr.
@@ -73,8 +73,11 @@ keeps its own event id in id and recording_id, while parent_id remains the serie
 id is what 'hey event edit' acts on for that day alone. Either way occurrence_id is what
 'hey event edit --occurrence' and 'hey event delete --occurrence' take, with the series id
 before it — and the delete is the one way to delete one day, written out or not.
-A countdown recording HEY includes in the day appears on its event as countdown in JSON
-and as a label in the styled table.`,
+A countdown recording HEY includes in the day appears on its event as countdown in JSON,
+a label with starts_at and ends_at, and as a label in the styled table. A later day of a
+recurring event may carry no countdown when HEY leaves it out of that period. When the day
+holds occurrences, the styled table adds Series ID, Occurrence ID and Recording ID columns
+beside ID.`,
 		Example: `  hey event day
   hey event day 2026-09-02
   hey event day --json`,
@@ -103,7 +106,8 @@ func newEventsWeekCommand() *eventsPeriodCommand {
 		Use:   "week [date]",
 		Short: "List the events of one week, as HEY draws it",
 		Long: `List the events of the week a date falls in, as HEY's Week View draws it: every event
-inside the week, occurrences of a repeating series included. Any day names its week.
+inside the week, occurrences of a repeating series included, each with that day's own
+starts_at and ends_at and an occurrence_id. Any day names its week.
 
 Without a date the week is the one today falls in, today in your HEY account's time zone,
 whatever this machine's is. An account with no time zone set reads this machine's today,
@@ -116,8 +120,11 @@ keeps its own event id in id and recording_id, while parent_id remains the serie
 id is what 'hey event edit' acts on for that day alone. Either way occurrence_id is what
 'hey event edit --occurrence' and 'hey event delete --occurrence' take, with the series id
 before it — and the delete is the one way to delete one day, written out or not.
-A countdown recording HEY includes in the week appears on its event as countdown in JSON
-and as a label in the styled table.`,
+A countdown recording HEY includes in the week appears on its event as countdown in JSON,
+a label with starts_at and ends_at, and as a label in the styled table. A later day of a
+recurring event may carry no countdown when HEY leaves it out of that period. When the week
+holds occurrences, the styled table adds Series ID, Occurrence ID and Recording ID columns
+beside ID.`,
 		Example: `  hey event week
   hey event week 2026-09-02
   hey event week --json`,
