@@ -26,7 +26,7 @@ func newAuthCommand() *authCommand {
 		Short: "Sign in, sign out, and check login status",
 		Long:  "Sign in to HEY, sign out, or check your login status.",
 		Annotations: map[string]string{
-			"agent_notes": "Use status to check auth before other commands. Returns token expiry info in JSON. Use login --token for non-interactive auth.",
+			"agent_notes": "Data commands reuse stored credentials and refresh expiring OAuth tokens themselves, so run the data command without an auth preflight. Use hey auth status --json only when an explicit check is needed. Never run hey auth login unattended: the browser flow waits for a person, and --token or --cookie is for a human handing over a credential, not something an agent runs on its own. A data command that exits 3 with code auth has no usable credentials; report it rather than signing in.",
 		},
 	}
 
@@ -147,6 +147,9 @@ func newAuthStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show authentication status",
+		Annotations: map[string]string{
+			"agent_notes": "Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing, so authenticated true does not prove HEY still accepts them. JSON answers authenticated, base_url, mail_account, account_source and install_id; method env_var when HEY_TOKEN is set; otherwise storage (keyring or file), auth_type, and expires_at, expired and refresh_available for a token. An expired token with refresh_available is refreshed by the next data command.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			status := map[string]any{
 				"base_url":       cfg.BaseURL,

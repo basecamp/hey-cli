@@ -34,29 +34,6 @@ func TestHeySkillReusesAuthenticationForUnattendedAgents(t *testing.T) {
 	}
 }
 
-func TestHeySkillExplainsContactDeliveryRouting(t *testing.T) {
-	data, err := FS.ReadFile("hey/SKILL.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	content := string(data)
-
-	for _, want := range []string{
-		"hey contact deliver <contact_id> --to imbox\\|feed\\|papertrail\\|screened-out",
-		"contact ID",
-		"clearance ID",
-		"box item ID",
-		"box ID",
-		"Screened Out is the deny/blocking choice and applies only to external email contacts",
-		"Selecting Feed removes an existing bundle",
-		"write-only",
-	} {
-		if !strings.Contains(content, want) {
-			t.Errorf("embedded HEY skill does not contain %q", want)
-		}
-	}
-}
-
 func TestHeySkillRetriesMacOSKeychainAccessWithoutBroadEscalation(t *testing.T) {
 	data, err := FS.ReadFile("hey/SKILL.md")
 	if err != nil {
@@ -124,6 +101,38 @@ func TestHeySkillAddsToAJournalEntryWithoutLosingIt(t *testing.T) {
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("embedded HEY skill does not contain %q", want)
+		}
+	}
+}
+
+// The skill is loaded whole on every activation, so it holds only the rules that span
+// commands and sends agents to the binary's own help for the rest.
+func TestHeySkillStaysDiscoveryFirstAndFocused(t *testing.T) {
+	data, err := FS.ReadFile("hey/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const maxSkillBytes = 16 * 1024
+	if len(data) > maxSkillBytes {
+		t.Errorf("SKILL.md is %d bytes, over %d: it is a routing and safety guide, not a command reference; put command detail in agent_notes", len(data), maxSkillBytes)
+	}
+
+	content := string(data)
+	leafHelp := "hey <group> <subcommand> --agent --help"
+	rootHelp := "hey --agent --help"
+	leaf, root := strings.Index(content, leafHelp), strings.Index(content, rootHelp)
+	if leaf < 0 || root < 0 {
+		t.Fatalf("skill must teach both %q and %q", leafHelp, rootHelp)
+	}
+	if leaf > root {
+		t.Error("leaf help must be taught before root help")
+	}
+	if !strings.Contains(content, "source of truth") {
+		t.Error("skill must name the command's help as the source of truth")
+	}
+	for _, catalog := range []string{"## Resource Reference", "## Quick Reference"} {
+		if strings.Contains(content, catalog) {
+			t.Errorf("skill still carries a command catalog: %q", catalog)
 		}
 	}
 }

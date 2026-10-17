@@ -19,7 +19,7 @@ func newTodoCommand() *todoCommand {
 		Use:   "todo",
 		Short: "Create and manage to-dos",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, add, complete, uncomplete, delete. Use list --ids-only to pipe IDs to complete/delete. add files on today in the HEY account's time zone without --date, and refuses when the account has none, so pass --date.",
+			"agent_notes": "Subcommands: list, add, complete, uncomplete, delete. Use list --ids-only to pipe IDs to complete/delete. add files on today in the HEY account's time zone without --date, and refuses when the account has none, so pass --date. Todo IDs must be positive; 0 or a negative ID is a usage error rather than a request.",
 		},
 	}
 
@@ -46,6 +46,9 @@ func newTodoListCommand() *todoListCommand {
 	todoListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List todos",
+		Annotations: map[string]string{
+			"agent_notes": "Reads the personal calendar unless --calendar names another. " + personalWindowNotes,
+		},
 		Example: `  hey todo list
   hey todo list --limit 10
   hey todo list --starts-on 2026-01-01 --ends-on 2026-01-31 --json`,
@@ -136,7 +139,8 @@ func newTodoAddCommand() *todoAddCommand {
 		Long: `Create a new todo, filed on --date or on today.
 
 Without --date the day is today in your HEY account's time zone, whatever this machine's
-is. An account with no time zone set is refused rather than guessed at: pass --date.`,
+is. An account with no time zone set is refused rather than guessed at: pass --date. A
+--date that is not YYYY-MM-DD is a usage error, refused before the request.`,
 		Example: `  hey todo add "Buy groceries"
   hey todo add -t "Meeting prep" --date 2026-01-20
   hey todo add --title "Review PR" --json

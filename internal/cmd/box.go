@@ -66,7 +66,7 @@ func newBoxViewCommand() *boxCommand {
 	return newBoxReaderCommand(
 		"view <name|id>",
 		"List email threads in a box",
-		"List email threads in a HEY box. Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), its kind (feedbox, trailbox, …), its display name (The Feed, Paper Trail) or its numeric ID.",
+		"List email threads in a HEY box. Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), its kind (feedbox, trailbox, asidebox, laterbox, bubblebox), its display name (The Feed, Paper Trail) or its numeric ID.",
 		`  hey box view imbox
   hey box view papertrail
   hey box view imbox --limit 10
@@ -82,7 +82,7 @@ func newBoxReaderCommand(use, short, long, example string) *boxCommand {
 		Short: short,
 		Long:  long,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), kind (feedbox, trailbox, …) or display name (including one the user gave the box) in any case, or a numeric ID. hey search --in and hey move --to take the same spellings, but not every box: search narrows only to imbox, feed and papertrail (plus trash) and refuses anything else as a usage error, and move takes a box ID or any box but bubbleup (use hey bubble up). An unknown name is not_found here and in move. Trash is not a box: search it with hey search --in trash and move threads there with hey trash. Returns email threads. Use topic_id with hey thread read, reply, and forward; use id with seen, unseen, and move. A row with kind \"bundle\" groups one sender's unseen threads and has no topic_id: list them with hey bundle view <id>, and every thread with that sender via hey contact threads <contact-id>. --page continues from the next_page cursor of an earlier listing of the same box.",
+			"agent_notes": "Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), kind (feedbox, trailbox, asidebox, laterbox, bubblebox) or display name (including one the user gave the box) in any case, or a numeric ID. hey search --in and hey move --to take the same spellings, but not every box: search narrows only to imbox, feed and papertrail (plus trash) and refuses anything else as a usage error, and move takes a box ID or any box but bubbleup (use hey bubble up). An unknown name is not_found here and in move. Trash is not a box: search it with hey search --in trash and move threads there with hey trash. --json returns the box itself (id, kind, name, app_url, next_history_url, next_page) with a `postings` array of its email threads. Use topic_id with hey thread read, reply, and forward; use id with seen, unseen, and move. A row with kind \"bundle\" groups one sender's unseen threads, and its name joins their subjects with \" • \". It carries a topic_id only while it holds exactly one unseen thread, which hey thread read reads as usual; otherwise it has none: list them with hey bundle view <id>, and every thread with that sender via hey contact threads <contact-id>. --page continues from the next_page cursor of an earlier listing of the same box. next_page is the page parameter inside next_history_url, and --page accepts either. --all reads up to 101 pages; if next_page is still set, continue with --page. --ids-only prints one box item ID (id) per line and --count the number of threads read.",
 		},
 		Example: example,
 		RunE:    command.run,

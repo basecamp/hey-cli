@@ -82,7 +82,7 @@ func newBulkReplyPreviewCommand() *bulkReplyPreviewCommand {
 		Use:   "preview <box-item-id>...",
 		Short: "Preview threads and recipients without sending",
 		Annotations: map[string]string{
-			"agent_notes": "Read-only. Box item IDs come from `hey box view` or `hey search`. The result contains the latest replyable entry and exact To, CC, and BCC recipients for each thread.",
+			"agent_notes": "Read-only. Box item IDs come from `hey box view` or `hey search` and must be positive and unique; anything else is a usage error. The result contains the latest replyable entry and exact To, CC, and BCC recipients for each thread. IDs that are not your box items, and threads with no replyable entry, are skipped and counted in meta.skipped_count.",
 		},
 		Example: `  hey bulk-reply preview 12345 67890
   hey bulk-reply preview 12345 67890 --json`,
@@ -138,7 +138,7 @@ func newBulkReplySendCommand() *bulkReplySendCommand {
 		Use:   "send <box-item-id>...",
 		Short: "Send one reply to multiple threads",
 		Annotations: map[string]string{
-			"agent_notes": "Mutating. Preview first. Accepts a message via -m, stdin, or $EDITOR and repeatable --attach files. HEY's server-provided name-tag content is preserved.",
+			"agent_notes": "Mutating. Preview first. Box item IDs must be positive and unique. Accepts a message via -m, stdin, or $EDITOR and repeatable --attach files. HEY's server-provided name-tag content is preserved. The selection is resolved again: threads with no replyable entry and IDs that are not your box items are skipped and counted in meta.skipped_count, and with none left it is a usage error and nothing is sent. The answer carries entries_count (the number of replies sent), id (the delivery ID) and delayed; when HEY delayed it (Undo Send on) it adds undo_send_url and an undo breadcrumb, hey bulk-reply undo <id>.",
 		},
 		Example: `  hey bulk-reply send 12345 67890 -m "Thanks for the update."
   echo "Thanks for the update." | hey bulk-reply send 12345 67890
@@ -274,7 +274,7 @@ func newBulkReplyUndoCommand() *bulkReplyUndoCommand {
 		Use:   "undo <bulk-reply-id>",
 		Short: "Recall a delayed bulk reply",
 		Annotations: map[string]string{
-			"agent_notes": "Mutating. Works only while HEY's undo window remains open. The bulk reply ID is returned by `hey bulk-reply send`.",
+			"agent_notes": "Mutating. Works only while HEY's undo window remains open. The bulk reply ID is returned by `hey bulk-reply send`. HEY's undo window is 15 seconds from the send.",
 		},
 		Example: `  hey bulk-reply undo 98765`,
 		RunE:    undoCommand.run,

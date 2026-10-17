@@ -21,7 +21,7 @@ func newTrashCommand() *trashCommand {
 		Example: `  hey trash 12345
   hey trash 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box view output. Shared threads lose your access rather than being deleted for everyone.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output. Shared threads lose your access rather than being deleted for everyone. A hey box view row with kind \"bundle\" is not a thread: trashing one answers success and changes nothing; trash the threads from hey bundle view <id> or hey contact threads <contact-id> instead.",
 		},
 		RunE: trashCommand.run,
 		Args: usageMinOneArg(),

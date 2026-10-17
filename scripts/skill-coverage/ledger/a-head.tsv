@@ -1,0 +1,167 @@
+intro/1	help:hey	Read, send, and organize HEY email, contacts, and calendars from your terminal.
+agent-invariants/1	skill	## Non-negotiable rules
+agent-invariants/3	help:hey	Filter JSON with a built-in jq expression
+agent-invariants/3	help:hey	Output JSON with metadata
+agent-invariants/4	skill	Never pipe to an external `jq`; `--jq` is built in and implies `--json`.
+agent-invariants/6	skill	it uses stored credentials and refreshes expiring OAuth tokens automatically
+agent-invariants/7	skill	If it returns an auth error, follow the retry in [Authentication](#authentication) before you report the task as blocked.
+agent-invariants/8	help:hey auth status	It reports stored credentials without contacting HEY and changes nothing
+agent-invariants/8	help:hey auth	Use hey auth status --json only when an explicit check is needed.
+agent-invariants/9	skill	Never run `hey auth login` unattended; use it only for interactive recovery with the user present.
+agent-invariants/11	help:hey	Write the original HTML to a pipe or file (thread read, journal read, and a contact's note via contact show or contact note show)
+agent-invariants/11	skill	`--html` writes the original HTML of `hey thread read`, `hey journal read` and a contact's private note to a pipe or file; a terminal is refused.
+agent-invariants/13	help:hey account	Linked accounts share the current login. Use list to discover IDs and use <id|all> to persist the default mail filter; --account overrides it for one invocation.
+agent-invariants/15	skill	Never run `hey config trust-local` without the user's explicit approval.
+output-filtering/1	skill	`--jq` filters the full JSON success envelope, so result data is under `.data`.
+output-filtering/2	skill	String results print as plain text; objects and arrays print as formatted JSON.
+output-filtering/3	skill	Use `--quiet --jq` when the expression should run against result data directly.
+output-filtering/4	skill	Errors keep their complete structured envelope.
+output-filtering/5	skill	Commands with raw output of their own (`auth token`, `shell-completion generate`, `setup`, `skill`, `tui`, `--version`, and `timetrack export` without `--output`) reject `--jq`.
+output-filtering/6	help:hey watch	Piped or with --json, writes one JSON object per change to stdout (NDJSON), not the usual envelope, and does not apply --jq.
+output-filtering/7	help:hey box list	Filter JSON with a built-in jq expression
+output-filtering/8	help:hey search	Filter JSON with a built-in jq expression
+output-filtering/8	help:hey search	topic_id opens the thread
+output-filtering/9	help:hey box list	Output result data only
+output-filtering/10	skill	An empty result is an empty array rather than `null`, so `.data[]` is safe on a listing that found nothing.
+output-filtering/11	help:hey	Output only IDs, one per line
+output-filtering/11	help:hey	Output only the count of results
+output-filtering/12	skill	Both answer for what was read, which is the first page unless `--all` or `--limit` reads more, and not every listing warns that more pages exist; `hey screener list --count` is the exception and counts the whole queue.
+output-filtering/13	skill	They work on listings: every `list` command, the thread listings, `hey workflow view`, `hey search`, `hey screener history`, `hey event day|week`, `hey timetrack categories`, `hey attachment list` and `hey thread read` (its entries, read from the index without bodies).
+output-filtering/14	skill	On thread listings they count the postings, not the box, label or contact around them.
+quick-reference/1	help:hey account list	List linked mail accounts
+quick-reference/2	help:hey account senders	Lists sender IDs, account IDs, email addresses
+quick-reference/3	help:hey account use	Set the default linked mail account
+quick-reference/4	help:hey account	--account overrides it for one invocation.
+quick-reference/5	help:hey config trusted-locals	List trusted repository-local HEY settings
+quick-reference/6	help:hey config trust-local	Trust this repository's local HEY settings
+quick-reference/6	skill	Never run `hey config trust-local` without the user's explicit approval.
+quick-reference/7	help:hey box list	List your HEY boxes
+quick-reference/8	help:hey box view	List email threads in a box
+quick-reference/9	help:hey label list	List your email labels
+quick-reference/10	help:hey label view	List email threads with a label
+quick-reference/11	help:hey label add	Add a label to email threads
+quick-reference/12	help:hey label create	Create a label and add it to email threads
+quick-reference/13	help:hey label remove	Label ID, or all to remove every label (required)
+quick-reference/14	help:hey collection list	List your email collections
+quick-reference/15	help:hey collection view	List email threads in a collection
+quick-reference/16	help:hey collection create	Create a collection
+quick-reference/17	help:hey collection update	New collection name
+quick-reference/18	help:hey collection add	Add email threads to a collection
+quick-reference/19	help:hey collection remove	Remove email threads from a collection
+quick-reference/20	help:hey set-aside view	List the email threads in Set Aside, with the group each one belongs to.
+quick-reference/21	help:hey set-aside group list	List the groups in Set Aside
+quick-reference/22	help:hey set-aside group view	List email threads in a Set Aside group
+quick-reference/23	help:hey set-aside group create	Gather email threads into a new Set Aside group
+quick-reference/24	help:hey set-aside group add	Add email threads to a Set Aside group
+quick-reference/25	help:hey set-aside group remove	Take email threads out of their Set Aside group
+quick-reference/26	help:hey set-aside group delete	Deleting a group moves its threads to Previously Seen in the Imbox, not back into Set Aside.
+quick-reference/27	help:hey workflow list	List your email workflows
+quick-reference/28	help:hey workflow view	View a workflow and its stages
+quick-reference/29	help:hey workflow add	Add email threads to a workflow stage
+quick-reference/30	help:hey workflow move	Move email threads to another workflow stage
+quick-reference/31	help:hey workflow remove	Remove email threads from a workflow
+quick-reference/32	help:hey clip list	List the newest page of passages clipped from email
+quick-reference/33	help:hey clip create	Save text from an email entry
+quick-reference/34	help:hey snippet list	List reusable email snippets
+quick-reference/35	help:hey snippet create	Create a reusable email snippet
+quick-reference/36	help:hey search	Search email threads and messages
+quick-reference/37	help:hey search filters	List available search refinement values
+quick-reference/38	help:hey contact list	List contacts
+quick-reference/39	help:hey contact list	Returns contact IDs, names, and email addresses. Use --all to fetch up to 100 pages.
+quick-reference/39	help:hey contact list	Lists only non-HEY senders you have screened in: other HEY users, senders still in or denied by The Screener, aliases and hidden contacts are left out
+quick-reference/39	help:hey contact list	--jq '.data[] | select(.email_address == "jane@example.com") | .id'. That matches primary addresses only
+quick-reference/40	help:hey contact show	The embedded postings are one page of the contact's threads
+quick-reference/41	help:hey contact threads	List every thread with a contact
+quick-reference/42	help:hey contact add	Add a contact
+quick-reference/43	help:hey contact update	Edit a contact
+quick-reference/44	help:hey contact hide	Hide a contact
+quick-reference/45	help:hey contact show-again	Show a hidden contact again
+quick-reference/46	help:hey contact deliver	Choose where a contact's email arrives
+quick-reference/46	help:hey contact deliver	Delivery destination: imbox, feed, papertrail, or screened-out
+quick-reference/47	help:hey contact bundle	Bundle a contact's mail
+quick-reference/48	help:hey contact unbundle	List a contact's mail separately
+quick-reference/49	help:hey bundle view	List the unseen threads a bundle groups
+quick-reference/50	help:hey contact note show	note_markdown (the note as Markdown, the form hey contact note set takes) and note_markdown_lossless. When note_markdown_lossless is false the note holds an attachment or other markup Markdown cannot carry
+quick-reference/51	help:hey contact note set	Replaces the whole note.
+quick-reference/52	help:hey contact note delete	Delete a private contact note
+quick-reference/53	help:hey contact photo set	The file must be a PNG or JPEG of at most 40 MiB, 58 megapixels and 16000 pixels a side
+quick-reference/54	help:hey contact photo remove	Remove a contact's photo
+quick-reference/55	help:hey thread read	Read a thread
+quick-reference/56	help:hey thread update	Rename a thread
+quick-reference/57	help:hey share	Get a sharing link for an email thread
+quick-reference/58	help:hey unshare	Turn off an email thread's sharing link
+quick-reference/59	help:hey reply	Reply to a thread
+quick-reference/60	help:hey forward	Forward the latest message in a thread
+quick-reference/61	help:hey compose	Write and send a new email
+quick-reference/62	help:hey compose	CC recipient email address(es)
+quick-reference/62	help:hey compose	BCC recipient email address(es)
+quick-reference/63	help:hey draft list	List draft emails
+quick-reference/63	help:hey draft list	Fetch all results (override --limit)
+quick-reference/63	help:hey draft list	Continue from a next_page cursor
+quick-reference/64	help:hey compose	Save as a draft instead of sending
+quick-reference/65	help:hey reply	Save as a draft instead of sending
+quick-reference/66	help:hey draft show	Read a draft back
+quick-reference/67	help:hey draft edit	Change a draft
+quick-reference/68	help:hey draft edit	Replace the sender with a configured email or ID in this draft account
+quick-reference/69	help:hey compose	Configured sender email or ID (see hey account senders)
+quick-reference/70	help:hey draft send	Deliver a draft
+quick-reference/71	help:hey draft delete	Trash drafts
+quick-reference/72	help:hey screener list	Returns clearance IDs with the sender and the subject of what they sent.
+quick-reference/73	help:hey screener list	Use --count for the number alone
+quick-reference/74	help:hey screener approve	Let a sender through
+quick-reference/75	help:hey screener deny	Turn a sender away
+quick-reference/76	help:hey screener history	List the senders already screened
+quick-reference/77	help:hey bulk-reply preview	Preview threads and recipients without sending
+quick-reference/78	help:hey bulk-reply send	Send one reply to multiple threads
+quick-reference/79	help:hey bulk-reply undo	Recall a delayed bulk reply
+quick-reference/80	help:hey calendar list	List calendars
+quick-reference/81	help:hey event list	List calendar events
+quick-reference/82	help:hey event day	Without a date the day is today
+quick-reference/82	help:hey event day	every event that falls on it, occurrences of a repeating series included
+quick-reference/83	help:hey event add	Create an event
+quick-reference/84	help:hey todo list	List todos
+quick-reference/85	help:hey todo add	Create a new todo
+quick-reference/86	help:hey todo complete	Mark a todo as complete
+quick-reference/87	help:hey todo uncomplete	Mark a todo as incomplete
+quick-reference/88	help:hey todo delete	Delete a todo
+quick-reference/89	help:hey watch	Use --exit-on-first to block until one change lands and then exit; a ready line comes first. For new mail only, add --events new.
+quick-reference/90	help:hey watch	Follow email threads and calendars as they change
+quick-reference/91	help:hey seen	Mark email threads as seen
+quick-reference/92	help:hey unseen	Mark email threads as unseen
+quick-reference/93	help:hey move	Move email threads to another box
+quick-reference/94	help:hey move	To remove Reply Later, move the threads to Imbox
+quick-reference/95	help:hey bubble up	Bubble the threads up right away
+quick-reference/96	help:hey bubble up	Bubble the threads up on a date (YYYY-MM-DD)
+quick-reference/97	help:hey bubble up	Bubble the threads up Saturday morning
+quick-reference/98	help:hey bubble list	List bubbled-up and scheduled email threads
+quick-reference/99	help:hey bubble pop	Cancel bubble-ups
+quick-reference/100	help:hey trash	Move email threads to Trash
+quick-reference/101	help:hey spam	Mark email threads as spam
+quick-reference/102	help:hey ignore	Ignore email threads
+quick-reference/103	help:hey stop-ignoring	Stop ignoring email threads
+quick-reference/104	help:hey habit list	List habits
+quick-reference/105	help:hey habit create	Create a habit
+quick-reference/106	help:hey habit edit	New weekdays (names or 0-6, comma-separated)
+quick-reference/107	help:hey habit delete	Delete a habit and its history
+quick-reference/108	help:hey habit complete	Mark a habit as complete for a date
+quick-reference/109	help:hey habit uncomplete	Remove a habit completion for a date
+quick-reference/110	help:hey timetrack start	Start time tracking
+quick-reference/111	help:hey timetrack stop	Category title to file the stopped track under, created if HEY has none by that title
+quick-reference/112	help:hey timetrack current	Show current time tracking status
+quick-reference/113	help:hey timetrack list	List completed time tracks
+quick-reference/114	help:hey timetrack edit	Edit a completed time track
+quick-reference/114	help:hey timetrack edit	New end, as YYYY-MM-DDTHH:MM in your time zone
+quick-reference/115	help:hey timetrack delete	Delete a time track
+quick-reference/116	help:hey timetrack export	Without --output the CSV goes straight to stdout
+quick-reference/116	help:hey timetrack export	The output formatting flags have nothing to reshape there and are refused rather than ignored. With --output, --json, --quiet and --markdown format the file's metadata
+quick-reference/117	help:hey timetrack export	Save CSV to this file instead of stdout
+quick-reference/117	help:hey timetrack export	With --output, --json, --quiet and --markdown format the file's metadata
+quick-reference/118	help:hey timetrack categories	List time track categories
+quick-reference/119	help:hey timetrack category create	Create a time track category
+quick-reference/120	help:hey journal list	List journal entries
+quick-reference/121	help:hey journal read	Write content_markdown back with hey journal write only when content_markdown_lossless is true.
+quick-reference/122	help:hey journal write	Content that trims to nothing — whitespace-only, or an emptied $EDITOR buffer — removes the day's entry
+quick-reference/123	help:hey auth status	Show authentication status
+quick-reference/124	help:hey auth token	A login made with --cookie stores a browser session cookie instead. HEY sends that as a Cookie header, so it is not a bearer token and this command refuses to print it.
+quick-reference/125	help:hey tui	Launch the interactive terminal UI
+quick-reference/125	help:hey tui	Ctrl+A switches linked mail accounts when there is more than one.

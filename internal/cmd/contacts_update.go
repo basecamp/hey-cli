@@ -27,7 +27,7 @@ func newContactsUpdateCommand() *contactsUpdateCommand {
 		Short: "Edit a contact",
 		Long:  "Edit a contact. Omitted name and email fields stay unchanged. Supplying --alias replaces the complete alias list; use --alias= to clear it.",
 		Annotations: map[string]string{
-			"agent_notes": "At least one field is required. Repeat --alias to replace aliases. --alias= clears every alias.",
+			"agent_notes": "At least one field is required. Repeat --alias to replace aliases. --alias= clears every alias. A hidden contact, an alias or another HEY user cannot be edited and answers not_found.",
 		},
 		Example: `  hey contact update 12345 --name "Jane Doe"
   hey contact update 12345 --email jane@example.com --alias jane.doe@example.org

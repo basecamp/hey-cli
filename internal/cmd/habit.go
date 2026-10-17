@@ -26,7 +26,7 @@ func newHabitCommand() *habitCommand {
 		Use:   "habit",
 		Short: "Create and manage habits",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, create, edit, delete, complete, uncomplete. Use list --ids-only to pipe IDs to the rest. Days accept weekday names or 0 (Sunday) through 6 (Saturday). Without --date, list, complete and uncomplete use today in the HEY account's time zone; complete and uncomplete refuse when the account has none, so pass --date.",
+			"agent_notes": "Subcommands: list, create, edit, delete, complete, uncomplete. Use list --ids-only to pipe IDs to the rest. Days accept weekday names or 0 (Sunday) through 6 (Saturday). A name may be written in full or as a common abbreviation (mon, tue, wed, thu, fri, sat, sun). Without --date, list, complete and uncomplete use today in the HEY account's time zone; complete and uncomplete refuse when the account has none, so pass --date.",
 		},
 	}
 
@@ -165,6 +165,9 @@ func newHabitCreateCommand() *habitCreateCommand {
 	habitCreateCommand.cmd = &cobra.Command{
 		Use:   "create [name]",
 		Short: "Create a habit",
+		Annotations: map[string]string{
+			"agent_notes": "Without --icon, --color or --days a habit gets the weights icon, the color blue, and every day of the week.",
+		},
 		Example: `  hey habit create "Morning strength training"
   hey habit create --name "Practice piano" --icon music --color green --days monday,wednesday,friday
   echo "Read for thirty minutes" | hey habit create`,
@@ -243,6 +246,9 @@ func newHabitEditCommand() *habitEditCommand {
 		Use:     "edit <id> [name]",
 		Aliases: []string{"update"},
 		Short:   "Edit a habit",
+		Annotations: map[string]string{
+			"agent_notes": "Only the name and the flags given change; omitted fields remain unchanged.",
+		},
 		Example: `  hey habit edit 789 --name "Evening walk"
   hey habit edit 789 --days monday,tuesday,wednesday,thursday,friday
   hey habit update 789 --icon walk --color gold`,

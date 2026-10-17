@@ -52,6 +52,9 @@ func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 					command.Annotations["agent_notes"],
 					command.NonInheritedFlags().FlagUsages(),
 				}, "\n")
+				// A wire name in backticks is what the JSON or the environment
+				// literally carries, so naming it is not terminology.
+				text = strings.NewReplacer("`postings`", "", "`posting`", "", "`posting_id`", "", "`HEY_POSTING_ID`", "").Replace(text)
 				if strings.Contains(strings.ToLower(text), "posting") {
 					t.Errorf("%s exposes internal posting terminology:\n%s", command.CommandPath(), text)
 				}

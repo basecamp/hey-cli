@@ -51,6 +51,12 @@ func personalWindow(today time.Time) (time.Time, time.Time) {
 	return today.AddDate(-4, 0, 0), today.AddDate(1, 0, 0)
 }
 
+// recordingWindowNotes is what every listing of a window says about the dates it takes.
+const recordingWindowNotes = "Both dates are YYYY-MM-DD; an unreadable one, or an --ends-on before --starts-on, is a usage error rather than an empty result. Naming only --starts-on moves the whole window, reading the default span from that day, rather than reading up to the default end."
+
+// personalWindowNotes is the window of a to-do or a journal listing.
+const personalWindowNotes = "Without dates the window is 4 years before today to 1 year after it. " + recordingWindowNotes
+
 // registerFlags puts the window on a command. calendarUsage says where the listing looks
 // without it, since that differs per recording type and is the one thing a reader cannot
 // guess.

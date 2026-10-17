@@ -32,7 +32,7 @@ func newContactNoteCommand() *contactNoteCommand {
 		Use:   "note",
 		Short: "Manage private contact notes",
 		Annotations: map[string]string{
-			"agent_notes": "Private notes support show, set, and delete. Show answers note_markdown, the form set takes, and note_markdown_lossless; when that is false, change note_html and set it with --note-html instead. Set replaces the whole note and accepts --note, positional content, stdin, or $EDITOR.",
+			"agent_notes": "Private notes support show, set, and delete. Show answers note_markdown, the form set takes, and note_markdown_lossless; when that is false, change note_html and set it with --note-html instead. Set replaces the whole note and accepts --note, positional content, stdin, or $EDITOR. A note belongs to the HEY account that holds the contact and is reached only through the user's own login: on a personal account only the user sees it, and on a HEY for Domains account everyone at that account does.",
 		},
 	}
 	noteCommand.cmd.AddCommand(newContactNoteShowCommand().cmd)
