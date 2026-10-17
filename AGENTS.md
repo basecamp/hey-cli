@@ -28,7 +28,7 @@ date by rebasing it onto main, never by merging main into it.
 ## Architecture Overview
 
 This is a Go project that uses:
-- [spf13/cobra](github.com/spf13/cobra) for the CLI interface
+- [spf13/cobra](https://github.com/spf13/cobra) for the CLI interface
 - [charm.land/bubbletea/v2] for the TUI interface along with bubbles/v2 and lipgloss/v2 (these are new versions that recently came out and differ from the v1 versions!)
 
 All API interactions go through the HEY SDK (`hey-sdk/go`), with typed service methods accessed via `internal/cmd/sdk.go` (e.g., `sdk.Boxes().List`, `sdk.Messages().Create`, `sdk.Calendars().GetRecordings`). Authentication and token refresh are handled via `internal/auth/`.
