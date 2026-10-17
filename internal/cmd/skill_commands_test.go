@@ -49,6 +49,7 @@ func TestSkillInvocationCheckCatchesStaleNames(t *testing.T) {
 		"contact note set 12345 --notes \"Prefers email\"",
 		"contact note sett 12345",
 		"label add|tag 12345 --to 789",
+		"thread read <topic_id> --jsno",
 	} {
 		if problem := checkSkillInvocation(root, invocation); problem == "" {
 			t.Errorf("hey %s was accepted", invocation)
@@ -62,6 +63,8 @@ func TestSkillInvocationCheckCatchesStaleNames(t *testing.T) {
 		"draft edit <draft_id> --subject/--to/--cc/--bcc/-m (flags replace)",
 		"login / hey logout",
 		"timetrack export -o tracked-time.csv --json",
+		"<group> <subcommand> --agent --help",
+		"contact <subcommand> --agent --help",
 	} {
 		if problem := checkSkillInvocation(root, invocation); problem != "" {
 			t.Errorf("hey %s was refused: %s", invocation, problem)
@@ -147,6 +150,9 @@ func checkSkillInvocation(root *cobra.Command, invocation string) string {
 				continue
 			}
 			if command == root || !command.Runnable() {
+				if strings.HasPrefix(token, "<") {
+					return ""
+				}
 				return fmt.Sprintf("%s has no subcommand %s", command.CommandPath(), token)
 			}
 			descending = false
@@ -219,6 +225,7 @@ func skillSubcommand(command *cobra.Command, name string) *cobra.Command {
 }
 
 func lookupSkillFlag(command *cobra.Command, token string) *pflag.Flag {
+	command.InitDefaultHelpFlag()
 	name, _, _ := strings.Cut(token, "=")
 	sets := []*pflag.FlagSet{command.Flags(), command.PersistentFlags(), command.InheritedFlags()}
 	for _, set := range sets {
