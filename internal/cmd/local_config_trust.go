@@ -62,7 +62,7 @@ func commandIgnoresLocalConfig(cmd *cobra.Command) bool {
 		return true
 	case "setup":
 		// The wizard itself uses the effective server; its subcommands
-		// (agents, claude, codex, omarchy) touch only local files and must
+		// (agents, claude, codex, grok, omarchy) touch only local files and must
 		// work from any directory — the installer pipes curl from wherever
 		// the user happens to be, malformed .hey/config.json included.
 		return len(parts) >= 3
@@ -85,7 +85,7 @@ func commandUsesRuntimeConfig(cmd *cobra.Command) bool {
 		return false
 	case "setup":
 		// `hey setup` itself signs in against the effective server, but its
-		// subcommands (agents, claude, codex) only touch local agent files.
+		// subcommands (agents, claude, codex, grok) only touch local agent files.
 		// The installer's non-TTY handoff runs `setup agents` from whatever
 		// directory the user piped curl in — possibly a repository with an
 		// untrusted .hey/config.json — and must not be blocked by it.
