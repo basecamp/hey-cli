@@ -45,7 +45,7 @@ func newBubbleListCommand() *bubbleListCommand {
 		Example: `  hey bubble list
   hey bubble list --json`,
 		Annotations: map[string]string{
-			"agent_notes": "Lists two buckets: bubbled_up, the threads back in the Imbox, and scheduled, the threads waiting in Bubble Up with bubble_up_schedule.bubble_up_at saying when. Use id with hey bubble pop; use topic_id with hey thread read. --limit caps each bucket.",
+			"agent_notes": "Lists two buckets: bubbled_up, the threads back in the Imbox, and scheduled, the threads waiting in Bubble Up with bubble_up_schedule.bubble_up_at saying when, and bubble_up_schedule.surprise_me true when HEY picked the time. Use id with hey bubble pop; use topic_id with hey thread read. --limit caps each bucket.",
 		},
 		RunE: bubbleListCommand.run,
 		Args: cobra.NoArgs,

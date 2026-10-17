@@ -135,7 +135,7 @@ func newDraftShowCommand() *draftShowCommand {
 		Use:   "show <draft-id>",
 		Short: "Read a draft back",
 		Annotations: map[string]string{
-			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown.",
+			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown. The answer includes from, the sender the draft goes out as, and, for a draft scheduled in a HEY app, scheduled_delivery_at in UTC like every HEY timestamp (the styled view shows it in local time).",
 		},
 		Example: `  hey draft show 12345
   hey draft show 12345 --json`,
@@ -216,7 +216,7 @@ func newDraftEditCommand() *draftEditCommand {
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
 or a top-level domain HEY does not know — is refused before anything is sent.`,
 		Annotations: map[string]string{
-			"agent_notes": "--from chooses a configured sender email or ID within this draft account. It preserves the body verbatim, including existing signatures; use a body flag to replace those. Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved.",
+			"agent_notes": "--from chooses a configured sender email or ID within this draft account. It preserves the body verbatim, including existing signatures; use a body flag to replace those. Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved. A draft scheduled between whole UTC hours, which HEY's API cannot express, is refused as a usage error (exit 1) rather than moved — adjust it in a HEY app first. --from saves no default sender.",
 		},
 		Example: `  hey draft edit 12345 --subject "Quarterly planning (v2)"
   hey draft edit 12345 --to maria@example.com --cc finance@example.com
@@ -340,10 +340,11 @@ hey thread read shows the thread without it, and a thread it started answers not
 until the message goes out. Read the thread again then.
 
 If HEY refuses the send — usually because the account has reached its sending limit —
-the draft stays a draft and the command fails with not_delivered (exit 7); send it again
-once the limit allows.`,
+the draft stays a draft and the command fails with not_delivered (exit 7). The retry is
+hey draft send on that same draft once the limit allows; composing the message again
+would make a second draft.`,
 		Annotations: map[string]string{
-			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. The answer carries the delivered message's id and its thread's topic_id, with subject and delayed; when HEY's answer names no entry, the id stays the draft's and only the fields HEY served are added. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
+			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. The answer carries the delivered message's id and its thread's topic_id, with subject and delayed; when HEY's answer names no entry, the id stays the draft's and only the fields HEY served are added. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id> on that same draft once the limit allows — that is the retry, and composing the message again makes a second draft.",
 		},
 		Example: `  hey draft send 12345`,
 		RunE:    sendCommand.run,
@@ -402,7 +403,7 @@ func newDraftDeleteCommand() *draftDeleteCommand {
 		Use:   "delete <draft-id>...",
 		Short: "Trash drafts",
 		Annotations: map[string]string{
-			"agent_notes": "Takes draft IDs from `hey draft list`. Trashes the draft; there is no undo here.",
+			"agent_notes": "Takes draft IDs from `hey draft list`. Trashes the draft; there is no undo here. Trashing a draft scheduled in a HEY app stops its delivery for as long as it stays in Trash.",
 		},
 		Example: `  hey draft delete 12345
   hey draft delete 12345 67890`,

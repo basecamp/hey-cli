@@ -33,7 +33,7 @@ func newMoveCommand() *moveCommand {
   hey move 12345 67890 --to imbox
   hey move 12345 --to 987`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. To remove Reply Later, move the threads to Imbox; seen threads then appear in Previously Seen. Use hey bubble up for Bubble Up. A hey box view row with kind \"bundle\" is refused: moving one unbundles that sender's mail in the box they are delivered to. Change grouping with hey contact bundle|unbundle <contact-id>.",
+			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. A thread that cannot be replied to is skipped silently when moving to Reply Later: no error, and the confirmation still counts it. To remove Reply Later, move the threads to Imbox; seen threads then appear in Previously Seen. Moving out of Reply Later does not return a thread to the box it was in before; it goes where --to says. Use hey bubble up for Bubble Up. A hey box view row with kind \"bundle\" is refused: moving one unbundles that sender's mail in the box they are delivered to. Change grouping with hey contact bundle|unbundle <contact-id>.",
 		},
 		RunE: moveCommand.run,
 		Args: usageMinOneArg(),
