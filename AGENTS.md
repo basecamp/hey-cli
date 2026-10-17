@@ -109,11 +109,7 @@ typed operation, and if HEY does not serve JSON for what you need, add it to the
 rather than working around it here. `sdk.GetHTML` has no callers left; if you find yourself
 reaching for it, that is the signal to stop.
 
-The journal used to be the example of this: a day with an entry answered 204, so the
-content was scraped from the Trix input on `/calendar/days/{date}/journal_entry/edit`.
-HEY answers the entry itself now, a 204 means the day is empty, and the scrape is gone.
-
-The last three went the same way. Two facts about the typed reads are worth keeping,
+Two facts about the typed reads are worth keeping,
 because both were mis-stated here before:
 
 - **`Topics.Get` does not carry bodies.** It carries the topic's first page of entries as
@@ -244,6 +240,13 @@ handed. The model has three layers, and it is worth knowing which one a change t
   `encoding/json` would otherwise write raw. A `--jq` string result on a pipe stays raw,
   as `jq -r` writes it.
 
+`terminal.Sanitize` keeps `\n` and `\t`, because a body, a jq result and a Markdown cell
+carry them on purpose. `terminal.SanitizeLine` is for where only one line fits — a table
+cell, a mutation confirmation — and turns those two into spaces so nothing can move what
+comes after them. Strip a sequence; do not deface it. Replacing the ESC byte with U+FFFD
+leaves the payload on screen as debris of somebody else's choosing, and `runewidth` then
+measures that debris when it lays out a table, so the column width is theirs to pick.
+
 The Markdown in `--json` is standard CommonMark; what a conformant renderer shows for it
 is the literal text and URL the email held — less, in prose, what `terminal.Sanitize`
 removes, since prose is written in its sanitized form so that the renderer's own pass
@@ -288,31 +291,6 @@ costs formatting rather than the message.
 `ToText` is still right where the result is not shown to anyone — the name tag
 `hey bulk-reply` reads out of a draft, for instance.
 
-### Text somebody else wrote goes through `internal/terminal`
-
-A sender's name, a subject, a filename, a label — a terminal acts on the escape
-sequences in all of it, so nothing HEY serves is printed raw. `terminal.Sanitize`
-strips the sequences with `ansi.Strip` and then drops the leftover control
-characters, keeping `\n` and `\t` because a body, a jq result and a Markdown cell
-carry them on purpose. `terminal.SanitizeLine` is the same thing where only one
-line fits — a table cell, a mutation confirmation — and turns those two into
-spaces so nothing can move what comes after them.
-
-Strip the sequence; do not deface it. Replacing the ESC byte with U+FFFD, which
-this repo used to do in six places — three of them the TUI's own
-`terminalSafeFolderText`, `terminalSafeCollectionText` and
-`terminalSafeAttachmentText` — leaves the payload on screen as debris of
-somebody else's choosing — and `runewidth` then measures that debris when it lays
-out a table, so the column width is theirs to pick.
-
-### One line for a person, the envelope for everyone else
-
-Every command that writes something confirms it through `writeMutation` (or
-`writeMutationLine`, where the line carries an id or a name the summary does not).
-It prints the sanitized line under `--styled` and hands `writeOK` the data and the
-summary otherwise. Do not hand-roll the `if writer.IsStyled()` branch again: it was
-copy-pasted about forty times, and three of the copies had drifted.
-
 #### Inbound email hides its body in an attachment
 
 `/messages/{id}` serves `content` through haystack's `trix_html_for_rich_text_editing`,
@@ -329,8 +307,13 @@ each embed another cannot recurse without end. `ExtractImageURLs` looks inside i
 since that is where an inbound email's inline images are; `ExtractAttachments` does not
 list it, because an embedded body is not a downloadable file.
 
-The web app has the same content and renders it in a sandboxed iframe, which is why the
-`srcdoc` scrape in `ParseTopicEntriesHTML` never hit this.
+### One line for a person, the envelope for everyone else
+
+Every command that writes something confirms it through `writeMutation` (or
+`writeMutationLine`, where the line carries an id or a name the summary does not).
+It prints the sanitized line under `--styled` and hands `writeOK` the data and the
+summary otherwise. Do not hand-roll the `if writer.IsStyled()` branch again: it was
+copy-pasted about forty times, and three of the copies had drifted.
 
 ### TUI structure
 
