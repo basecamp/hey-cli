@@ -27,7 +27,7 @@ func newContactsListCommand() *contactsListCommand {
 		Use:   "list",
 		Short: "List contacts",
 		Annotations: map[string]string{
-			"agent_notes": "Returns contact IDs, names, and email addresses. Use --all to fetch up to 100 pages.",
+			"agent_notes": "Returns contact IDs, names, and email addresses. Use --all to fetch up to 100 pages. Each row carries the contact's id, name, primary email_address and updated_at. Lists only non-HEY senders you have screened in: other HEY users, senders still in or denied by The Screener, aliases and hidden contacts are left out, so an address missing here does not mean HEY has no contact for it. There is no search: to find a contact by email, read every page with --all (the notice names the --page to continue from) and filter with --jq '.data[] | select(.email_address == \"jane@example.com\") | .id'. That matches primary addresses only; a contact's aliases are on hey contact show.",
 		},
 		Example: `  hey contact list
   hey contact list --page 2 --json

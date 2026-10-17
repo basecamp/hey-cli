@@ -38,7 +38,7 @@ func newContactsDeliverCommand() *contactsDeliverCommand {
 			"Selecting The Feed removes an existing bundle; Imbox and Paper Trail preserve eligible bundles. This command is write-only because HEY does not expose the current setting as structured data. " +
 			"Existing mail may move asynchronously, so success means HEY accepted the change, not that every affected thread has already moved.",
 		Annotations: map[string]string{
-			"agent_notes": "Use a contact ID from `hey contact list`, not a clearance ID, box item ID, box ID, or email address. Pass the exact --to token: imbox, feed, papertrail, or screened-out.",
+			"agent_notes": "Use a contact ID from `hey contact list`, not a clearance ID, box item ID, box ID, or email address. Pass the exact --to token: imbox, feed, papertrail, or screened-out. screened-out is the deny/block choice.",
 		},
 		Example: `  hey contact deliver 12345 --to feed
   hey contact deliver 12345 --to screened-out`,

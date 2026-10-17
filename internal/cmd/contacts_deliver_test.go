@@ -98,7 +98,7 @@ func TestContactDeliverHelpDescribesRoutingContract(t *testing.T) {
 		}
 	}
 
-	const wantAgentNotes = "Use a contact ID from `hey contact list`, not a clearance ID, box item ID, box ID, or email address. Pass the exact --to token: imbox, feed, papertrail, or screened-out."
+	const wantAgentNotes = "Use a contact ID from `hey contact list`, not a clearance ID, box item ID, box ID, or email address. Pass the exact --to token: imbox, feed, papertrail, or screened-out. screened-out is the deny/block choice."
 	if got := command.Annotations["agent_notes"]; got != wantAgentNotes {
 		t.Errorf("agent notes = %q, want %q", got, wantAgentNotes)
 	}

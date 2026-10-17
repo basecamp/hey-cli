@@ -813,7 +813,7 @@ Theming needs none of this: on Omarchy the TUI already follows the active theme.
   hey setup omarchy --notify
   hey setup omarchy --remove`,
 		Annotations: map[string]string{
-			"agent_notes": "Only meaningful on Omarchy Linux. Writes to ~/.config/omarchy and ~/.local/share/applications; never edits Hyprland keybindings.",
+			"agent_notes": "Only meaningful on Omarchy Linux. Writes to ~/.config/omarchy and ~/.local/share/applications; never edits Hyprland keybindings. The bar-plugin offer at sign-in never fires for an agent (machine output, HEY_NONINTERACTIVE, a non-TTY, or a --token/--cookie login), so this command is how an agent installs the plugin; it installs in every output format and fails with setup_failed on an incomplete outcome.",
 		},
 		RunE: setupOmarchyCommand.run,
 	}
