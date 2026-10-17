@@ -169,7 +169,7 @@ hey box list --quiet --jq '.[].name'
 - An empty result is an empty array rather than `null`, so `.data[]` is safe on a listing that found nothing.
 - A field HEY's answer leaves out is left out, never guessed. A posting's `seen` is present only when true, so test `.seen != true` for unseen.
 - `--ids-only` prints one ID per line and `--count` a bare number. They work on listings: every `list` command, the thread listings, `hey workflow view`, `hey search`, `hey screener history`, `hey event day|week`, `hey timetrack categories`, `hey attachment list` and `hey thread read` (its entries, read from the index without bodies). Both answer for what was read, which is the first page unless `--all` or `--limit` reads more, and not every listing warns that more pages exist; `hey screener list --count` is the exception and counts the whole queue. On thread listings they count the postings, not the box, label or contact around them.
-- Listings page by cursor: pass `next_page` to `--page`. `--all` reads up to 101 pages, so if `next_page` is still set afterwards, continue from it rather than treating the list as complete.
+- `--all` stops at a page cap, which each listing's help names. A capped read says where to continue: `next_page` for a cursor listing such as `hey box view`, or the `notice`, naming the `--page` value, for a numbered one such as `hey search` or `hey contact list`. Continue from there rather than treating the list as complete.
 - `--html` writes the original HTML of `hey thread read`, `hey journal read` and a contact's private note to a pipe or file; a terminal is refused.
 
 ## IDs
