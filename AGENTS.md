@@ -135,22 +135,25 @@ Details: [docs/architecture/email-bodies.md](docs/architecture/email-bodies.md).
 
 `mail.ReadPage` is the one read for a box, a label, a collection, a bundle and a contact's
 threads. A source knows its kind from `BoxKind`, never from its name. `Page.Cursor` is
-opaque. Lists page by the geared_pagination cursor in the `Link` header, which only the
-SDK's `*Page` methods keep. Search and contacts number their pages instead. A live
+opaque and differs by kind. A box pages by HEY's `next_history_url` on its own route,
+dispatched on `BoxKind`. A label and a collection page by the geared_pagination cursor in
+the `Link` header, which only the SDK's `*Page` methods keep. Search and contacts number
+their pages instead. A live
 re-read splices the top page in through `refreshHead`.
 Details: [docs/architecture/mail-sources-and-paging.md](docs/architecture/mail-sources-and-paging.md).
 
 #### Watching for changes
 
-`hey watch` and the TUI take an Action Cable broadcast as a doorbell, then read the
-change from the sync feed. The feed's cursor is the source of truth, not the broadcast.
-The start, resync and "new mail" rules are subtle, so read the doc before you change
-`watch*.go` or `tui_watch.go`.
+Both `hey watch` and the TUI take an Action Cable broadcast as a doorbell, not as the
+change. `hey watch` then reads the change from the posting sync feed, whose cursor is the
+source of truth, and its start, resync and "new mail" rules are subtle. The TUI just
+re-reads the box's top page, and re-reads the box on screen after a reconnect. Read the
+doc before you change `watch*.go` or `tui_watch.go`.
 Details: [docs/architecture/watch.md](docs/architecture/watch.md).
 
 #### Calendar and time tracking
 
-A selection is a `Recording.key()`, not an id, because a repeating event's days have id 0.
+A selection is a `Recording.key()`, not an id, because HEY serves a repeating event's virtual days with id 0.
 Delete a repeating day through its occurrence. Tracked time is readable only through
 `TimeTracks().ListPage`. An event update is not a partial, so send every field back.
 Details: [docs/architecture/calendar.md](docs/architecture/calendar.md).
@@ -169,7 +172,8 @@ Details: [docs/architecture/inline-images.md](docs/architecture/inline-images.md
 
 #### Upgrade command
 
-`hey upgrade` trusts nothing it downloaded until sigstore verifies the release's checksums.
+`hey upgrade` hands Homebrew and Scoop installs to their package manager. On its own path
+it trusts nothing it downloaded until sigstore verifies the release's checksums.
 Its tests go through seam variables and never talk to GitHub or run a package manager.
 Details: [docs/architecture/upgrade.md](docs/architecture/upgrade.md).
 
