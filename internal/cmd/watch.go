@@ -109,7 +109,17 @@ last skip. A resync is an event of its own: reported by default, scripts run for
 calendar's feed falls behind the same way, and calendar_resync is the same word for it.
 Ready and disconnected are written to stdout only.`,
 		Annotations: map[string]string{
-			"agent_notes": "Long-running. Piped or with --json, writes one JSON object per change to stdout (NDJSON), not the usual envelope, and does not apply --jq. Use --exit-on-first to block until one change lands and then exit; a ready line comes first. For new mail only, add --events new.",
+			"agent_notes": "Long-running, and driven by a websocket rather than polling: use it instead of polling hey box view in a loop. " +
+				"Piped or with --json, writes one JSON object per change to stdout (NDJSON), not the usual envelope, and does not apply --jq. " +
+				"A mail line carries `change`, `at`, `box` (`id`, `kind`, `name`), `posting_id`, `thread_id`, `new` and `posting`; a deleted line carries no `posting`, `thread_id` or `new`. " +
+				"`thread_id` is the topic ID for hey thread read, absent for a bundle row that names no single thread. " +
+				"A recording_added, recording_updated or recording_deleted line carries `calendar` (`id`, `name`) instead of `box`, plus `recording_id` and `recording_type`, and `recording` on all but recording_deleted. " +
+				"Use --exit-on-first to block until one change lands and then exit; a ready line comes first. For new mail only, add --events new. " +
+				"ready and disconnected lines carry no `box`, are not written when --run-async or --run-sync is given, and never count for --exit-on-first. " +
+				"Passing both --run-async and --run-sync is a usage error. " +
+				"Either command gets the line's JSON on stdin and its fields as `HEY_CHANGE`, `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`, `HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID` " +
+				"(`HEY_CALENDAR_ID`, `HEY_CALENDAR_NAME`, `HEY_RECORDING_ID` and `HEY_RECORDING_TYPE` for a calendar change), with `HEY_NEW=1` for new mail and `HEY_NEW=0` otherwise, " +
+				"and it takes over stdout: the watch prints no lines of its own.",
 		},
 		Example: `  hey watch
   hey watch --box imbox --events added

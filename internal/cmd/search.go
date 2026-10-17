@@ -58,7 +58,10 @@ func newSearchCommand() *searchCommand {
 		Short: "Search email threads and messages",
 		Long:  "Search email threads and matching messages. Combine an optional free-text query with advanced refinements.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns one result per thread. id is the box item ID for organization actions, omitted when you have no box item for the thread; topic_id opens the thread, and messages contains the matching message summaries. Use `hey search filters` to discover box, date, label, and attachment values.",
+			"agent_notes": "Returns one result per thread. id is the box item ID for organization actions, omitted when you have no box item for the thread; topic_id opens the thread, and messages contains the matching message summaries. topic_id also works with hey reply and hey forward. Each result also carries subject and updated_at, and each message its message id, creator, created_at and summary. " +
+				"Use `hey search filters` to discover box, date, label, and attachment values. It lists years from 2020 to this one, and the CLI refuses any year but 20xx. " +
+				"An unrecognized --in, --date or --attachment is refused as a usage error naming the values it accepts, before any search is sent; for --in that includes Set Aside, Reply Later, Bubble Up and a name no box has, never not_found. An --in spelling other than a short name or a kind, such as a display name, costs one box list read. --label is not checked, so read hey search filters when unsure of a label. " +
+				"--all stops after 100 pages, and the notice then names the --page value to continue from.",
 		},
 		Example: `  hey search "quarterly planning"
   hey search --from jane@example.com --date last_30_days

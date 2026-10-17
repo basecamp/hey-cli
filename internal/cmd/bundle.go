@@ -77,7 +77,7 @@ func newBundleReaderCommand(use, short, example string) *bundleCommand {
 		Short: short,
 		Long:  "List the unseen email threads a bundle groups. A bundle is a hey box view row with kind \"bundle\": one sender's mail rolled into a single row instead of a thread apiece.",
 		Annotations: map[string]string{
-			"agent_notes": "The ID is a bundle row's own id from hey box view — a row with kind \"bundle\" and no topic_id. Returns the unseen threads the bundle groups, each with topic_id for hey thread read. A bundle read through has no unseen threads; every thread with its sender, seen and unseen, is listed by hey contact threads <contact-id>.",
+			"agent_notes": "The ID is a bundle row's own id from hey box view — a row with kind \"bundle\", which carries a topic_id only while it holds exactly one unseen thread. Returns the unseen threads the bundle groups, each with topic_id for hey thread read. A bundle read through has no unseen threads; every thread with its sender, seen and unseen, is listed by hey contact threads <contact-id>.",
 		},
 		Example: example,
 		RunE:    command.run,
