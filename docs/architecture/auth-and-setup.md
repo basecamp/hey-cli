@@ -4,7 +4,7 @@ Authentication supports four methods, all managed through `internal/auth/`:
 
 1. **Browser-based OAuth with PKCE** (primary) — `hey auth login` opens a browser for OAuth authentication against HEY's own OAuth server (`/oauth/authorizations/new`), using PKCE (S256) for security. A local callback server on an ephemeral `127.0.0.1` port (RFC 8252 §7.3) receives the authorization code, which is exchanged for access and refresh tokens at `/oauth/tokens`.
 2. **Pre-generated bearer token** — `hey auth login --token TOKEN` stores a token directly.
-3. **Browser session cookie** — `hey auth login --cookie COOKIE` uses an existing HEY.com session.
+3. **Browser session cookie** — `hey auth login --cookie COOKIE` uses an existing HEY.com session (`__Host-session_token`, or `session_token`).
 4. **Environment variable** — Set `HEY_TOKEN` to use a token without storing it.
 
 The auth Manager (`internal/auth/auth.go`) proactively refreshes tokens with a 5-minute expiry buffer. The SDK uses the Manager to authenticate requests via a bridge in `internal/cmd/sdk.go`.

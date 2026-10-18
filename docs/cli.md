@@ -46,7 +46,7 @@ hey auth login
 # Or use a pre-generated token
 hey auth login --token TOKEN
 
-# Or use a browser session cookie
+# Or use a browser session cookie (__Host-session_token, or session_token)
 hey auth login --cookie COOKIE
 ```
 
