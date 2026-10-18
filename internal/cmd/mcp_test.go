@@ -131,8 +131,8 @@ func TestMCPCommandServesMCP(t *testing.T) {
 		}
 		names = append(names, tool.Name)
 	}
-	if len(names) != 7 {
-		t.Fatalf("tools = %v, want 7 hey_* tools", names)
+	if len(names) != 10 {
+		t.Fatalf("tools = %v, want 10 hey_* tools", names)
 	}
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
