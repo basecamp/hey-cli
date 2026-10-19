@@ -75,7 +75,9 @@ and its date and hour) or triage the thread in the same request (`mark_done`, `p
 scheduled clears its schedule rather than letting it go out later. A save comes back as
 `{"drafted": true, "draft_id": ..., "location": ..., "note": ...}`. HEY acknowledges a
 draft with 204 and a Location. Any other answer is reported as an error that says the
-mail may have been sent, so check HEY before trying again.
+mail may have been sent, so check HEY before trying again. A save that fails with no
+answer from HEY (a dropped connection, a timeout, a 5xx) may still have been saved, and
+its error says to check Drafts before retrying.
 
 There is no send action yet. A person reviews the draft and sends it from HEY, or with
 `hey draft send <draft_id>`. Earlier releases delivered mail when a call omitted

@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -94,6 +95,22 @@ func unconfirmedDraft(action string, resp *hey.Response) string {
 	}
 	return fmt.Sprintf("%s may not have saved a draft: HEY answered HTTP %d%s, not the 204 and Location a saved draft gets, so it may have been sent. Check the thread and Sent in HEY before trying again.",
 		action, resp.StatusCode, missing)
+}
+
+// refusedByHEY reports whether err is HEY declining the request outright: a
+// 4xx answer other than 408, which HEY sends without acting on it. Anything
+// else (a transport failure, a timeout, a 5xx) leaves open whether the save
+// landed.
+func refusedByHEY(err error) bool {
+	var apiErr *hey.Error
+	return errors.As(err, &apiErr) && apiErr.HTTPStatus >= 400 && apiErr.HTTPStatus < 500 && apiErr.HTTPStatus != http.StatusRequestTimeout
+}
+
+// unsettledDraft is the error for a draft save whose outcome is unknown: the
+// request may have reached HEY, but no answer says whether it acted.
+func unsettledDraft(action string, err error) string {
+	return fmt.Sprintf("%s may have saved a draft: %v. HEY may have acted before the request failed, so check the thread and Drafts in HEY before trying again; a retry could save a second copy.",
+		action, err)
 }
 
 // draftPath is a draft save's Location path, …/messages/{entry_id}, as the

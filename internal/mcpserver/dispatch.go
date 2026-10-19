@@ -73,6 +73,9 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 
 	resp, err := d.call(ctx, full.Method, path, body)
 	if err != nil {
+		if draft && !refusedByHEY(err) {
+			return gateway.ErrorResult("%s", unsettledDraft(full.Action, err)), nil
+		}
 		return gateway.ErrorResult("%v", err), nil
 	}
 	if draft {

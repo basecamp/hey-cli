@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -248,6 +249,39 @@ func TestDraftSaveNotAnsweredAsADraftIsUnconfirmed(t *testing.T) {
 					t.Errorf("unconfirmed save reported as drafted: %s", text)
 				}
 			})
+		}
+	}
+}
+
+// A draft save that fails without HEY's answer saying it declined (a dropped
+// connection, a timeout, a 5xx) may still have landed, so the error says to
+// check HEY before retrying. A 4xx is HEY declining, and passes through.
+func TestDraftSaveWithAnUnknownOutcomeSaysToCheckHEY(t *testing.T) {
+	unknown := map[string]error{
+		"connection dropped": errors.New("connection reset by peer"),
+		"timeout":            context.DeadlineExceeded,
+		"server error":       &hey.Error{Message: "server error", HTTPStatus: http.StatusBadGateway},
+		"request timeout":    &hey.Error{Message: "timeout", HTTPStatus: http.StatusRequestTimeout},
+	}
+	for name, callErr := range unknown {
+		for _, action := range []string{"create_message", "create_reply", "update_message"} {
+			t.Run(name+"/"+action, func(t *testing.T) {
+				text, isError := callThreads(t, &fakeAPI{err: callErr}, action, paramsFor(action, nil))
+				if !isError {
+					t.Fatalf("failed save reported as a success: %s", text)
+				}
+				if !strings.Contains(text, action+" may have saved a draft") || !strings.Contains(text, "before trying again") || !strings.Contains(text, callErr.Error()) {
+					t.Errorf("error = %q, want the cause and a warning to check HEY before retrying", text)
+				}
+			})
+		}
+	}
+
+	declined := &hey.Error{Message: "validation failed", HTTPStatus: http.StatusUnprocessableEntity}
+	for _, action := range []string{"create_message", "create_reply", "update_message"} {
+		text, isError := callThreads(t, &fakeAPI{err: declined}, action, paramsFor(action, nil))
+		if !isError || strings.Contains(text, "may have saved") || !strings.Contains(text, "validation failed") {
+			t.Errorf("%s: a declined save = %q, want HEY's error as is", action, text)
 		}
 	}
 }
