@@ -26,7 +26,7 @@ var DomainSpecs = []catalog.DomainSpec{
 	{
 		Key:   "threads",
 		Tags:  []string{"Topics", "Entries", "Messages"},
-		Blurb: "HEY email threads: topics and their entries, renaming a thread, full message content, replies and forwards, drafts, and triage (trash, spam, restore, move).",
+		Blurb: "HEY email threads: topics and their entries, renaming a thread, full message content, replies and forwards, drafts, and triage (trash, spam, restore, move). create_message, create_reply and update_message only ever save drafts: they never send or schedule mail, and a request to send, schedule or triage in the same call is refused. Updating a scheduled draft clears its schedule. There is no send action; a person sends a draft from HEY or with `hey draft send <id>`.",
 	},
 	{
 		Key:   "contacts",

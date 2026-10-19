@@ -220,3 +220,67 @@ func TestMCPCommandDoesNotRetryMutations(t *testing.T) {
 		t.Errorf("upstream saw %d delivery attempts, want exactly 1 — a delivery must never be retried", got)
 	}
 }
+
+// `hey mcp` never delivers: a request to send is refused before HEY is
+// contacted, and a plain compose is saved as a draft.
+func TestMCPCommandSavesDraftsAndNeverSends(t *testing.T) {
+	var requests atomic.Int32
+	var status atomic.Value
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != http.MethodPost || r.URL.Path != "/messages.json" {
+			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			Entry struct {
+				Status string `json:"status"`
+			} `json:"entry"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		status.Store(body.Entry.Status)
+		w.Header().Set("Location", "/messages/42")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(upstream.Close)
+
+	session := runMCPCommand(t, upstream)
+	call := func(entry map[string]any) *mcp.CallToolResult {
+		t.Helper()
+		params := map[string]any{"acting_sender_id": 7, "message": map[string]any{"subject": "s", "content": "c"}}
+		if entry != nil {
+			params["entry"] = entry
+		}
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "hey_threads",
+			Arguments: map[string]any{"action": "create_message", "params": params},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	refused := call(map[string]any{"status": "sent"})
+	if !refused.IsError {
+		t.Fatalf("a send request was accepted: %v", refused.Content)
+	}
+	if text := refused.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, "hey draft send <id>") {
+		t.Errorf("refusal doesn't say how to send: %s", text)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Fatalf("a refused send reached HEY (%d requests)", got)
+	}
+
+	saved := call(nil)
+	if saved.IsError {
+		t.Fatalf("draft save failed: %v", saved.Content)
+	}
+	if got := status.Load(); got != "drafted" {
+		t.Errorf("HEY received entry.status %v, want drafted", got)
+	}
+	if text := saved.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, `"drafted": true`) || !strings.Contains(text, "hey draft send 42") {
+		t.Errorf("result = %s", text)
+	}
+}

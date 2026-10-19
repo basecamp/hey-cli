@@ -54,6 +54,18 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		return gateway.ErrorResult("internal error: action %q not in domain %q", op.Action, dom.Name()), nil
 	}
 
+	// Draft-first (drafts.go): a sending operation is forced to a draft, and
+	// a request to send, schedule or triage is refused here, before HEY is
+	// contacted.
+	draft := draftFirst[full.ID]
+	if draft {
+		forced, err := draftOnly(full.Action, params)
+		if err != nil {
+			return gateway.ErrorResult("%v", err), nil
+		}
+		params = forced
+	}
+
 	path, body, err := buildRequest(full, params)
 	if err != nil {
 		return gateway.ErrorResult("%v", err), nil
@@ -62,6 +74,12 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 	resp, err := d.call(ctx, full.Method, path, body)
 	if err != nil {
 		return gateway.ErrorResult("%v", err), nil
+	}
+	if draft {
+		if !savedAsDraft(resp) {
+			return gateway.ErrorResult("%s", unconfirmedDraft(full.Action, resp)), nil
+		}
+		return gateway.JSONResult(draftResult(resp))
 	}
 	if want, ok := acknowledgedBy[full.ID]; ok && resp.StatusCode != want {
 		return gateway.ErrorResult("%s was not acknowledged: HEY answered HTTP %d, not %d, so nothing was changed",

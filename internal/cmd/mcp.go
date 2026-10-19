@@ -31,6 +31,11 @@ func newMCPCommand() *mcpCommand {
 		Short: "Serve HEY to MCP clients over stdio",
 		Long: "Run an MCP (Model Context Protocol) server on stdin/stdout, serving HEY mail,\n" +
 			"contacts, and todos as tools backed by your signed-in account.\n\n" +
+			"It never sends mail. create_message, create_reply and update_message only save\n" +
+			"drafts, and a request to send, schedule or triage in the same call is refused\n" +
+			"before HEY is contacted. Updating a scheduled draft clears its schedule. Send a\n" +
+			"draft yourself from HEY or with `hey draft send <id>`. --read-only drops every\n" +
+			"write action, drafts included.\n\n" +
 			"Register it with an MCP client as a stdio server, e.g.:\n\n" +
 			"  claude mcp add hey -- hey mcp",
 		Args: cobra.NoArgs,
@@ -50,7 +55,9 @@ func newMCPCommand() *mcpCommand {
 // shared client's retry policy, while mutations go through a twin that never
 // retries on 429/503. UpdateMessage delivers mail on PUT, and its contract
 // forbids a transparent retry after an ambiguous first attempt — a duplicate
-// send is irreversible. POST and PATCH never auto-retried, so sending PUT and
+// send is irreversible. The dispatcher holds it to a draft save (drafts.go),
+// but a save HEY didn't confirm as a draft may still have sent, so it stays
+// single-shot. POST and PATCH never auto-retried, so sending PUT and
 // DELETE through the no-retry twin makes every mutation single-shot. A 401
 // still refreshes the token before the error surfaces, so a caller's own
 // retry goes out with fresh credentials.

@@ -63,3 +63,22 @@ Mutations are never retried automatically: a 429/503 on a write surfaces to
 the caller rather than risking a duplicate delivery, so retry a failed write
 yourself once you know it did not land. Logs go to stderr — stdout carries
 the MCP wire protocol.
+
+### Drafts, never sends
+
+`hey mcp` never delivers mail. `create_message`, `create_reply` and `update_message`,
+the three actions that can send on HEY's API, always save a draft: the entry's status is
+forced to `drafted`, and the entry takes only its recipients (`entry.addressed`). A
+call that asks to send (any other `entry.status`), schedule (`entry.scheduled_delivery`
+and its date and hour) or triage the thread in the same request (`mark_done`, `pop`,
+`scheduled_bubble_up`) is refused before anything reaches HEY. Updating a draft that was
+scheduled clears its schedule rather than letting it go out later. A save comes back as
+`{"drafted": true, "draft_id": ..., "location": ..., "note": ...}`. HEY acknowledges a
+draft with 204 and a Location. Any other answer is reported as an error that says the
+mail may have been sent, so check HEY before trying again.
+
+There is no send action yet. A person reviews the draft and sends it from HEY, or with
+`hey draft send <draft_id>`. Earlier releases delivered mail when a call omitted
+`entry.status`. An MCP client that relied on that now gets a draft. `describe` for these
+actions serves the draft-only schema, and the `hey_threads` tool description says the same.
+`--read-only` still drops every write action, drafts included.
