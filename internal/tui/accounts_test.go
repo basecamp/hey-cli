@@ -150,6 +150,74 @@ func TestCtrlAOpensAccountPickerOverTheSectionBehindIt(t *testing.T) {
 	}
 }
 
+func TestMailAccountHintStaysVisibleDuringSeenChanges(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || (r.URL.Path != "/postings/seen.json" && r.URL.Path != "/postings/unseen.json") {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(server.Close)
+	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
+
+	for _, width := range []int{80, 120, 160} {
+		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
+			m := modelWithBoxes()
+			m.vc.sdk = client
+			m.mailAccounts = []mailAccountChoice{
+				{label: "All Accounts"},
+				{id: 1, label: "jane@example.com"},
+				{id: 2, label: "jane@example.org"},
+			}
+			updated, _ := m.Update(currentPostingsLoaded(m.mailView, imboxPostings()[:1]))
+			m = updated.(model)
+			updated, _ = m.Update(tea.WindowSizeMsg{Width: width, Height: 40})
+			m = updated.(model)
+			footer := m.help.view()
+			contentHeight := m.vc.height
+			if !strings.Contains(stripANSI(footer), "ctrl+a mail account") {
+				t.Fatal("initial help does not show the mail account shortcut")
+			}
+			checkFooter := func(stage string) {
+				t.Helper()
+				if !strings.HasSuffix(m.View().Content, footer) {
+					t.Errorf("%s: rendered help changed:\n%s", stage, stripANSI(m.help.view()))
+				}
+				if m.vc.height != contentHeight {
+					t.Errorf("%s: content height = %d, want %d", stage, m.vc.height, contentHeight)
+				}
+			}
+
+			for _, key := range []string{"e", "u", "e", "u"} {
+				updated, action := m.Update(keyPress(key))
+				m = updated.(model)
+				if action == nil {
+					t.Fatalf("%s did not start a seen change", key)
+				}
+				checkFooter(key + " pending")
+				updated, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModCtrl}))
+				m = updated.(model)
+				if m.mailAccountPicker {
+					t.Fatal("account picker opened before the seen change finished")
+				}
+				updated, _ = m.Update(runCmd(action))
+				m = updated.(model)
+				if m.err != nil {
+					t.Fatalf("%s failed: %v", key, m.err)
+				}
+				checkFooter(key + " finished")
+			}
+			updated, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Mod: tea.ModCtrl}))
+			m = updated.(model)
+			if !m.mailAccountPicker {
+				t.Fatal("account picker did not open after the seen changes finished")
+			}
+		})
+	}
+}
+
 func TestAccountPickerWaitsForPendingMutation(t *testing.T) {
 	m := newModel()
 	m.loading = false
