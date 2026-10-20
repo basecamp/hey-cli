@@ -122,6 +122,8 @@ type todayCommand struct {
 	sends func(day string) string
 	write bool
 
+	sendsEastOfUTC func(day string) string
+
 	readsZoneForDays bool
 }
 
@@ -130,7 +132,10 @@ var todayCommands = []todayCommand{
 	{name: "event week", args: []string{"event", "week"}, sends: func(day string) string { return "GET /calendar/weeks/" + day }},
 	{name: "event list", args: []string{"event", "list"}, sends: func(day string) string {
 		start, _ := time.Parse(dateLayout, day)
-		return "GET /calendars/9/recordings starts_on=" + start.AddDate(0, 0, -1).Format(dateLayout) + " ends_on=" + start.AddDate(0, 0, 31).Format(dateLayout)
+		return "GET /calendars/9/recordings starts_on=" + start.Format(dateLayout) + " ends_on=" + start.AddDate(0, 0, 31).Format(dateLayout)
+	}, sendsEastOfUTC: func(day string) string {
+		start, _ := time.Parse(dateLayout, day)
+		return "GET /calendars/9/recordings starts_on=" + start.AddDate(0, 0, -1).Format(dateLayout) + " ends_on=" + start.AddDate(0, 0, 30).Format(dateLayout)
 	}, readsZoneForDays: true},
 	{name: "habit list", args: []string{"habit", "list"}, sends: func(day string) string { return "GET /calendar/weeks/" + day }},
 	{name: "journal read", args: []string{"journal", "read"}, sends: func(day string) string { return "GET /calendar/days/" + day + "/journal_entry" }},
@@ -247,13 +252,18 @@ func TestAReadWithoutAnAccountZoneTakesTheMachinesToday(t *testing.T) {
 			}
 			t.Run(fixture.name+"/"+command.name, func(t *testing.T) {
 				atInstantOn(t, "2026-10-15T12:00:00Z", "Pacific/Kiritimati")
+				inLocalZone(t, 14)
 				handler, requests := todayServer(t, fixture.fixture)
 				stdout, stderr, err := runFormattedCommandWithStderr(t, handler, []string{"--json"}, command.args...)
 				if err != nil {
 					t.Fatalf("execute %s: %v", command.name, err)
 				}
-				if sent := requests.all(); !strings.Contains(sent, command.sends("2026-10-16")) {
-					t.Errorf("requests =\n%s\nwant %q", sent, command.sends("2026-10-16"))
+				sends := command.sends
+				if command.sendsEastOfUTC != nil {
+					sends = command.sendsEastOfUTC
+				}
+				if sent := requests.all(); !strings.Contains(sent, sends("2026-10-16")) {
+					t.Errorf("requests =\n%s\nwant %q", sent, sends("2026-10-16"))
 				}
 				want := "Notice: " + fixture.reason + ", so today is 2026-10-16 by this machine's clock"
 				if !strings.Contains(stderr, want) {

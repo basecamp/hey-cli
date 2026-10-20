@@ -111,11 +111,11 @@ func TestEventsListCommand(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		if got := r.URL.Query().Get("starts_on"); got != "2026-07-31" {
-			t.Errorf("starts_on = %q, want the day before so an evening in a zone west of UTC is inside", got)
+		if got := r.URL.Query().Get("starts_on"); got != "2026-08-01" {
+			t.Errorf("starts_on = %q, want the first day, as UTC reaches into no day before it", got)
 		}
-		if got := r.URL.Query().Get("ends_on"); got != "2026-09-02" {
-			t.Errorf("ends_on = %q, want two days after so the last day's evening is inside", got)
+		if got := r.URL.Query().Get("ends_on"); got != "2026-09-01" {
+			t.Errorf("ends_on = %q, want one day after the last day, as UTC reaches into no day beyond it", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":1,"title":"Planning","starts_at":"2026-08-02T09:00:00Z"},{"id":2,"title":"Review","starts_at":"2026-08-03T09:00:00Z"}],"Calendar::Todo":[{"id":3,"title":"Send notes"}]}`)
@@ -269,8 +269,8 @@ func TestEventsListRefusesARepeatedRecordingsCursor(t *testing.T) {
 
 func TestEventsListDefaultsEndDateFromStart(t *testing.T) {
 	response, err := runJSONCommand(t, withLocalDays(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("ends_on"); got != "2026-03-04" {
-			t.Errorf("ends_on = %q, want the 30th day from 2026-02-01, and two days more for the zone", got)
+		if got := r.URL.Query().Get("ends_on"); got != "2026-03-03" {
+			t.Errorf("ends_on = %q, want the 30th day from 2026-02-01, and one day more", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{}`)

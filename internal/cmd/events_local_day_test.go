@@ -65,15 +65,27 @@ func (s *localDayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *localDayServer) readWidened() bool {
+func (s *localDayServer) readWindow(startsOn, endsOn string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, path := range s.requested {
-		if strings.Contains(path, "starts_on=2026-09-19") && strings.Contains(path, "ends_on=2026-09-22") {
+		if strings.Contains(path, "starts_on="+startsOn) && strings.Contains(path, "ends_on="+endsOn) {
 			return true
 		}
 	}
 	return false
+}
+
+func (s *localDayServer) dayReads() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reads := 0
+	for _, path := range s.requested {
+		if strings.HasPrefix(path, "/calendar/days/") {
+			reads++
+		}
+	}
+	return reads
 }
 
 func runLocalDay(t *testing.T, server *localDayServer, args ...string) string {
@@ -112,8 +124,8 @@ func TestEventsWeekKeepsAnEventFromTheNeighbourDay(t *testing.T) {
 func TestEventsListWidensTheRequestAndDropsOtherDays(t *testing.T) {
 	server := &localDayServer{zone: "America/New_York", recordings: `{"Calendar::Event":[` + localDayDinner + `,` + localDayConcert + `]}`}
 	got := runLocalDay(t, server, "event", "list", "--calendar", "9102", "--starts-on", "2026-09-20", "--ends-on", "2026-09-20")
-	if !server.readWidened() {
-		t.Error("want the window widened by a day before and two days after")
+	if !server.readWindow("2026-09-20", "2026-09-22") {
+		t.Error("want the window widened by two days after and none before")
 	}
 	if !strings.Contains(got, "Late dinner") || strings.Contains(got, "Evening concert") {
 		t.Errorf("list = %s, want the dinner and not the concert", got)
@@ -133,8 +145,16 @@ func TestEventsEditFindsAnEveningEventByItsLocalDate(t *testing.T) {
 	if _, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-09-20", "--title", "Dinner with Priya Patel"); err != nil {
 		t.Fatalf("event edit: %v", err)
 	}
-	if !server.readWidened() {
+	if !server.readWindow("2026-09-19", "2026-09-22") {
 		t.Error("want the widened window")
+	}
+}
+
+func TestEventsDayInUTCReadsNoNeighbourDay(t *testing.T) {
+	server := &localDayServer{zone: "Etc/UTC"}
+	runLocalDay(t, server, "event", "day", "2026-09-20")
+	if reads := server.dayReads(); reads != 1 {
+		t.Errorf("day reads = %d, want 1", reads)
 	}
 }
 
@@ -159,7 +179,7 @@ func TestEventsDayWithoutAnAccountZoneUsesTheMachinesZone(t *testing.T) {
 func TestEventsDayFailsWhenTheZoneOrANeighbourCannotBeRead(t *testing.T) {
 	for _, server := range []*localDayServer{
 		{failPath: "/identity.json"},
-		{zone: "UTC", failPath: "/calendar/days/2026-09-21.json"},
+		{zone: "America/New_York", failPath: "/calendar/days/2026-09-21.json"},
 	} {
 		if _, err := runJSONCommand(t, server, "event", "day", "2026-09-20"); err == nil {
 			t.Errorf("a failed read of %s was ignored", server.failPath)

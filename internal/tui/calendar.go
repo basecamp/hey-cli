@@ -2672,7 +2672,7 @@ func (v *calendarView) requestRecordings() tea.Cmd {
 		if err != nil {
 			return recordingsLoadedMsg{requestResult: newRequestResult(requestID, err)}
 		}
-		neighbours, err := calendarday.ReadNeighbours(ctx, period, periods.Day)
+		neighbours, err := calendarday.ReadNeighbours(ctx, period, loc, periods.Day)
 		if err != nil {
 			return recordingsLoadedMsg{requestResult: newRequestResult(requestID, err)}
 		}

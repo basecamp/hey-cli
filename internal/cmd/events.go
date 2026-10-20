@@ -125,8 +125,8 @@ func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 }
 
 // readEventsOfLocalDays reads the events that overlap the window's days in the account's zone.
-// HEY reads a date as a UTC day, so it asks for a day more on each side and keeps what falls
-// on the days named.
+// HEY reads a date as a UTC day, so it asks for the UTC day the zone reaches into on each
+// side, and keeps what falls on the days named.
 func readEventsOfLocalDays(ctx context.Context, cmd *cobra.Command, account *accountZone, window recordingWindow) ([]generated.Recording, error) {
 	loc, err := account.locationToRead(ctx, cmd.ErrOrStderr())
 	if err != nil {
@@ -142,8 +142,14 @@ func readEventsOfLocalDays(ctx context.Context, cmd *cobra.Command, account *acc
 	}
 
 	wide := window
-	wide.startsOn = first.AddDate(0, 0, -1).Format(dateLayout)
-	wide.endsOn = last.AddDate(0, 0, 2).Format(dateLayout)
+	wide.startsOn = first.Format(dateLayout)
+	if calendarday.ReachesDayBefore(first, loc) {
+		wide.startsOn = first.AddDate(0, 0, -1).Format(dateLayout)
+	}
+	wide.endsOn = last.AddDate(0, 0, 1).Format(dateLayout)
+	if calendarday.ReachesDayAfter(last, loc) {
+		wide.endsOn = last.AddDate(0, 0, 2).Format(dateLayout)
+	}
 	read, err := wide.read(ctx, recordingTypeEvent)
 	if err != nil {
 		return nil, err
@@ -658,7 +664,8 @@ func findEventIn(ctx context.Context, window recordingWindow, id int64) (generat
 }
 
 // eventSearchWindow is where an event given by id is looked for: the day given, read as
-// [day-1, day+2), or a year either side of today, over every calendar.
+// [day-1, day+2), or a year either side of today, over every calendar. It reads no zone, since
+// that costs a request of its own, and the wider window costs none.
 func eventSearchWindow(ctx context.Context, on string) (recordingWindow, error) {
 	startsOn, endsOn := on, on
 	if day, err := time.Parse(dateLayout, on); err == nil {

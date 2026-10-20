@@ -68,8 +68,9 @@ Without a date the day is today in your HEY account's time zone, whatever this m
 is. An account with no time zone set reads this machine's today, and says so on stderr.
 
 The date names a day in that same zone, so an event at 9:15 PM in New York is on its own
-date and not on the next UTC date. The day before and the day after are read too, and an
-event is listed when it overlaps the day.
+date and not on the next UTC date. HEY reads a date as a UTC day, so the command also reads
+the UTC day that the local day reaches into: the day after west of UTC, the day before east
+of it, and neither in UTC. An event is listed when it overlaps the day.
 
 The day covers the calendars switched on in HEY, the same set the app draws, so there is
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
@@ -118,8 +119,9 @@ Without a date the week is the one today falls in, today in your HEY account's t
 whatever this machine's is. An account with no time zone set reads this machine's today,
 and says so on stderr.
 
-The days of the week are days in that same zone. The day before the week and the day
-after it are read too, and an event is listed when it overlaps the week.
+The days of the week are days in that same zone. HEY reads a date as a UTC day, so the
+command also reads the UTC day that the week reaches into: the day after west of UTC, the
+day before east of it, and neither in UTC. An event is listed when it overlaps the week.
 
 The week covers the calendars switched on in HEY, the same set the app draws, so there is
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
@@ -224,7 +226,7 @@ func localPeriodRecordings(ctx context.Context, cmd *cobra.Command, account *acc
 		}
 		return neighbour, nil
 	}
-	neighbours, err := calendarday.ReadNeighbours(ctx, period, readDay)
+	neighbours, err := calendarday.ReadNeighbours(ctx, period, loc, readDay)
 	if err != nil {
 		return nil, nil, err
 	}

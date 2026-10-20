@@ -1,7 +1,10 @@
 package calendarday
 
 import (
+	"context"
 	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,19 +32,58 @@ func period(t *testing.T, first, last string, events ...generated.Recording) *ge
 func TestSpanOf(t *testing.T) {
 	newYork, _ := time.LoadLocation("America/New_York")
 	cases := []struct {
-		name, starts, ends, last, before, after string
-		hours                                   int
+		name, starts, ends, last, neighbours string
+		hours                                int
 	}{
-		{"week", "2026-09-14T00:00:00Z", "2026-09-20T23:59:59Z", "2026-09-20", "2026-09-13", "2026-09-21", 7 * 24},
-		{"end at midnight", "2026-09-14T00:00:00Z", "2026-09-21T00:00:00Z", "2026-09-20", "2026-09-13", "2026-09-21", 7 * 24},
-		{"clock change", "2026-11-01T00:00:00Z", "2026-11-01T23:59:59Z", "2026-11-01", "2026-10-31", "2026-11-02", 25},
+		{"week", "2026-09-14T00:00:00Z", "2026-09-20T23:59:59Z", "2026-09-20", "2026-09-21", 7 * 24},
+		{"end at midnight", "2026-09-14T00:00:00Z", "2026-09-21T00:00:00Z", "2026-09-20", "2026-09-21", 7 * 24},
+		{"clock change", "2026-11-01T00:00:00Z", "2026-11-01T23:59:59Z", "2026-11-01", "2026-11-02", 25},
 	}
 	for _, tc := range cases {
 		span := SpanOf(&generated.CalendarPeriod{StartsAt: instant(t, tc.starts), EndsAt: instant(t, tc.ends)})
-		before, after := span.Neighbours()
+		neighbours := strings.Join(span.Neighbours(newYork), " ")
 		from, to := span.Local(newYork)
-		if span.Last.Format(dateLayout) != tc.last || before != tc.before || after != tc.after || int(to.Sub(from).Hours()) != tc.hours {
-			t.Errorf("%s: last %s, neighbours %s %s, length %s", tc.name, span.Last.Format(dateLayout), before, after, to.Sub(from))
+		if span.Last.Format(dateLayout) != tc.last || neighbours != tc.neighbours || int(to.Sub(from).Hours()) != tc.hours {
+			t.Errorf("%s: last %s, neighbours %q, length %s", tc.name, span.Last.Format(dateLayout), neighbours, to.Sub(from))
+		}
+	}
+}
+
+func TestReadNeighboursReadsOnlyTheDaysTheZoneReaches(t *testing.T) {
+	cases := []struct {
+		name        string
+		zone        string
+		first, last string
+		want        []string
+	}{
+		{"New York, day", "America/New_York", "2026-09-20", "2026-09-20", []string{"2026-09-21"}},
+		{"Tokyo, day", "Asia/Tokyo", "2026-09-20", "2026-09-20", []string{"2026-09-19"}},
+		{"UTC, day", "UTC", "2026-09-20", "2026-09-20", nil},
+		{"New York, week", "America/New_York", "2026-09-14", "2026-09-20", []string{"2026-09-21"}},
+		{"London, BST ends", "Europe/London", "2027-10-31", "2027-10-31", []string{"2027-10-30"}},
+		{"London, BST starts", "Europe/London", "2026-03-29", "2026-03-29", nil},
+		{"New York, EDT ends", "America/New_York", "2026-11-01", "2026-11-01", []string{"2026-11-02"}},
+		{"Kolkata, day", "Asia/Kolkata", "2026-09-20", "2026-09-20", []string{"2026-09-19"}},
+		{"St John's, day", "America/St_Johns", "2026-09-20", "2026-09-20", []string{"2026-09-21"}},
+	}
+	for _, tc := range cases {
+		loc, err := time.LoadLocation(tc.zone)
+		if err != nil {
+			t.Skipf("time zone database unavailable: %v", err)
+		}
+		var mu sync.Mutex
+		var asked []string
+		readDay := func(_ context.Context, date string) (*generated.CalendarPeriod, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			asked = append(asked, date)
+			return period(t, date, date), nil
+		}
+		main := period(t, tc.first, tc.last)
+		periods, err := ReadNeighbours(t.Context(), main, loc, readDay)
+		slices.Sort(asked)
+		if err != nil || !slices.Equal(asked, tc.want) || len(periods) != len(tc.want) {
+			t.Errorf("%s: asked %v, read %d periods, error %v, want %v", tc.name, asked, len(periods), err, tc.want)
 		}
 	}
 }

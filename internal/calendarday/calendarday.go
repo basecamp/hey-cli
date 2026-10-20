@@ -30,15 +30,18 @@ type Span struct {
 // own, so it never sees the SDK client or how a calendar is chosen.
 type DayReader func(ctx context.Context, date string) (*generated.CalendarPeriod, error)
 
-// ReadNeighbours reads the day before and the day after a period, at the same time. An
-// event of a local day can sit on either UTC day, and a failed read is an error because a
-// day with a missing neighbour would silently lose events.
-func ReadNeighbours(ctx context.Context, main *generated.CalendarPeriod, readDay DayReader) ([]*generated.CalendarPeriod, error) {
+// ReadNeighbours reads the UTC days outside a period that its local days reach into, at the
+// same time. West of UTC that is the day after, east of it the day before, and in UTC none,
+// so no request is made that cannot find an event. A failed read is an error because a day
+// with a missing neighbour would silently lose events.
+func ReadNeighbours(ctx context.Context, main *generated.CalendarPeriod, loc *time.Location, readDay DayReader) ([]*generated.CalendarPeriod, error) {
 	if main == nil || main.StartsAt.IsZero() {
 		return nil, nil
 	}
-	before, after := SpanOf(main).Neighbours()
-	dates := []string{before, after}
+	dates := SpanOf(main).Neighbours(loc)
+	if len(dates) == 0 {
+		return nil, nil
+	}
 	periods := make([]*generated.CalendarPeriod, len(dates))
 	failures := make([]error, len(dates))
 
@@ -162,6 +165,21 @@ func Overlaps(r generated.Recording, from, to time.Time) bool {
 	return r.StartsAt.Before(to) && r.EndsAt.After(from)
 }
 
+// ReachesDayBefore reports whether the local day of the UTC date first starts before that
+// date does, so HEY files some of its events under the UTC day before. That is the case east
+// of UTC. Each edge uses its own offset, so a clock change is right.
+func ReachesDayBefore(first time.Time, loc *time.Location) bool {
+	return civilMidnight(first, loc).Before(first)
+}
+
+// ReachesDayAfter reports whether the local day after the UTC date last starts after that
+// date's day ends, so HEY files some of the events of last under the UTC day after. That is
+// the case west of UTC.
+func ReachesDayAfter(last time.Time, loc *time.Location) bool {
+	next := last.AddDate(0, 0, 1)
+	return civilMidnight(next, loc).After(next)
+}
+
 // utcDate is the UTC day an instant falls on, as a midnight in UTC. HEY files an event under
 // that day, whatever zone the reader keeps.
 func utcDate(at time.Time) time.Time {
@@ -184,10 +202,18 @@ func identity(event generated.Recording) string {
 	return fmt.Sprintf("%s|%d|%s", event.Type, event.StartsAt.UnixNano(), event.Title)
 }
 
-// Neighbours are the dates of the UTC days just outside the span. HEY can file an event of
-// the span's local days under either of them.
-func (s Span) Neighbours() (before, after string) {
-	return s.First.AddDate(0, 0, -1).Format(dateLayout), s.Last.AddDate(0, 0, 1).Format(dateLayout)
+// Neighbours are the dates of the UTC days just outside the span that its local days reach
+// into, the day before first and then the day after. HEY can file an event of the span's
+// local days under either of them.
+func (s Span) Neighbours(loc *time.Location) []string {
+	var dates []string
+	if ReachesDayBefore(s.First, loc) {
+		dates = append(dates, s.First.AddDate(0, 0, -1).Format(dateLayout))
+	}
+	if ReachesDayAfter(s.Last, loc) {
+		dates = append(dates, s.Last.AddDate(0, 0, 1).Format(dateLayout))
+	}
+	return dates
 }
 
 // Local is the span as a range of instants in the reader's zone, from the start of its

@@ -579,11 +579,12 @@ lists once as the series it is stored as, plus a row for each day HEY has writte
 
 A date given to `hey event list`, `hey event day` and `hey event week` is a day in your HEY
 account's time zone. If the account has none, it is a day in the machine's zone, and the
-command says so once on stderr. HEY reads a date as a UTC day, so the CLI reads the days
-either side too and keeps the events that overlap the days you named. An event at 9:15 PM in
-New York is on its own date, not on the next one. `hey event list` includes `--ends-on`,
-lists an all-day event on the dates it names, and lists a repeating series as the one row HEY
-stores, unless the series starts after the last day.
+command says so once on stderr. HEY reads a date as a UTC day, so the CLI also reads the UTC
+day that the local day (or week) reaches into: the day after west of UTC, the day before east
+of it, and neither in UTC. It keeps the events that overlap the days you named. An event at
+9:15 PM in New York is on its own date, not on the next one. `hey event list` includes
+`--ends-on`, lists an all-day event on the dates it names, and lists a repeating series as the
+one row HEY stores, unless the series starts after the last day.
 
 `hey event edit <id> <date>` looks for the event from the day before the date to the day
 after it, so it finds an evening or early-morning event by the date it shows on.
