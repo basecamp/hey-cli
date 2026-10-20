@@ -1108,7 +1108,10 @@ func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "o":
 			return v.openEventLink()
 		case "e":
-			event := v.detail.event
+			event, ok := v.selectedRecording()
+			if !ok || event.key() != v.detail.event.key() {
+				return notify("This event is no longer available")
+			}
 			cmd := v.startEventForm(eventFormEdit, event)
 			// Only close the card if the form was successfully created; if startEventForm
 			// found no fileable calendars it returns an error notice without setting

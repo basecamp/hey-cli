@@ -117,3 +117,29 @@ func TestEventCardSanitizesServerFields(t *testing.T) {
 		t.Fatal("sanitizing discarded readable notes")
 	}
 }
+
+func TestEventCardEditUsesTheLatestRecording(t *testing.T) {
+	v := cardDay(t)
+	v.HandleContentKey(keyPress("right"))
+	v.requestRecordings()
+	v.HandleContentKey(keyPress("enter"))
+	latest := v.events[0]
+	latest.Notes = "Bring the updated October report"
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{latest}})
+	v.HandleContentKey(keyPress("e"))
+	if v.eventForm == nil || v.editing.Notes != latest.Notes {
+		t.Fatal("edit reused the card's stale event after an in-flight read completed")
+	}
+}
+
+func TestEventCardCannotEditARemovedRecording(t *testing.T) {
+	v := cardDay(t)
+	v.HandleContentKey(keyPress("right"))
+	v.requestRecordings()
+	v.HandleContentKey(keyPress("enter"))
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v)})
+	v.HandleContentKey(keyPress("e"))
+	if v.eventForm != nil || v.detail == nil {
+		t.Fatal("edit opened a form for an event removed by an in-flight read")
+	}
+}

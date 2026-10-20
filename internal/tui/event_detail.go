@@ -244,7 +244,7 @@ func (d *eventDetail) guests() string {
 
 // repeatFrequencyLabel turns the schedule kind HEY serves — "every_week" and the like — back
 // into the words the repeat picker offers, so the card and the form say a recurrence the same
-// way. An unknown kind uses a generic label rather than a raw token.
+// way. An unknown kind has no label; the card supplies a generic one.
 func repeatFrequencyLabel(kind string) string {
 	if kind == "" {
 		return ""
