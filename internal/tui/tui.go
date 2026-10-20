@@ -792,7 +792,8 @@ func (m *model) updateHelpBindings() {
 	if m.canToggleHelp() && !m.help.hidden {
 		bindings = append(bindings, helpBinding{"?", "toggle help"})
 	}
-	if m.canOpenMailAccountPicker() && !m.mailAccountPicker {
+	// Keep the hint during writes; the key handler still waits for them to finish.
+	if m.canSwitchMailAccounts() && !m.loading && !m.activeView.InThread() && !m.mailAccountPicker {
 		if ic, ok := m.activeView.(inputCapturer); !ok || !ic.CapturingInput() {
 			description := "mail account"
 			if m.mailAccountDiscoveryErr != "" {

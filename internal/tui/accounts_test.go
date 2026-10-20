@@ -162,7 +162,7 @@ func TestMailAccountHintStaysVisibleDuringSeenChanges(t *testing.T) {
 	t.Cleanup(server.Close)
 	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "token"}, hey.WithMaxRetries(0))
 
-	for _, width := range []int{80, 120, 160} {
+	for _, width := range []int{80, 100, 160} {
 		t.Run(fmt.Sprintf("width_%d", width), func(t *testing.T) {
 			m := modelWithBoxes()
 			m.vc.sdk = client
@@ -202,7 +202,9 @@ func TestMailAccountHintStaysVisibleDuringSeenChanges(t *testing.T) {
 				if m.mailAccountPicker {
 					t.Fatal("account picker opened before the seen change finished")
 				}
-				updated, _ = m.Update(runCmd(action))
+				updated, result := m.Update(runCmd(action))
+				m = updated.(model)
+				updated, _ = m.Update(runCmd(result))
 				m = updated.(model)
 				if m.err != nil {
 					t.Fatalf("%s failed: %v", key, m.err)
