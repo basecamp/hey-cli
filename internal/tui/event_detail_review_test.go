@@ -69,3 +69,51 @@ func TestEventCardAllDayEndAcrossDaylightSaving(t *testing.T) {
 		t.Fatalf("when() = %q, want %q", got, want)
 	}
 }
+
+func TestEventCardScrollsLongNotes(t *testing.T) {
+	v := cardDay(t)
+	v.events[0].Notes = strings.Repeat("Review the milestones.\n", 40) + "Final decision"
+	v.HandleContentKey(keyPress("right"))
+	v.HandleContentKey(keyPress("enter"))
+	if strings.Contains(stripANSI(v.detail.view()), "Final decision") {
+		t.Fatal("long notes already fit without scrolling")
+	}
+	for range 4 {
+		v.HandleContentKey(keyPress("pgdown"))
+	}
+	if got := stripANSI(v.detail.view()); !strings.Contains(got, "Final decision") {
+		t.Fatalf("page down did not reveal the end of the notes: %s", got)
+	}
+	v.HandleContentKey(keyPress("pgup"))
+	if strings.Contains(stripANSI(v.detail.view()), "Final decision") {
+		t.Fatal("page up did not move back through the notes")
+	}
+}
+
+func TestEventCardKeepsDetailsWhenEditUnavailable(t *testing.T) {
+	v := cardDay(t)
+	v.calendars = nil
+	v.HandleContentKey(keyPress("right"))
+	v.HandleContentKey(keyPress("enter"))
+	v.HandleContentKey(keyPress("e"))
+	if v.eventForm != nil || v.detail == nil {
+		t.Fatal("failed edit replaced the read-only card")
+	}
+}
+
+func TestEventCardSanitizesServerFields(t *testing.T) {
+	d := newEventDetail(Recording{
+		Title: "Roadmap\x1b[2J review", Location: "Design\u202e studio",
+		Link:      "https://meet.example.com/roadmap\x1b[2J",
+		Attendees: []string{"ana@example.com\u202e"}, Notes: "Bring\x1b[2J the report",
+	}, "Design\u202e Team", false, testVC().styles, 100, 30)
+	view := d.view()
+	for _, unsafe := range []string{"\x1b[2J", "\u202e"} {
+		if strings.Contains(view, unsafe) {
+			t.Errorf("card contains unsafe sequence %q", unsafe)
+		}
+	}
+	if !strings.Contains(stripANSI(view), "Bring the report") {
+		t.Fatal("sanitizing discarded readable notes")
+	}
+}

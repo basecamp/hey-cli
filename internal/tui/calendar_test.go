@@ -715,11 +715,15 @@ func TestEnterOpensTheReadOnlyEventCard(t *testing.T) {
 	}
 }
 
-// o on the card opens the link through the same launcher an attachment uses.
+// o on the card opens the link through the browser launcher.
 func TestTheEventCardOpensTheLink(t *testing.T) {
 	var opened []string
 	vc := testVC()
-	vc.openAttachment = func(target string) error {
+	vc.openAttachment = func(string) error {
+		t.Fatal("event link reached the local attachment launcher")
+		return nil
+	}
+	vc.openURL = func(target string) error {
 		opened = append(opened, target)
 		return nil
 	}
@@ -753,7 +757,7 @@ func TestTheEventCardOpensTheLink(t *testing.T) {
 func TestTheEventCardWillNotOpenANonWebLink(t *testing.T) {
 	var opened []string
 	vc := testVC()
-	vc.openAttachment = func(target string) error {
+	vc.openURL = func(target string) error {
 		opened = append(opened, target)
 		return nil
 	}

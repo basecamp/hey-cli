@@ -583,6 +583,10 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.firstWeekDay = msg.firstWeekDay
 		v.use24Hour = msg.use24Hour
+		if v.detail != nil {
+			v.detail.use24 = v.use24Hour
+			v.detail.resize(v.vc.width, v.vc.height)
+		}
 		v.accountZone = msg.timeZone
 		if v.eventForm != nil {
 			v.eventForm.adoptAccountZone(msg.timeZone)
@@ -1387,8 +1391,8 @@ func (v *calendarView) openEventDetail() {
 	v.detail = newEventDetail(event, v.calendarName(event.CalendarID), v.use24Hour, v.vc.styles, v.vc.width, v.vc.height)
 }
 
-// openEventLink hands the card's event link to the same launcher that opens an attachment —
-// xdg-open, open, the Windows handler. Only an http/https link is handed over (openableLink),
+// openEventLink hands the card's event link to the browser launcher.
+// Only an http/https link is handed over (openableLink),
 // so a shared event's file:// path or application scheme cannot invoke a local handler; a
 // launcher missing from PATH says so in a toast rather than the key seeming dead.
 func (v *calendarView) openEventLink() tea.Cmd {
@@ -1399,10 +1403,10 @@ func (v *calendarView) openEventLink() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	if v.vc.openAttachment == nil {
+	if v.vc.openURL == nil {
 		return nil
 	}
-	if err := v.vc.openAttachment(link); err != nil {
+	if err := v.vc.openURL(link); err != nil {
 		return notifyError("Could not open the link", err)
 	}
 	return notify("Opening the link…")

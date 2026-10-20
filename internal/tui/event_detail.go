@@ -123,18 +123,16 @@ func (d *eventDetail) content() string {
 
 	contentWidth := modalContentWidth(d.width)
 	// The when line can exceed contentWidth on narrow terminals; wrap it like the other rows.
-	for i, whenLine := range wrapText(d.when(), contentWidth) {
-		if i == 0 {
-			b.WriteString(d.styles.entryDate.Render(whenLine) + "\n")
-		} else {
-			b.WriteString(whenLine + "\n")
-		}
+	for _, line := range wrapText(d.when(), contentWidth) {
+		b.WriteString(d.styles.entryDate.Render(line) + "\n")
 	}
 	if label := repeatFrequencyLabel(d.event.RepeatKind); d.event.Recurring {
 		if label == "" {
 			label = "on a schedule" // unknown repeat kind — still recurring, just not a named preset
 		}
-		b.WriteString(styleMuted.Render("Repeats "+label) + "\n")
+		for _, line := range wrapText("Repeats "+label, contentWidth) {
+			b.WriteString(styleMuted.Render(line) + "\n")
+		}
 	}
 
 	rows := [][2]string{
@@ -152,6 +150,7 @@ func (d *eventDetail) content() string {
 	valueWidth := max(contentWidth-labelWidth, 1)
 	wrote := false
 	for _, row := range rows {
+		row[1] = strings.TrimSpace(row[1])
 		if row[1] == "" {
 			continue
 		}
@@ -160,11 +159,11 @@ func (d *eventDetail) content() string {
 			wrote = true
 		}
 		if stacked {
-			// Stacked layout: label on its own line (truncated to contentWidth), value indented by 2.
 			label := fitGraphemes(row[0], contentWidth)
 			b.WriteString(d.styles.entryFrom.Render(label) + "\n")
-			for _, valueLine := range wrapText(row[1], max(contentWidth-2, 1)) {
-				fmt.Fprintf(&b, "  %s\n", valueLine)
+			indent := strings.Repeat(" ", min(2, contentWidth-1))
+			for _, valueLine := range wrapText(row[1], contentWidth-len(indent)) {
+				fmt.Fprintf(&b, "%s%s\n", indent, valueLine)
 			}
 		} else {
 			// Side-by-side layout: fixed 8-char label, value wrapped to remaining width.
@@ -179,8 +178,11 @@ func (d *eventDetail) content() string {
 	}
 
 	if notes := strings.TrimRight(d.event.Notes, "\n"); strings.TrimSpace(notes) != "" {
-		b.WriteString("\n" + d.styles.entryFrom.Render("Notes") + "\n")
-		for _, line := range wrapParagraphs(terminal.Sanitize(notes), modalContentWidth(d.width)) {
+		b.WriteString("\n")
+		for _, line := range wrapText("Notes", contentWidth) {
+			b.WriteString(d.styles.entryFrom.Render(line) + "\n")
+		}
+		for _, line := range wrapParagraphs(terminal.Sanitize(notes), contentWidth) {
 			b.WriteString(line + "\n")
 		}
 	}
@@ -205,9 +207,8 @@ func (d *eventDetail) when() string {
 			// Normalize same-day: if end is the same calendar day as start, it's a single-day event.
 			// Also handle exclusive midnight end: a midnight end belongs to the previous day.
 			endDay := ends
-			if ends.Hour() == 0 && ends.Minute() == 0 && ends.Second() == 0 {
-				// Exclusive midnight end — the event ends before this day begins.
-				endDay = ends.Add(-24 * time.Hour)
+			if ends.Equal(time.Date(ends.Year(), ends.Month(), ends.Day(), 0, 0, 0, 0, ends.Location())) {
+				endDay = ends.AddDate(0, 0, -1)
 			}
 			if sameDay(starts, endDay) {
 				return starts.Format("Monday, January 2") + " · all day"
@@ -234,7 +235,7 @@ func (d *eventDetail) guests() string {
 	}
 	clean := make([]string, 0, len(d.event.Attendees))
 	for _, attendee := range d.event.Attendees {
-		if trimmed := terminal.SanitizeLine(attendee); trimmed != "" {
+		if trimmed := strings.TrimSpace(terminal.SanitizeLine(attendee)); trimmed != "" {
 			clean = append(clean, trimmed)
 		}
 	}
@@ -243,7 +244,7 @@ func (d *eventDetail) guests() string {
 
 // repeatFrequencyLabel turns the schedule kind HEY serves — "every_week" and the like — back
 // into the words the repeat picker offers, so the card and the form say a recurrence the same
-// way. An unknown kind gets no line rather than a raw token.
+// way. An unknown kind uses a generic label rather than a raw token.
 func repeatFrequencyLabel(kind string) string {
 	if kind == "" {
 		return ""
