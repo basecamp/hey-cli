@@ -24,6 +24,11 @@ habits without keeping them — nothing on that screen knows what was kept on th
 the minimum needed. A week row is as tall as its busiest day, so a week's *number* says nothing
 about which line it is on — scrolling by the number is what let the cursor walk off the bottom.
 
+**All-day start and end dates are inclusive.** HEY serves them as UTC midnights, but they
+are calendar dates, not instants to convert or exclusive boundaries. The card shows both
+dates, and `eventsByDate` keeps the final day in the grid. Only a timed event ending at
+midnight excludes the following day.
+
 **A selection is a `Recording.key()`, not an id.** HEY serves a repeating event's days as virtual
 occurrences with `id: 0` and an `occurrence_id` of `"<series>_<date>"`, so an id keyed selection
 could not pick one out at all. The same fact decides how it is written: `occurrenceOf` sends an

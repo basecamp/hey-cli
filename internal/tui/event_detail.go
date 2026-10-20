@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
@@ -203,17 +202,8 @@ func (d *eventDetail) when() string {
 	ends := d.event.Ends()
 
 	if d.event.AllDay {
-		if !ends.IsZero() && ends.After(starts) {
-			// Normalize same-day: if end is the same calendar day as start, it's a single-day event.
-			// Also handle exclusive midnight end: a midnight end belongs to the previous day.
-			endDay := ends
-			if ends.Equal(time.Date(ends.Year(), ends.Month(), ends.Day(), 0, 0, 0, 0, ends.Location())) {
-				endDay = ends.AddDate(0, 0, -1)
-			}
-			if sameDay(starts, endDay) {
-				return starts.Format("Monday, January 2") + " · all day"
-			}
-			return starts.Format("Monday, January 2") + " – " + endDay.Format("Monday, January 2") + " · all day"
+		if !ends.IsZero() && ends.After(starts) && !sameDay(starts, ends) {
+			return starts.Format("Monday, January 2") + " – " + ends.Format("Monday, January 2") + " · all day"
 		}
 		return starts.Format("Monday, January 2") + " · all day"
 	}

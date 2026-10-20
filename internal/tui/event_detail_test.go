@@ -79,20 +79,25 @@ func TestAllDayEventSameDayEndShowsAsSingleDay(t *testing.T) {
 	}
 }
 
-// An all-day event whose end is exactly midnight of the next day (exclusive) should show as
-// a single day, not "Aug 21 – Aug 22".
-func TestAllDayEventExclusiveMidnightEndShowsAsSingleDay(t *testing.T) {
+func TestAllDayEventAdjacentDatesStayInclusive(t *testing.T) {
 	d := &eventDetail{event: Recording{
 		AllDay:   true,
 		StartsAt: at("2026-08-21T00:00:00Z"),
-		EndsAt:   at("2026-08-22T00:00:00Z"), // exclusive midnight
+		EndsAt:   at("2026-08-22T00:00:00Z"),
 	}}
-	got := d.when()
-	if strings.Contains(got, "–") {
-		t.Errorf("exclusive-midnight all-day event showed a range: %q", got)
+	if got, want := d.when(), "Friday, August 21 – Saturday, August 22 · all day"; got != want {
+		t.Errorf("when() = %q, want %q", got, want)
 	}
-	if !strings.Contains(got, "all day") {
-		t.Errorf("all-day event missing 'all day': %q", got)
+}
+
+func TestAllDayEventSameMidnightShowsOneDate(t *testing.T) {
+	d := &eventDetail{event: Recording{
+		AllDay:   true,
+		StartsAt: at("2026-08-21T00:00:00Z"),
+		EndsAt:   at("2026-08-21T00:00:00Z"),
+	}}
+	if got, want := d.when(), "Friday, August 21 · all day"; got != want {
+		t.Errorf("when() = %q, want %q", got, want)
 	}
 }
 
@@ -101,11 +106,10 @@ func TestAllDayEventMultiDayShowsRange(t *testing.T) {
 	d := &eventDetail{event: Recording{
 		AllDay:   true,
 		StartsAt: at("2026-08-21T00:00:00Z"),
-		EndsAt:   at("2026-08-23T00:00:00Z"), // exclusive — event covers Aug 21 & 22
+		EndsAt:   at("2026-08-23T00:00:00Z"),
 	}}
-	got := d.when()
-	if !strings.Contains(got, "–") {
-		t.Errorf("multi-day all-day event did not show a range: %q", got)
+	if got, want := d.when(), "Friday, August 21 – Sunday, August 23 · all day"; got != want {
+		t.Errorf("when() = %q, want %q", got, want)
 	}
 }
 

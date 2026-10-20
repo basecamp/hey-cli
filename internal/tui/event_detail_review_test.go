@@ -53,20 +53,19 @@ func TestEventCardOmitsWhitespaceOnlyFields(t *testing.T) {
 }
 
 func TestEventCardAllDayEndAcrossDaylightSaving(t *testing.T) {
-	zone, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		t.Fatal(err)
-	}
-	local := time.Local
-	time.Local = zone
-	t.Cleanup(func() { time.Local = local })
-	d := &eventDetail{event: Recording{
-		AllDay:   true,
-		StartsAt: time.Date(2026, time.March, 8, 0, 0, 0, 0, zone),
-		EndsAt:   time.Date(2026, time.March, 9, 0, 0, 0, 0, zone),
-	}}
-	if got, want := d.when(), "Sunday, March 8 · all day"; got != want {
-		t.Fatalf("when() = %q, want %q", got, want)
+	inZone(t, "America/New_York")
+	for _, test := range []struct {
+		name, start, end, want string
+	}{
+		{"spring", "2026-03-08T00:00:00Z", "2026-03-09T00:00:00Z", "Sunday, March 8 – Monday, March 9 · all day"},
+		{"fall", "2026-11-01T00:00:00Z", "2026-11-02T00:00:00Z", "Sunday, November 1 – Monday, November 2 · all day"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			d := &eventDetail{event: Recording{AllDay: true, StartsAt: at(test.start), EndsAt: at(test.end)}}
+			if got := d.when(); got != test.want {
+				t.Fatalf("when() = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 

@@ -34,3 +34,35 @@ func TestCalendarEnterShowsEventNotes(t *testing.T) {
 		})
 	}
 }
+
+func TestCalendarOpensAllDayEventOnInclusiveEndDate(t *testing.T) {
+	inZone(t, "America/New_York")
+	v := newCalendarView(testVC())
+	v.Resize(100, 30)
+	v.now = func() time.Time { return time.Date(2026, 8, 22, 9, 0, 0, 0, time.Local) }
+	v.Update(calendarsLoadedMsg{calendars: testCalendars()})
+	v.Update(recordingsLoadedMsg{requestResult: currentRequest(v), recordings: []Recording{
+		{ID: 5, Title: "Design offsite", Type: "Calendar::Event", CalendarID: 10, AllDay: true,
+			StartsAt: at("2026-08-20T00:00:00Z"), EndsAt: at("2026-08-22T00:00:00Z")},
+	}})
+	v.HandleContentKey(keyPress("down"))
+	v.HandleContentKey(keyPress("enter"))
+	if !strings.Contains(stripANSI(v.View()), "Thursday, August 20 – Saturday, August 22 · all day") {
+		t.Fatal("the event could not be opened on its inclusive final date")
+	}
+}
+
+func TestTimedMidnightEndDoesNotOccupyTheNextDay(t *testing.T) {
+	inZone(t, "Etc/UTC")
+	event := Recording{ID: 5, Title: "Overnight maintenance",
+		StartsAt: at("2026-08-20T22:00:00Z"), EndsAt: at("2026-08-22T00:00:00Z")}
+	days := eventsByDate([]Recording{event})
+	for _, day := range []string{"2026-08-20", "2026-08-21"} {
+		if len(days[day]) != 1 {
+			t.Errorf("timed event missing from %s", day)
+		}
+	}
+	if len(days["2026-08-22"]) != 0 {
+		t.Fatal("a timed midnight end occupied the next day")
+	}
+}
