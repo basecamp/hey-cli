@@ -118,6 +118,19 @@ func TestDayColumnsUseTheFirstInstantOfADayWithASkippedMidnight(t *testing.T) {
 	}
 }
 
+func TestDayColumnsEndTheDayBeforeASkippedMidnight(t *testing.T) {
+	santiago, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Skipf("time zone database unavailable: %v", err)
+	}
+	const daySpan = 96
+	anchor := time.Date(2026, 9, 5, 0, 30, 0, 0, santiago)
+	meeting := Recording{StartsAt: at("2026-09-05T14:00:00Z").In(santiago), EndsAt: at("2026-09-05T15:00:00Z").In(santiago)}
+	if start, end := dayColumns(meeting.StartsAt, meeting.EndsAt, anchor, daySpan); start != 40 || end != 44 {
+		t.Errorf("columns %d..%d, want 40..44", start, end)
+	}
+}
+
 func TestRenderDayViewStartsAMultiDayStayAtTheFirstHour(t *testing.T) {
 	zone := newYork(t)
 	stay := []Recording{{ID: 4823, Title: "Conference hotel stay", Type: "Calendar::Event",

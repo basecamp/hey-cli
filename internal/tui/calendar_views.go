@@ -773,8 +773,9 @@ func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time
 // a stay over several days is drawn whole on each day it touches.
 func dayColumns(starts, ends, anchor time.Time, daySpan int) (int, int) {
 	loc := anchor.Location()
+	y, m, d := anchor.Date()
 	dayStart := calendarday.StartOfDay(anchor, loc)
-	dayEnd := calendarday.StartOfDay(anchor.AddDate(0, 0, 1), loc)
+	dayEnd := calendarday.StartOfDay(time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC), loc)
 
 	startPos, endPos := 0, daySpan
 	if !starts.Before(dayStart) {
