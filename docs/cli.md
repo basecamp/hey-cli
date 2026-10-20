@@ -537,9 +537,11 @@ day`, `week` and `list`, `hey habit list`, `complete` and `uncomplete`, `hey jou
 and `write`, and `hey todo add` — works it out in your HEY account's time zone and sends
 the date. HEY would read "now" in UTC, and a server's clock is UTC too, so in New York
 after 20:00 either would name tomorrow. Resolving today's date reads the identity once for
-the account's zone, and naming the date skips that read. A specific `--account` is validated
-by a separate identity read before the command runs, so a defaulted command with it reads
-the identity twice and a dated command once. If the account has no zone set, or one this
+the account's zone, and naming the date skips that read, except for `hey event day`, `week`
+and `list`, which read the zone for any date to pick the local days and show times in it. A
+specific `--account` is validated by a separate identity read before the command runs, so a
+defaulted command with it reads the identity twice and a dated command once, while those
+three read it twice either way. If the account has no zone set, or one this
 build does not know, a read uses this machine's today and says so on stderr, while a write
 is refused and asks you to name the date. A failed read of the account is an error either way, with the
 code it failed with; a sign-in failure is reported as one. `hey todo list` and `hey
@@ -584,7 +586,8 @@ day that the local day (or week) reaches into: the day after west of UTC, the da
 of it, and neither in UTC. It keeps the events that overlap the days you named. An event at
 9:15 PM in New York is on its own date, not on the next one. `hey event list` includes
 `--ends-on`, lists an all-day event on the dates it names, and lists a repeating series as the
-one row HEY stores, unless the series starts after the last day.
+one row HEY stores, unless the series starts after the last day. The table shows times in that
+same zone, and `--json` keeps HEY's UTC times.
 
 `hey event edit <id> <date>` looks for the event from the day before the date to the day
 after it, so it finds an evening or early-morning event by the date it shows on.

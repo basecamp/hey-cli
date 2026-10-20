@@ -76,7 +76,9 @@ today, and says so on stderr.
 --starts-on and --ends-on name days in that same zone, and --ends-on is included. An
 event is listed when it overlaps those days, so an evening event is on its own day and not
 on the next UTC day. An all-day event is listed on the dates it names. A repeating series
-is listed as the row HEY stores, unless the series starts after the last day.`,
+is listed as the row HEY stores, unless the series starts after the last day.
+
+The table shows times in that same zone, and --json keeps HEY's UTC times.`,
 		Annotations: map[string]string{
 			"agent_notes": "list carries no countdowns; day and week do. " + recordingWindowNotes,
 		},
@@ -110,7 +112,12 @@ func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	events, err := readEventsOfLocalDays(ctx, cmd, &account, window)
+	loc, err := account.locationToRead(ctx, cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+
+	events, err := readEventsOfLocalDays(ctx, window, loc)
 	if err != nil {
 		return err
 	}
@@ -121,17 +128,13 @@ func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	notice := output.TruncationNotice(len(events), total)
 
-	return writeEventRows(cmd, eventRows(events), window.describe(), notice)
+	return writeEventRows(cmd, eventRows(events), window.describe(), notice, loc)
 }
 
 // readEventsOfLocalDays reads the events that overlap the window's days in the account's zone.
 // HEY reads a date as a UTC day, so it asks for the UTC day the zone reaches into on each
 // side, and keeps what falls on the days named.
-func readEventsOfLocalDays(ctx context.Context, cmd *cobra.Command, account *accountZone, window recordingWindow) ([]generated.Recording, error) {
-	loc, err := account.locationToRead(ctx, cmd.ErrOrStderr())
-	if err != nil {
-		return nil, err
-	}
+func readEventsOfLocalDays(ctx context.Context, window recordingWindow, loc *time.Location) ([]generated.Recording, error) {
 	first, err := parseDateArg("starts-on date", window.startsOn)
 	if err != nil {
 		return nil, err
@@ -167,13 +170,13 @@ func readEventsOfLocalDays(ctx context.Context, cmd *cobra.Command, account *acc
 // eventBoundary writes one end of an event: a day for an all-day event, a day and a clock
 // time for a timed one. An all-day event has no time of day, and printing it midnight reads
 // as an event that starts at midnight. HEY's JSON is always UTC, so a timed boundary
-// converts to the reader's clock the way HEY's own views draw it, while an all-day date is
-// the day it names and does not shift.
-func eventBoundary(at time.Time, allDay bool, location *time.Location) string {
+// converts to the zone the days were picked in, the way HEY's own views draw it, while an
+// all-day date is the day it names and does not shift.
+func eventBoundary(at time.Time, allDay bool, loc *time.Location) string {
 	if allDay {
-		return formatDate(at)
+		return formatDate(at.UTC())
 	}
-	return formatTimestamp(at.In(location))
+	return formatTimestamp(at.In(loc))
 }
 
 // add

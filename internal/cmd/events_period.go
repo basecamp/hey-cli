@@ -70,7 +70,8 @@ is. An account with no time zone set reads this machine's today, and says so on 
 The date names a day in that same zone, so an event at 9:15 PM in New York is on its own
 date and not on the next UTC date. HEY reads a date as a UTC day, so the command also reads
 the UTC day that the local day reaches into: the day after west of UTC, the day before east
-of it, and neither in UTC. An event is listed when it overlaps the day.
+of it, and neither in UTC. An event is listed when it overlaps the day. The table shows
+times in that same zone, and --json keeps HEY's UTC times.
 
 The day covers the calendars switched on in HEY, the same set the app draws, so there is
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
@@ -122,6 +123,7 @@ and says so on stderr.
 The days of the week are days in that same zone. HEY reads a date as a UTC day, so the
 command also reads the UTC day that the week reaches into: the day after west of UTC, the
 day before east of it, and neither in UTC. An event is listed when it overlaps the week.
+The table shows times in that same zone, and --json keeps HEY's UTC times.
 
 The week covers the calendars switched on in HEY, the same set the app draws, so there is
 no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
@@ -168,11 +170,16 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.FromSDK(err)
 	}
 
-	events, countdowns, err := localPeriodRecordings(ctx, cmd, &account, period)
+	loc, err := account.locationToRead(ctx, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}
-	sortEventsByStart(events, time.Local)
+
+	events, countdowns, err := localPeriodRecordings(ctx, period, loc)
+	if err != nil {
+		return err
+	}
+	sortEventsByStart(events, loc)
 	rows := occurrenceEventRows(events)
 	attachEventCountdowns(rows, countdowns)
 
@@ -182,7 +189,7 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	notice := output.TruncationNotice(len(rows), total)
 
-	return writeEventRows(cmd, rows, described, notice)
+	return writeEventRows(cmd, rows, described, notice, loc)
 }
 
 // date is the day the period is read around, and the words that name it. With no date given
@@ -207,7 +214,7 @@ func (c *eventsPeriodCommand) date(ctx context.Context, cmd *cobra.Command, acco
 // localPeriodRecordings are the events and countdowns of a period's local days. HEY filed an
 // event under its UTC day, so the days either side are read too, and a countdown that the
 // reads share is listed once.
-func localPeriodRecordings(ctx context.Context, cmd *cobra.Command, account *accountZone, period *generated.CalendarPeriod) ([]generated.Recording, []generated.Recording, error) {
+func localPeriodRecordings(ctx context.Context, period *generated.CalendarPeriod, loc *time.Location) ([]generated.Recording, []generated.Recording, error) {
 	if period == nil {
 		return []generated.Recording{}, nil, nil
 	}
@@ -215,10 +222,6 @@ func localPeriodRecordings(ctx context.Context, cmd *cobra.Command, account *acc
 		return filterRecordingsByType(&period.Recordings, recordingTypeEvent), filterRecordingsByType(&period.Recordings, recordingTypeCountdown), nil
 	}
 
-	loc, err := account.locationToRead(ctx, cmd.ErrOrStderr())
-	if err != nil {
-		return nil, nil, err
-	}
 	readDay := func(ctx context.Context, date string) (*generated.CalendarPeriod, error) {
 		neighbour, readErr := sdk.CalendarPeriods().Day(ctx, date)
 		if readErr != nil {
@@ -349,9 +352,9 @@ func attachEventCountdowns(rows []eventRow, countdowns []generated.Recording) {
 // grouped by type with no promise about order, and instants alone would not do — an
 // all-day event is stamped midnight UTC, so a timed event late the same local evening
 // can be the earlier instant even though the app draws it below the band.
-func sortEventsByStart(events []generated.Recording, location *time.Location) {
+func sortEventsByStart(events []generated.Recording, loc *time.Location) {
 	sort.SliceStable(events, func(i, j int) bool {
-		if di, dj := eventDay(events[i], location), eventDay(events[j], location); di != dj {
+		if di, dj := eventDay(events[i], loc), eventDay(events[j], loc); di != dj {
 			return di < dj
 		}
 		if events[i].AllDay != events[j].AllDay {
@@ -365,19 +368,20 @@ func sortEventsByStart(events []generated.Recording, location *time.Location) {
 }
 
 // eventDay names the day a row sits on, the day HEY draws it: the stamped date for an
-// all-day event, the reader's own day for a timed one. HEY's JSON is always UTC, so a
-// 23:30Z event belongs to the next day east of Greenwich.
-func eventDay(event generated.Recording, location *time.Location) string {
+// all-day event, the day in the zone the days were picked in for a timed one. HEY's JSON is
+// always UTC, so a 23:30Z event belongs to the next day east of Greenwich.
+func eventDay(event generated.Recording, loc *time.Location) string {
 	if event.AllDay {
 		return event.StartsAt.UTC().Format(dateLayout)
 	}
-	return event.StartsAt.In(location).Format(dateLayout)
+	return event.StartsAt.In(loc).Format(dateLayout)
 }
 
 // writeEventRows renders one listing of events: the table when styled, the JSON envelope
 // with the add/edit/delete breadcrumbs otherwise. described names the span read, in
-// whatever words the command reads it — a window, a day, a week.
-func writeEventRows(cmd *cobra.Command, events []eventRow, described, notice string) error {
+// whatever words the command reads it — a window, a day, a week. The table shows times in
+// loc, the zone the days were picked in, while the JSON keeps HEY's UTC.
+func writeEventRows(cmd *cobra.Command, events []eventRow, described, notice string, loc *time.Location) error {
 	if writer.IsStyled() {
 		if len(events) == 0 {
 			fmt.Fprintf(cmd.OutOrStdout(), "No events %s.\n", described)
@@ -422,8 +426,8 @@ func writeEventRows(cmd *cobra.Command, events []eventRow, described, notice str
 				row = append(row, seriesID, event.OccurrenceId, recordingID)
 			}
 			row = append(row, event.Title,
-				eventBoundary(event.StartsAt, event.AllDay, time.Local),
-				eventBoundary(event.EndsAt, event.AllDay, time.Local),
+				eventBoundary(event.StartsAt, event.AllDay, loc),
+				eventBoundary(event.EndsAt, event.AllDay, loc),
 				event.Calendar.Name)
 			if showsCountdown {
 				label := ""

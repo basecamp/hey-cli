@@ -88,6 +88,44 @@ func TestReadNeighboursReadsOnlyTheDaysTheZoneReaches(t *testing.T) {
 	}
 }
 
+func TestStartOfDay(t *testing.T) {
+	cases := []struct {
+		name string
+		zone string
+		date string
+		want string
+	}{
+		{"Santiago, skipped midnight", "America/Santiago", "2026-09-06", "2026-09-06T04:00:00Z"},
+		{"Santiago, the day before", "America/Santiago", "2026-09-05", "2026-09-05T04:00:00Z"},
+		{"Havana, repeated midnight", "America/Havana", "2026-11-01", "2026-11-01T04:00:00Z"},
+		{"New York", "America/New_York", "2026-09-20", "2026-09-20T04:00:00Z"},
+		{"Tokyo", "Asia/Tokyo", "2026-09-20", "2026-09-19T15:00:00Z"},
+	}
+	for _, tc := range cases {
+		loc, err := time.LoadLocation(tc.zone)
+		if err != nil {
+			t.Skipf("time zone database unavailable: %v", err)
+		}
+		if got := StartOfDay(instant(t, tc.date+"T00:00:00Z"), loc); !got.Equal(instant(t, tc.want)) {
+			t.Errorf("%s: StartOfDay = %s, want %s", tc.name, got.UTC().Format(time.RFC3339), tc.want)
+		}
+	}
+}
+
+func TestInDaysPlacesAnEventBeforeASkippedMidnightOnTheDayBefore(t *testing.T) {
+	santiago, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Skipf("time zone database unavailable: %v", err)
+	}
+	event := generated.Recording{StartsAt: instant(t, "2026-09-06T03:15:00Z"), EndsAt: instant(t, "2026-09-06T03:45:00Z")}
+	for date, want := range map[string]bool{"2026-09-05": true, "2026-09-06": false} {
+		day := instant(t, date+"T00:00:00Z")
+		if got := InDays(event, day, day, santiago); got != want {
+			t.Errorf("%s: InDays = %v, want %v", date, got, want)
+		}
+	}
+}
+
 func TestLocalEvents(t *testing.T) {
 	event := func(id int64, title, starts, ends string) generated.Recording {
 		r := generated.Recording{Id: id, Title: title, StartsAt: instant(t, starts)}

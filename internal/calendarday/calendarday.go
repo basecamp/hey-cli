@@ -127,7 +127,7 @@ func InDays(r generated.Recording, first, last time.Time, loc *time.Location) bo
 		if r.AllDay {
 			return !utcDate(r.StartsAt).After(last)
 		}
-		return r.StartsAt.Before(civilMidnight(last.AddDate(0, 0, 1), loc))
+		return r.StartsAt.Before(StartOfDay(last.AddDate(0, 0, 1), loc))
 	}
 	if r.AllDay {
 		startsOn := utcDate(r.StartsAt)
@@ -137,7 +137,7 @@ func InDays(r generated.Recording, first, last time.Time, loc *time.Location) bo
 		}
 		return !startsOn.After(last) && !endsOn.Before(first)
 	}
-	return Overlaps(r, civilMidnight(first, loc), civilMidnight(last.AddDate(0, 0, 1), loc))
+	return Overlaps(r, StartOfDay(first, loc), StartOfDay(last.AddDate(0, 0, 1), loc))
 }
 
 // SpanOf is the UTC days a period covers. HEY ends a period at midnight, which belongs to
@@ -169,7 +169,7 @@ func Overlaps(r generated.Recording, from, to time.Time) bool {
 // date does, so HEY files some of its events under the UTC day before. That is the case east
 // of UTC. Each edge uses its own offset, so a clock change is right.
 func ReachesDayBefore(first time.Time, loc *time.Location) bool {
-	return civilMidnight(first, loc).Before(first)
+	return StartOfDay(first, loc).Before(first)
 }
 
 // ReachesDayAfter reports whether the local day after the UTC date last starts after that
@@ -177,7 +177,28 @@ func ReachesDayBefore(first time.Time, loc *time.Location) bool {
 // the case west of UTC.
 func ReachesDayAfter(last time.Time, loc *time.Location) bool {
 	next := last.AddDate(0, 0, 1)
-	return civilMidnight(next, loc).After(next)
+	return StartOfDay(next, loc).After(next)
+}
+
+// StartOfDay is the first instant of a date in the reader's zone, the date being the one day
+// carries. time.Date alone is wrong where a clock change skips or repeats midnight: a skipped
+// midnight is moved back to the day before, and a repeated one may be either of its two.
+func StartOfDay(day time.Time, loc *time.Location) time.Time {
+	y, m, d := day.Date()
+	t := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	if ty, tm, td := t.Date(); ty != y || tm != m || td != d {
+		_, end := t.ZoneBounds()
+		return end
+	}
+	start, _ := t.ZoneBounds()
+	if !start.IsZero() {
+		_, offset := start.Add(-time.Nanosecond).Zone()
+		earlier := time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Add(-time.Duration(offset) * time.Second)
+		if earlier.Before(start) {
+			return earlier
+		}
+	}
+	return t
 }
 
 // utcDate is the UTC day an instant falls on, as a midnight in UTC. HEY files an event under
@@ -185,12 +206,6 @@ func ReachesDayAfter(last time.Time, loc *time.Location) bool {
 func utcDate(at time.Time) time.Time {
 	at = at.UTC()
 	return time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)
-}
-
-// civilMidnight is the start of a date in the reader's zone. The date is read off day as it
-// is, so a UTC day maps to the same calendar date there.
-func civilMidnight(day time.Time, loc *time.Location) time.Time {
-	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
 }
 
 // identity names an event so that the same one read under two days counts once. A recording
@@ -219,5 +234,5 @@ func (s Span) Neighbours(loc *time.Location) []string {
 // Local is the span as a range of instants in the reader's zone, from the start of its
 // first day up to the start of the day after its last.
 func (s Span) Local(loc *time.Location) (from, to time.Time) {
-	return civilMidnight(s.First, loc), civilMidnight(s.Last.AddDate(0, 0, 1), loc)
+	return StartOfDay(s.First, loc), StartOfDay(s.Last.AddDate(0, 0, 1), loc)
 }

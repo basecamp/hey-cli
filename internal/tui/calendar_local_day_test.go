@@ -94,6 +94,30 @@ func TestDayColumnsClipASpanningEventToTheDay(t *testing.T) {
 	}
 }
 
+func TestDayColumnsUseTheFirstInstantOfADayWithASkippedMidnight(t *testing.T) {
+	santiago, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Skipf("time zone database unavailable: %v", err)
+	}
+	const daySpan = 96
+	cases := []struct {
+		name       string
+		starts     string
+		ends       string
+		day        int
+		start, end int
+	}{
+		{"event after the clocks jump", "2026-09-06T03:15:00Z", "2026-09-06T05:00:00Z", 6, 0, 8},
+		{"event before the jump, on the day before", "2026-09-06T03:15:00Z", "2026-09-06T03:45:00Z", 5, 93, 95},
+	}
+	for _, tc := range cases {
+		anchor := time.Date(2026, 9, tc.day, 12, 0, 0, 0, santiago)
+		if start, end := dayColumns(at(tc.starts).In(santiago), at(tc.ends).In(santiago), anchor, daySpan); start != tc.start || end != tc.end {
+			t.Errorf("%s: columns %d..%d, want %d..%d", tc.name, start, end, tc.start, tc.end)
+		}
+	}
+}
+
 func TestRenderDayViewStartsAMultiDayStayAtTheFirstHour(t *testing.T) {
 	zone := newYork(t)
 	stay := []Recording{{ID: 4823, Title: "Conference hotel stay", Type: "Calendar::Event",

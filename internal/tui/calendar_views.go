@@ -10,6 +10,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/basecamp/hey-cli/internal/calendarday"
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
@@ -772,8 +773,8 @@ func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time
 // a stay over several days is drawn whole on each day it touches.
 func dayColumns(starts, ends, anchor time.Time, daySpan int) (int, int) {
 	loc := anchor.Location()
-	dayStart := time.Date(anchor.Year(), anchor.Month(), anchor.Day(), 0, 0, 0, 0, loc)
-	dayEnd := time.Date(anchor.Year(), anchor.Month(), anchor.Day()+1, 0, 0, 0, 0, loc)
+	dayStart := calendarday.StartOfDay(anchor, loc)
+	dayEnd := calendarday.StartOfDay(anchor.AddDate(0, 0, 1), loc)
 
 	startPos, endPos := 0, daySpan
 	if !starts.Before(dayStart) {
