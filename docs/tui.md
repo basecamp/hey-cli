@@ -36,6 +36,11 @@ search and the next threads are read in behind you, so there are no pages to ste
 PgUp and PgDn move a screen at a time through any list — a box, a search, a bundle, The
 Screener or your contacts — keeping the cursor on the same row of the screen.
 
+Bundle rows have a small square (`▪`) before the subject, separate from the unread dot
+(`●`) and selection check (`✓`). The square stays visible for read and selected bundles,
+and in lists that hide read state. It uses the same standard Unicode support as the rest
+of the TUI; no special icon font is required.
+
 The thread actions use HEY's web shortcuts, in either letter case except `l`, whose
 uppercase belongs to Labels:
 

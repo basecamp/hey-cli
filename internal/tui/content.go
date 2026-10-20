@@ -773,6 +773,9 @@ func (c *contentList) view() string {
 		if p.VisibleEntryCount > 1 {
 			subject += fmt.Sprintf(" (%d)", p.VisibleEntryCount)
 		}
+		if p.IsBundle {
+			subject = "▪ " + subject
+		}
 
 		date := formatDisplayDate(p.CreatedAt)
 		subject = truncateToWidth(subject, textWidth)
