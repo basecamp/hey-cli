@@ -14434,7 +14434,8 @@
             "description": "Discriminator with direct (`CalendarTodo`) and namespaced (`Calendar::Todo`) values."
           },
           "parent": {
-            "$ref": "#/components/schemas/Recording"
+            "$ref": "#/components/schemas/Recording",
+            "x-go-type-skip-optional-pointer": false
           },
           "starts_at_time_zone": {
             "type": "string"
