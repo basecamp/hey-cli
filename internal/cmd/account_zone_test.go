@@ -121,15 +121,22 @@ type todayCommand struct {
 	args  []string
 	sends func(day string) string
 	write bool
+
+	sendsEastOfUTC func(day string) string
+
+	readsZoneForDays bool
 }
 
 var todayCommands = []todayCommand{
-	{name: "event day", args: []string{"event", "day"}, sends: func(day string) string { return "GET /calendar/days/" + day }},
-	{name: "event week", args: []string{"event", "week"}, sends: func(day string) string { return "GET /calendar/weeks/" + day }},
+	{name: "event day", args: []string{"event", "day"}, sends: func(day string) string { return "GET /calendar/days/" + day }, readsZoneForDays: true},
+	{name: "event week", args: []string{"event", "week"}, sends: func(day string) string { return "GET /calendar/weeks/" + day }, readsZoneForDays: true},
 	{name: "event list", args: []string{"event", "list"}, sends: func(day string) string {
 		start, _ := time.Parse(dateLayout, day)
-		return "GET /calendars/9/recordings starts_on=" + day + " ends_on=" + start.AddDate(0, 0, 30).Format(dateLayout)
-	}},
+		return "GET /calendars/9/recordings starts_on=" + start.Format(dateLayout) + " ends_on=" + start.AddDate(0, 0, 31).Format(dateLayout)
+	}, sendsEastOfUTC: func(day string) string {
+		start, _ := time.Parse(dateLayout, day)
+		return "GET /calendars/9/recordings starts_on=" + start.AddDate(0, 0, -1).Format(dateLayout) + " ends_on=" + start.AddDate(0, 0, 30).Format(dateLayout)
+	}, readsZoneForDays: true},
 	{name: "habit list", args: []string{"habit", "list"}, sends: func(day string) string { return "GET /calendar/weeks/" + day }},
 	{name: "journal read", args: []string{"journal", "read"}, sends: func(day string) string { return "GET /calendar/days/" + day + "/journal_entry" }},
 	{name: "habit complete", args: []string{"habit", "complete", "42"}, write: true, sends: func(day string) string { return "POST /calendar/days/" + day + "/habits/42/completions" }},
@@ -175,9 +182,13 @@ func TestTodayIsTheAccountsToday(t *testing.T) {
 	}
 }
 
-// A day that is named is the day sent, and the account is not asked for its zone.
+// A day that is named is the day sent, and the account is not asked for its zone, bar the
+// event commands, which cut events to local days and show their times in that zone.
 func TestANamedDayReadsNoAccountZone(t *testing.T) {
 	for _, command := range todayCommands {
+		if command.readsZoneForDays {
+			continue
+		}
 		t.Run(command.name, func(t *testing.T) {
 			atInstantOn(t, "2026-10-15T02:00:00Z", "UTC")
 			handler, requests := todayServer(t, todayFixture{identityStatus: http.StatusInternalServerError})
@@ -195,8 +206,8 @@ func TestANamedDayReadsNoAccountZone(t *testing.T) {
 }
 
 // A specific --account is validated by the SDK with an identity read before the command
-// runs. Resolving an omitted date makes its own read for the zone; naming the date skips
-// that read, but not account validation.
+// runs. The event commands read the zone to show times in, so a named date costs the same
+// two reads as an omitted one.
 func TestAccountSelectionReadsIdentitySeparatelyFromToday(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
@@ -205,7 +216,7 @@ func TestAccountSelectionReadsIdentitySeparatelyFromToday(t *testing.T) {
 		identityReads int32
 	}{
 		{name: "default date", args: []string{"--account", "2", "event", "day"}, wantDay: "2026-10-14", identityReads: 2},
-		{name: "named date", args: []string{"--account", "2", "event", "day", "2026-03-15"}, wantDay: "2026-03-15", identityReads: 1},
+		{name: "named date", args: []string{"--account", "2", "event", "day", "2026-03-15"}, wantDay: "2026-03-15", identityReads: 2},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			atInstantOn(t, "2026-10-15T02:00:00Z", "UTC")
@@ -241,13 +252,18 @@ func TestAReadWithoutAnAccountZoneTakesTheMachinesToday(t *testing.T) {
 			}
 			t.Run(fixture.name+"/"+command.name, func(t *testing.T) {
 				atInstantOn(t, "2026-10-15T12:00:00Z", "Pacific/Kiritimati")
+				inLocalZone(t, 14)
 				handler, requests := todayServer(t, fixture.fixture)
 				stdout, stderr, err := runFormattedCommandWithStderr(t, handler, []string{"--json"}, command.args...)
 				if err != nil {
 					t.Fatalf("execute %s: %v", command.name, err)
 				}
-				if sent := requests.all(); !strings.Contains(sent, command.sends("2026-10-16")) {
-					t.Errorf("requests =\n%s\nwant %q", sent, command.sends("2026-10-16"))
+				sends := command.sends
+				if command.sendsEastOfUTC != nil {
+					sends = command.sendsEastOfUTC
+				}
+				if sent := requests.all(); !strings.Contains(sent, sends("2026-10-16")) {
+					t.Errorf("requests =\n%s\nwant %q", sent, sends("2026-10-16"))
 				}
 				want := "Notice: " + fixture.reason + ", so today is 2026-10-16 by this machine's clock"
 				if !strings.Contains(stderr, want) {
