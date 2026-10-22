@@ -34,7 +34,10 @@ func TestHeySkillReusesAuthenticationForUnattendedAgents(t *testing.T) {
 	}
 }
 
-func TestHeySkillRetriesMacOSKeychainAccessWithoutBroadEscalation(t *testing.T) {
+// Under Codex the sandbox hides the keyring and the network. The skill must
+// send reads through the rules hey setup codex installs, send everything else
+// through the user's approval, and not answer a sandboxed read with a login loop.
+func TestHeySkillRunsUnderTheCodexSandbox(t *testing.T) {
 	data, err := FS.ReadFile("hey/SKILL.md")
 	if err != nil {
 		t.Fatal(err)
@@ -42,14 +45,16 @@ func TestHeySkillRetriesMacOSKeychainAccessWithoutBroadEscalation(t *testing.T) 
 	content := string(data)
 
 	for _, want := range []string{
-		"On macOS under Codex",
-		"retry `hey auth status --json` once with elevated sandbox permission",
-		"one read-only command",
-		"normal approval flow",
-		"rerun only the exact `hey` command the user requested",
-		"separate one-command approval",
-		"`data.authenticated` is `true`",
-		"`data.authenticated` is `false` or the status command fails",
+		"Under Codex",
+		"blocks the system keyring and the network",
+		"`hey setup codex` installs rules",
+		"no `VAR=value` prefix, no pipe, no redirect",
+		"global flags after the subcommand",
+		"`--jq` instead of piping to `jq`",
+		"with escalated sandbox permissions so the user approves it",
+		"run `hey setup codex` in a terminal and restart Codex",
+		"Do not tell them to log in again unless `hey auth status --json`",
+		"`data.authenticated` is `false`",
 		"Never run the macOS `security` command",
 		"print or copy credentials",
 		"move credentials into a file",
@@ -58,6 +63,15 @@ func TestHeySkillRetriesMacOSKeychainAccessWithoutBroadEscalation(t *testing.T) 
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("embedded HEY skill does not contain %q", want)
+		}
+	}
+
+	for _, forbidden := range []string{
+		"retry `hey auth status --json` once with elevated sandbox permission",
+		"On macOS under Codex, the sandbox can hide credentials",
+	} {
+		if strings.Contains(content, forbidden) {
+			t.Errorf("embedded HEY skill still has the escalate-and-retry advice %q", forbidden)
 		}
 	}
 }
