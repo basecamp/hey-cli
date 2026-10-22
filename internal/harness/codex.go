@@ -13,14 +13,13 @@ func init() {
 		Name:   "Codex",
 		ID:     "codex",
 		Detect: DetectCodex,
-		// Codex discovers the shared ~/.agents skill directly, so health is
-		// skill-presence only. When a native plugin lands, this grows the
-		// plugin/version checks basecamp-cli has.
+		// Codex discovers the shared ~/.agents skill directly; the rules are
+		// what let its commands reach the keyring and HEY from the sandbox.
 		Checks: func() []*StatusCheck {
-			return []*StatusCheck{CheckCodexSkill()}
+			return []*StatusCheck{CheckCodexSkill(), CheckCodexRules()}
 		},
 		Diagnostics: func(_ context.Context) []*StatusCheck {
-			return []*StatusCheck{CheckCodexSkill()}
+			return []*StatusCheck{CheckCodexSkill(), CheckCodexRules()}
 		},
 	})
 }

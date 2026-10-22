@@ -14,10 +14,10 @@ manage the integrations on their own:
 
 ```bash
 hey setup claude    # install the skill and the hey@37signals plugin for Claude Code
-hey setup codex     # install the shared skill for Codex
+hey setup codex     # install the shared skill and sandbox rules for Codex
 hey skill install   # install the skill only (~/.agents/skills/hey, linked for detected agents)
 hey setup agents             # non-interactive: skill + a single detected agent (the installer uses this)
-hey setup agents --remove    # remove HEY's managed skills and Claude Code plugin
+hey setup agents --remove    # remove HEY's managed skills, Codex rules and Claude Code plugin
 hey doctor                   # check skill and plugin health per detected agent
 ```
 
@@ -32,6 +32,18 @@ not also copy it to `~/.codex/skills/hey`, which would make Codex list the same
 skill twice. Setup and version refresh remove that legacy path only when its
 ownership marker proves an older hey-cli created it; user-authored files are
 left untouched.
+
+Codex runs every shell command in a sandbox that blocks the system keyring and the
+network, so a `hey` command run there can neither read your credentials nor reach HEY.
+`hey setup codex` therefore also writes `~/.codex/rules/hey.rules` (under `$CODEX_HOME`
+when that is set): prefix rules that let Codex run hey's read-only commands, such as
+`hey search`, `hey box`, `hey thread read` and the list, show and view subcommands,
+outside the sandbox without asking. Every other hey command, including anything that
+sends, changes or saves, still goes through Codex's approval prompt each time. Codex
+reads rules only when a session starts, so restart Codex after setup. `hey doctor`
+reports the rules as missing or out of date after an upgrade that changes them; rerun
+`hey setup codex` to refresh them. `hey setup agents --remove` deletes the file. Setup
+never overwrites a `hey.rules` it did not write: move your own aside first.
 
 hey only ever writes skill directories it owns: each one it creates carries a
 `.managed-by-hey-cli` marker, and install, replacement and automatic refresh all refuse a

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -73,6 +74,7 @@ var agentSetupHandlers = map[string]agentSetupHandler{
 	"codex": {
 		Labels: []string{
 			"Install the shared HEY skill for Codex",
+			"Let Codex run read-only hey commands outside its sandbox",
 		},
 		Run:               runCodexSetup,
 		RunNonInteractive: runCodexSetupNonInteractive,
@@ -238,7 +240,11 @@ func runSetupAgent(cmd *cobra.Command, agent harness.AgentInfo, handler agentSet
 		if len(manualCommands) > 0 {
 			hint = strings.Join(manualCommands, "; ")
 		}
-		return &apierr.Error{Code: "setup_incomplete", Message: summary, Hint: hint}
+		setupErr := &apierr.Error{Code: "setup_incomplete", Message: summary, Hint: hint}
+		if len(setupErrors) > 0 {
+			setupErr.Meta = map[string]any{"errors": setupErrors}
+		}
+		return setupErr
 	}
 
 	breadcrumbs := []output.Breadcrumb{
@@ -393,7 +399,8 @@ func agentCommandFailure(out []byte, err error) string {
 
 // --- Codex ---
 
-// runCodexSetup connects Codex to the shared agent skill.
+// runCodexSetup connects Codex to the shared agent skill and installs the
+// rules that let its reads leave the sandbox.
 func runCodexSetup(cmd *cobra.Command) error {
 	w := cmd.OutOrStdout()
 	path, err := installCodexSkill()
@@ -403,11 +410,22 @@ func runCodexSetup(cmd *cobra.Command) error {
 		return nil //nolint:nilerr // warn and continue; the post-setup snapshot reports the failure
 	}
 	fmt.Fprintln(w, statusLine(true, "Codex skill installed ("+path+")"))
+
+	rulesPath, err := installCodexRules()
+	if err != nil {
+		fmt.Fprintln(w, warning.format("Codex rules install failed: "+err.Error()))
+		fmt.Fprintln(w, "Then verify with: hey doctor")
+		return nil //nolint:nilerr // warn and continue; the post-setup snapshot reports the failure
+	}
+	fmt.Fprintln(w, statusLine(true, "Codex rules installed ("+rulesPath+"); restart Codex to load them"))
 	return nil
 }
 
 func runCodexSetupNonInteractive(*cobra.Command) error {
-	_, err := installCodexSkill()
+	if _, err := installCodexSkill(); err != nil {
+		return err
+	}
+	_, err := installCodexRules()
 	return err
 }
 
@@ -432,6 +450,49 @@ func installCodexSkill() (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// installCodexRules writes hey's rules file, which lets Codex run the read-only
+// commands outside its sandbox. Like claimSkillDir, it replaces only a file
+// hey-cli wrote. It runs after installCodexSkill, so it never fabricates the
+// Codex home on a machine without Codex.
+func installCodexRules() (string, error) {
+	path := harness.CodexRulesPath()
+	if path == "" {
+		return "", fmt.Errorf("cannot determine Codex home directory")
+	}
+	state, err := harness.InspectCodexRules(path)
+	if err != nil {
+		return "", fmt.Errorf("inspecting %s: %w", path, err)
+	}
+	if state == harness.CodexRulesForeign {
+		return "", fmt.Errorf("%s exists but was not written by hey-cli; move it aside to let hey install its Codex rules there", path)
+	}
+	if err := writeFileAtomic(path, harness.CodexRules()); err != nil {
+		return "", fmt.Errorf("writing %s: %w", path, err)
+	}
+	return path, nil
+}
+
+// writeFileAtomic replaces path through a rename, so Codex never loads a
+// half-written rules file. The temporary name does not end in .rules, which
+// keeps Codex from loading it either.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil { // #nosec G301 -- Codex's own rules directory
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".hey-rules-*.tmp")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name()) // a no-op once the rename has moved it
+	_, writeErr := tmp.Write(data)
+	chmodErr := tmp.Chmod(0o644) // #nosec G302 -- rules are configuration, not secrets
+	if err := errors.Join(writeErr, chmodErr, tmp.Close()); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // --- Shared helpers ---

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -144,6 +145,7 @@ func TestSetupCodexInstallsReadOnlyRules(t *testing.T) {
 func TestCodexRulesNameRunnableCommands(t *testing.T) {
 	rules := installedRules(t)
 	root := newRootCmd()
+	var covered []string
 	for _, rule := range rules {
 		if rule[0] != "hey" || len(rule) < 2 {
 			t.Errorf("rule %v does not name a hey subcommand", rule)
@@ -158,6 +160,17 @@ func TestCodexRulesNameRunnableCommands(t *testing.T) {
 		if !found.Runnable() {
 			t.Errorf("rule %q names a command group, not a command", path)
 		}
+		for _, sub := range found.Commands() {
+			covered = append(covered, sub.CommandPath())
+		}
+	}
+	// A rule is a prefix, so it also lets a subcommand of the command it names
+	// leave the sandbox. These were reviewed as read-only; a new one fails here
+	// until someone decides whether it may run without asking.
+	reviewed := "hey box list|hey box view|hey bundle view|hey search filters"
+	slices.Sort(covered)
+	if got := strings.Join(covered, "|"); got != reviewed {
+		t.Errorf("subcommands covered by a rule = %q, reviewed %q", got, reviewed)
 	}
 }
 

@@ -55,6 +55,12 @@ func runRemoveAgentSetup(cmd *cobra.Command) error {
 		}
 	}
 
+	if didRemove, removeErr := removeCodexRules(); removeErr != nil {
+		failures = append(failures, "Codex rules: "+removeErr.Error())
+	} else if didRemove {
+		removed = append(removed, "Codex rules")
+	}
+
 	baseline := filepath.Join(home, ".agents", "skills", "hey")
 	if didRemove, removeErr := removeOwnedSkillFiles(baseline); removeErr != nil {
 		failures = append(failures, "agent skill: "+removeErr.Error())
@@ -120,6 +126,26 @@ func removeOwnedSkillFiles(dir string) (bool, error) {
 		}
 	}
 	_ = os.Remove(dir) // Additional user files keep the now-unmanaged directory in place.
+	return true, nil
+}
+
+// removeCodexRules deletes hey's Codex rules file, and only a regular file
+// that carries hey-cli's marker: a user's hey.rules or symlink stays put.
+func removeCodexRules() (bool, error) {
+	path := harness.CodexRulesPath()
+	if path == "" {
+		return false, nil
+	}
+	state, err := harness.InspectCodexRules(path)
+	if err != nil {
+		return false, fmt.Errorf("inspecting %s: %w", path, err)
+	}
+	if state != harness.CodexRulesCurrent && state != harness.CodexRulesStale {
+		return false, nil
+	}
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return false, fmt.Errorf("removing %s: %w", path, err)
+	}
 	return true, nil
 }
 

@@ -26,11 +26,12 @@ authentication/2	skill	Run the requested data command without a login preflight.
 authentication/3	help:hey auth status	Show authentication status
 authentication/3	help:hey auth status	Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing
 authentication/4	skill	If a data command returns exit code 3 with `"code": "auth"`, or fails with `could not read stored credentials`, authentication is unavailable to that process.
-authentication/5	skill	On macOS under Codex, the sandbox can hide credentials that the HEY CLI stores in Keychain.
-authentication/6	skill	Before reporting the task as blocked, use the harness's normal approval flow to retry `hey auth status --json` once with elevated sandbox permission.
-authentication/7	skill	Limit the escalation to this one read-only command.
-authentication/8	skill	If the response's `data.authenticated` is `true`, rerun only the exact `hey` command the user requested through a separate one-command approval.
-authentication/9	skill	If `data.authenticated` is `false` or the status command fails, report the task as blocked and tell the user to run `hey auth login`; do not run it for them unattended.
+authentication/5	retired	The Codex sandbox blocks the keyring and the network on every platform, not only macOS; the rules hey setup codex installs now run reads outside it.
+authentication/6	retired	Escalating one status check and then one command per task left users looping back to hey auth login; reads now leave the sandbox through hey setup codex's rules, and other commands go through Codex's own approval.
+authentication/7	retired	Escalating one status check and then one command per task left users looping back to hey auth login; reads now leave the sandbox through hey setup codex's rules, and other commands go through Codex's own approval.
+authentication/8	retired	Escalating one status check and then one command per task left users looping back to hey auth login; reads now leave the sandbox through hey setup codex's rules, and other commands go through Codex's own approval.
+authentication/9	skill	Outside Codex, report the task as blocked and tell the user to run `hey auth login`; do not run it for them unattended.
+authentication/9	skill	Do not tell them to log in again unless `hey auth status --json`, run with escalated sandbox permissions, reports that `data.authenticated` is `false`.
 authentication/10	skill	Never run the macOS `security` command to read Keychain contents, print or copy credentials, or move credentials into a file; never disable the sandbox globally; never set `HEY_NO_KEYRING=1` as an authentication workaround.
 authentication/11	skill	Piped, machine-output and non-TTY commands do not prompt for sign-in.
 authentication/12	skill	When an agent harness runs commands under a PTY, set `HEY_NONINTERACTIVE=1` so a missing login returns the same actionable auth error instead of opening an interactive prompt.

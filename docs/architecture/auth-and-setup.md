@@ -47,7 +47,10 @@ version change. Ownership is explicit: every skill write goes through `claimSkil
 marks a directory it creates (`.managed-by-hey-cli`) and refuses a populated one without the
 marker; removal (`removeExistingSkillLink`) touches only our canonical symlink or a marked
 copy; refresh writes only marked, non-symlinked files. Do not add a write path that bypasses
-the gate.
+the gate. Codex's `$CODEX_HOME/rules/hey.rules`, which lets the read-only commands in
+`harness.CodexReadCommands` run outside Codex's sandbox, is the other hey-cli-managed write: its
+first line is the marker, and setup, removal and `hey doctor` all go through
+`harness.InspectCodexRules`, which treats an unmarked file or a symlink as the user's.
 
 New top-level commands and subcommands need the `.surface` snapshot updated
 (`go test ./internal/cmd -run TestSurfaceSnapshot -update-surface`), and anything listed in
