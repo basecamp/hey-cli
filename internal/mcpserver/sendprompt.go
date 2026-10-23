@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"fmt"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
@@ -26,7 +27,8 @@ func (s *sender) prompt(snap *draftSnapshot, outcome *reviewOutcome) string {
 	fmt.Fprintf(&b, "  To:       %s\n", recipientList(snap.to, outcome.newAddresses))
 	fmt.Fprintf(&b, "  Cc:       %s\n", recipientList(snap.cc, outcome.newAddresses))
 	fmt.Fprintf(&b, "  Bcc:      %s\n", recipientList(snap.bcc, outcome.newAddresses))
-	fmt.Fprintf(&b, "  Subject:  %s\n", inertLine(snap.subject))
+	// Delivered text is shown whole: only display names, which aren't sent, are capped.
+	fmt.Fprintf(&b, "  Subject:  %s\n", inertWhole(snap.subject))
 	fmt.Fprintf(&b, "  Attached: %s\n", attachmentList(snap.body.attachments))
 	b.WriteString("  Body:\n")
 
@@ -83,9 +85,9 @@ func attachmentList(attachments []attachment) string {
 	}
 	names := make([]string, 0, len(attachments))
 	for _, a := range attachments {
-		name := fmt.Sprintf("%s (%s)", inertLine(a.Filename), humanSize(a.Size))
+		name := fmt.Sprintf("%s (%s)", inertWhole(a.Filename), humanSize(a.Size))
 		if a.Caption != "" {
-			name += `, captioned "` + inertLine(a.Caption) + `"`
+			name += `, captioned "` + inertWhole(a.Caption) + `"`
 		}
 		names = append(names, name)
 	}
@@ -121,6 +123,13 @@ func inertLine(s string) string {
 	return out
 }
 
+// inertWhole renders a delivered header field (the subject, an attachment's name and
+// caption): one line, every control and invisible character escaped, never truncated,
+// since what's cut off would go out unseen.
+func inertWhole(s string) string {
+	return escapeInvisible(s, false)
+}
+
 // inertBody renders the body: plain newlines kept, everything else escaped.
 func inertBody(s string) string {
 	return escapeInvisible(s, true)
@@ -145,7 +154,14 @@ func escapeInvisible(s string, keepNewlines bool) string {
 	return b.String()
 }
 
+// invisible reports a rune that shows as nothing or reorders what's around it: every
+// format character (Unicode Cf: bidi controls, zero-width characters, tag characters,
+// the soft hyphen), variation selectors, private-use characters, and the controls and
+// separators below. A class, not a list, so the next invisible character is caught too.
 func invisible(r rune) bool {
+	if unicode.In(r, unicode.Cf, unicode.Co, unicode.Variation_Selector) {
+		return true
+	}
 	switch {
 	case r < 0x20, r == 0x7F, r >= 0x80 && r <= 0x9F:
 		return true

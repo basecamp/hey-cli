@@ -82,8 +82,10 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		return gateway.ErrorResult("%v", err), nil
 	}
 	// The exposure marker lands before the content leaves (D6). A read not in the
-	// table exposes: it can't be shown not to.
-	if exposes, classified := readExposes[full.ID]; d.markExposed != nil && full.ReadOnly && (exposes || !classified) {
+	// table exposes: it can't be shown not to. So does a write that answers with a body
+	// (reveal_contact answers the contact): what HEY returns is content, whatever the
+	// verb. A draft save's answer is this server's own.
+	if d.markExposed != nil && !draft && exposingAnswer(full, resp) {
 		if err := d.markExposed(ctx, full.Action); err != nil {
 			return gateway.ErrorResult("hey mcp can't return %s right now: it couldn't record that the answer may include mail from an unscreened sender (%v)", full.Action, err), nil
 		}
@@ -119,6 +121,17 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		}
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(resp.Data)}}}, nil
+}
+
+// exposingAnswer reports whether an answer may carry an unscreened sender's words
+// (exposure.go): a read the table doesn't clear, or a write whose answer has a body.
+func exposingAnswer(op *catalog.Operation, resp *hey.Response) bool {
+	if op.ReadOnly {
+		exposes, classified := readExposes[op.ID]
+		return exposes || !classified
+	}
+	body := bytes.TrimSpace(resp.Data)
+	return len(body) > 0 && !bytes.Equal(body, []byte("null"))
 }
 
 // acknowledgedBy names the mutations whose success is one exact status, because a
