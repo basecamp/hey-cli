@@ -103,6 +103,10 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Whatever it may do, this process authenticates only as the sign-in it starts on:
+	// one that started without send must not move onto a later send-capable sign-in
+	// whose exposure it doesn't record.
+	mcpAuthMgr.PinGrant(creds.GrantKey)
 
 	ctx := cmd.Context()
 	reads, err := clientForAccountSelection(ctx, newMCPSDKClient(), cfg.AccountID)

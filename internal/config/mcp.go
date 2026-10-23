@@ -77,6 +77,9 @@ func globalMCPClientIDs() (map[string]string, error) {
 		if originErr != nil {
 			return nil, fmt.Errorf("could not parse mcp_client_ids origin %s in %s: %w", origin, path, originErr)
 		}
+		if existing, duplicate := ids[normalized]; duplicate && existing != id {
+			return nil, fmt.Errorf("conflicting mcp_client_ids for %s in %s", normalized, path)
+		}
 		ids[normalized] = id
 	}
 	return ids, nil

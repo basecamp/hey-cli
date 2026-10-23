@@ -71,6 +71,24 @@ func (m *Manager) LoginMCP(ctx context.Context, opts LoginOptions) (string, erro
 	return "oauth", m.Login(ctx, opts)
 }
 
+// PinGrant makes grantKey the only sign-in this manager authenticates with from now on
+// (pinnedGrant). hey mcp pins the sign-in it starts on.
+func (m *Manager) PinGrant(grantKey string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pinnedGrant = grantKey
+}
+
+// ErrGrantChanged is a stored credential under a different sign-in than the pinned one.
+var ErrGrantChanged = errors.New("hey mcp was signed in again, or signed out, since it started; restart it")
+
+func (m *Manager) checkPinnedGrant(creds *Credentials) error {
+	if m.pinnedGrant != "" && creds.GrantKey != m.pinnedGrant {
+		return errNoCredential(ErrGrantChanged.Error(), ErrGrantChanged)
+	}
+	return nil
+}
+
 // StoredCredentials reads this manager's stored credential.
 func (m *Manager) StoredCredentials() (*Credentials, error) {
 	return m.store.Load(m.storeKey)

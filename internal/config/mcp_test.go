@@ -41,3 +41,20 @@ func TestMCPClientIDResolution(t *testing.T) {
 		t.Error("a malformed HEY_MCP_CLIENT_ID was accepted")
 	}
 }
+
+func TestConflictingSpellingsOfOneOriginAreRefused(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HEY_MCP_CLIENT_ID", "")
+	dir := filepath.Join(home, configDirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	global := `{"mcp_client_ids":{"https://app.hey.com":"FirstLocalMcp00000000001","https://APP.HEY.COM:443":"OtherLocalMcp00000000001"}}`
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(global), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := MCPClientID("https://app.hey.com"); err == nil {
+		t.Error("two ids for one origin resolved to one of them")
+	}
+}

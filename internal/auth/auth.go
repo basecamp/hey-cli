@@ -43,6 +43,11 @@ type Manager struct {
 	honorEnvToken bool
 	// wait sleeps between device-flow polls; a seam for tests.
 	wait func(context.Context, time.Duration) error
+	// pinnedGrant, when set, is the only sign-in this manager authenticates with: a
+	// credential stored under another grant key (a later `hey auth login --mcp`) is
+	// refused rather than adopted, so a running hey mcp never moves onto a sign-in it
+	// didn't start with. Guarded by mu.
+	pinnedGrant string
 
 	store        *Store
 	httpClient   *http.Client
@@ -422,6 +427,9 @@ func (m *Manager) loadCredentialsLocked() (*Credentials, error) {
 
 func (m *Manager) reloadCredentialsLocked() (*Credentials, error) {
 	creds, err := m.store.Load(m.storeKey)
+	if err == nil {
+		err = m.checkPinnedGrant(creds)
+	}
 	if err != nil {
 		m.cachedCredentials = nil
 		return nil, err
@@ -462,6 +470,10 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	}
 	if loadErr != nil {
 		return credentialLoadError(loadErr)
+	}
+	if pinErr := m.checkPinnedGrant(stored); pinErr != nil {
+		m.cachedCredentials = nil
+		return pinErr
 	}
 	m.cachedCredentials = cloneCredentials(stored)
 	changed := stored.AccessToken != creds.AccessToken || stored.SessionCookie != creds.SessionCookie
