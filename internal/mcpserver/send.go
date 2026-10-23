@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -268,6 +269,16 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 		return gateway.ErrorResult("the send may have gone out: %v. Check Sent in HEY before doing anything else; hey mcp won't send this draft again", err), nil
 	}
 
+	// HEY refuses a delivery it won't make (usually the account's sending limit) by
+	// keeping the draft and redirecting to its edit page, which reads as a message with
+	// an id and no thread. Only an edit page served says it's still a draft (as
+	// mail.ConfirmDelivered reads it for hey draft send).
+	if sent != nil && sent.Id != 0 && sent.TopicId == 0 {
+		if edit, editErr := s.cfg.Drafts.GetEdit(ctx, sent.Id); editErr == nil && edit != nil {
+			return gateway.ErrorResult("not sent: HEY kept the draft instead of sending it, usually because the account reached its sending limit. hey mcp won't send this draft again for 24 hours; send it from HEY when the limit allows: %s", s.editURL(draftID)), nil
+		}
+	}
+
 	result := map[string]any{"sent": true, "draft_id": draftID, "note": "Sent through HEY's undo window. The person approved it in this app."}
 	if sent != nil {
 		if sent.Id != 0 {
@@ -315,6 +326,15 @@ func (s *sender) notSent(draftID int64, why string) *mcp.CallToolResult {
 		"note":     why + " Draft saved but not sent. Review and send it in HEY: " + url,
 	})
 	return result
+}
+
+// heyHost is the host of the HEY this sender runs against.
+func (s *sender) heyHost() string {
+	u, err := url.Parse(s.cfg.Origin)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }
 
 func (s *sender) editURL(draftID int64) string {
@@ -425,8 +445,8 @@ func normalizedAddress(address string) string {
 	return strings.ToLower(strings.TrimSpace(address))
 }
 
-func snapshotOf(edit *generated.MessageEditState) (*draftSnapshot, error) {
-	body, err := analyzeBody(edit.Content)
+func snapshotOf(edit *generated.MessageEditState, heyHost string) (*draftSnapshot, error) {
+	body, err := analyzeBody(edit.Content, heyHost)
 	if err != nil {
 		return nil, err
 	}
@@ -509,7 +529,7 @@ func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *re
 	if edit == nil || edit.Id != draftID {
 		return refuse("not sent: %d isn't a draft HEY can send", draftID)
 	}
-	snap, err := snapshotOf(edit)
+	snap, err := snapshotOf(edit, s.heyHost())
 	if err != nil {
 		return refuse("not sent: %v", err)
 	}
@@ -603,7 +623,7 @@ func (s *sender) newAddresses(ctx context.Context, snap *draftSnapshot) []string
 }
 
 // knownAddresses looks each address up in HEY's search for a message to it from one of
-// this identity's addresses, created before the sign-in. The search only narrows: each
+// this identity's addresses, delivered before the sign-in. The search only narrows: each
 // match is checked here against the entry's own creator, time and recipients, so a
 // search that matches loosely can't make an address known.
 func (s *sender) knownAddresses(ctx context.Context, addresses []string) map[string]bool {
@@ -638,7 +658,9 @@ func (s *sender) knownAddresses(ctx context.Context, addresses []string) map[str
 func sentBefore(result *generated.AdvancedSearchResult, address string, mine map[string]bool, before time.Time) bool {
 	for _, match := range result.Matches {
 		for _, entry := range match.Entries {
-			if !mine[normalizedAddress(entry.Creator.EmailAddress)] || entry.CreatedAt.IsZero() || !entry.CreatedAt.Before(before) {
+			// ActiveAt is when the entry went out; CreatedAt would count a draft made
+			// before the sign-in and sent after it. No delivery time, no proof.
+			if !mine[normalizedAddress(entry.Creator.EmailAddress)] || entry.ActiveAt.IsZero() || !entry.ActiveAt.Before(before) {
 				continue
 			}
 			for _, r := range slices.Concat(entry.Addressed.Directly, entry.Addressed.Copied, entry.Addressed.Blindcopied) {
