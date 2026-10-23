@@ -76,8 +76,8 @@ type sendStateData struct {
 type grantState struct {
 	// Sends are when each confirmed send was claimed, Unix seconds.
 	Sends []int64 `json:"sends,omitempty"`
-	// NewAddresses are the new addresses charged in the window, each with when it was
-	// first charged: a send is charged only for new addresses not already here (D4).
+	// NewAddresses are the new addresses sent to in the window, each with when it was
+	// last sent to: a send is charged only for new addresses not already here (D4).
 	NewAddresses map[string]int64 `json:"new_addresses,omitempty"`
 	// ExposedUntil is when the exposure window ends, Unix seconds (D6).
 	ExposedUntil int64 `json:"exposed_until,omitempty"`
@@ -378,7 +378,9 @@ func (s *SendState) claim(ctx context.Context, origin string, draftID int64, gra
 
 		d.Claims[key] = now.Unix()
 		g.Sends = append(g.Sends, now.Unix())
-		for _, address := range charge {
+		// Each new address counts once, and stays in the window for 24 hours after the
+		// last send to it, so the window holds every new address sent to within it.
+		for _, address := range newAddresses {
 			g.NewAddresses[address] = now.Unix()
 		}
 		return nil

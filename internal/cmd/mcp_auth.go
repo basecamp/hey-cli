@@ -64,6 +64,14 @@ func requireMCPCredentials() (*auth.Credentials, error) {
 	return creds, nil
 }
 
+// mcpCanSend is whether hey mcp serves send_draft on creds: the grant holds send, and
+// write, without which hey mcp serves reads only (and read, which write implies). The
+// sign-in's local key is the principal send safety counts against, so a credential
+// without one can't send.
+func mcpCanSend(creds *auth.Credentials) bool {
+	return auth.HasScope(creds.Scope, "write", "send") && creds.GrantKey != ""
+}
+
 // loginMCP runs `hey auth login --mcp`.
 func loginMCP(cmd *cobra.Command, noBrowser bool) error {
 	if errMCPClientIDConfig != nil {
@@ -86,10 +94,10 @@ func loginMCP(cmd *cobra.Command, noBrowser bool) error {
 	if err != nil {
 		return err
 	}
-	canSend := auth.HasScope(creds.Scope, "read", "send")
+	canSend := mcpCanSend(creds)
 	line := fmt.Sprintf("Signed hey mcp in (%s).", creds.Scope)
 	if !canSend {
-		line += " Sending wasn't granted, so hey mcp saves drafts but can't send them; sign in again and leave sending checked to allow it."
+		line += " hey mcp can't send on this sign-in (it needs write and send); sign in again and leave both checked to allow it."
 	}
 	return writeMutationLine(cmd, line, "hey mcp signed in",
 		map[string]any{"method": method, "scope": creds.Scope, "can_send": canSend})
@@ -140,7 +148,7 @@ func mcpCredentialStatus() map[string]any {
 	}
 	status["authenticated"] = true
 	status["scope"] = creds.Scope
-	status["can_send"] = auth.HasScope(creds.Scope, "read", "send")
+	status["can_send"] = mcpCanSend(creds)
 	if creds.ExpiresAt > 0 {
 		expiry := time.Unix(creds.ExpiresAt, 0)
 		status["expires_at"] = expiry.Format(time.RFC3339)

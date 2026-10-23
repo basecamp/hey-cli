@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -69,6 +70,12 @@ type SendConfig struct {
 	Origin string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
+	// CurrentGrant answers the sign-in's key as stored now. When it no longer matches
+	// Grant.Key (hey mcp was signed in again or out since this process started, and the
+	// token the client authenticates with may be the new one), sends and exposing reads
+	// are refused until hey mcp restarts, so caps and exposure never count against a
+	// sign-in other than the one the requests ride. Nil skips the check.
+	CurrentGrant func(context.Context) (string, error)
 }
 
 const (
@@ -181,6 +188,9 @@ func (s *sender) handle(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	if err != nil {
 		return gateway.ErrorResult("%v", err), nil
 	}
+	if err := s.checkGrant(ctx); err != nil {
+		return gateway.ErrorResult("not sent: %v", err), nil
+	}
 
 	// A host that can't show the person a confirmation can't send (D3). There is no
 	// "I confirm" parameter: a value the model supplies is what an injected
@@ -269,6 +279,30 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 		result["delayed"] = sent.Delayed
 	}
 	return gateway.JSONResult(result)
+}
+
+// checkGrant refuses when the stored sign-in isn't the one this process started on.
+func (s *sender) checkGrant(ctx context.Context) error {
+	if s.cfg.CurrentGrant == nil {
+		return nil
+	}
+	current, err := s.cfg.CurrentGrant(ctx)
+	if err != nil {
+		return fmt.Errorf("hey mcp couldn't read its sign-in (%w)", err)
+	}
+	if current != s.cfg.Grant.Key {
+		return errors.New("hey mcp was signed in again, or signed out, since it started; restart it")
+	}
+	return nil
+}
+
+// markExposed records an exposing read against this process's sign-in, refusing when
+// the stored sign-in has changed under it.
+func (s *sender) markExposed(ctx context.Context, action string) error {
+	if err := s.checkGrant(ctx); err != nil {
+		return err
+	}
+	return s.cfg.State.MarkExposed(ctx, s.cfg.Grant.Key, action, s.cfg.Now())
 }
 
 // notSent is D3's answer: not an error, a draft and where to send it.
@@ -488,6 +522,8 @@ func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *re
 		return refuse("not sent: the draft has no recipients; add them with update_message (entry.addressed)")
 	case len(recipients) > maxRecipients:
 		return refuse("not sent: hey mcp sends to at most %d recipients across To, Cc and Bcc, and this draft has %d. Send it from HEY: %s", maxRecipients, len(recipients), s.editURL(draftID))
+	case snap.body.unverifiable != "":
+		return refuse("not sent: the draft's body has an attachment hey mcp can't verify (%s), so the confirmation couldn't show what it sends. Send it from HEY: %s", snap.body.unverifiable, s.editURL(draftID))
 	case snap.body.remote != "":
 		return refuse("not sent: the draft's body has a reference a mail client loads by itself (%s), which can carry mailbox data to whoever hosts it. Send it from HEY: %s", snap.body.remote, s.editURL(draftID))
 	}
@@ -509,7 +545,9 @@ func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *re
 			by, int(exposureWindow/time.Minute), newAddresses[0], s.editURL(draftID))
 	}
 
-	unseen := !snap.body.lossless || len([]rune(snap.body.text)) > bodyPromptCap
+	// Measured on the escaped text the prompt shows: escapes lengthen it, and what
+	// falls past the cut is unseen however short the raw text was.
+	unseen := !snap.body.lossless || utf8.RuneCountInString(inertBody(snap.body.text)) > bodyPromptCap
 	if unseen && (len(newAddresses) > 0 || exposed) {
 		return refuse("not sent: the draft can't be fully reviewed here (it has an attachment, more than %d characters, or formatting that can hide text), and it goes to someone you haven't emailed before or this conversation read unscreened mail. Send it from HEY: %s",
 			bodyPromptCap, s.editURL(draftID))

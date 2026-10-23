@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/auth"
 )
 
 // fakeLocalMCPOAuth serves the device flow and revocation for the local MCP client.
@@ -131,5 +132,18 @@ func TestAuthLoginMCPTakesNoTokenOrCookie(t *testing.T) {
 	defer server.Close()
 	if _, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "auth", "login", "--mcp", "--token", "x"); err == nil {
 		t.Fatal("--mcp stored a hand-supplied token")
+	}
+}
+
+// can_send is the same predicate hey mcp serves hey_send on: send alone, without write,
+// leaves hey mcp read-only.
+func TestMCPCanSendNeedsWriteAndSend(t *testing.T) {
+	for scope, want := range map[string]bool{"read write send": true, "write send": true, "read send": false, "read write": false} {
+		if got := mcpCanSend(&auth.Credentials{Scope: scope, GrantKey: "g"}); got != want {
+			t.Errorf("mcpCanSend(%q) = %v, want %v", scope, got, want)
+		}
+	}
+	if mcpCanSend(&auth.Credentials{Scope: "read write send"}) {
+		t.Error("a sign-in without a local key can send")
 	}
 }

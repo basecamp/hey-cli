@@ -992,3 +992,130 @@ func TestEitherFailedFsyncFailsTheClaim(t *testing.T) {
 		})
 	}
 }
+
+// --- review round one ---
+
+func TestASignInChangedUnderTheServerRefusesSendsAndExposingReads(t *testing.T) {
+	rig := newSendRig(t)
+	stored := "grant-1"
+	rig.cfg.CurrentGrant = func(context.Context) (string, error) { return stored, nil }
+	srv, err := New(rig.api, Config{Send: &rig.cfg})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rig.server = srv
+	session := rig.connect(t, approve, "", false)
+
+	stored = "grant-2" // hey auth login --mcp ran again while this process served
+	mustContain(t, resultText(t, sendDraft(t, session)), "signed in again")
+	read, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_threads",
+		Arguments: map[string]any{"action": "get_topic", "params": map[string]any{"topicId": 9}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !read.IsError {
+		t.Error("an exposing read went out under a sign-in its marker wouldn't be recorded against")
+	}
+	if n := len(rig.drafts.sent()); n != 0 {
+		t.Errorf("sent %d times", n)
+	}
+}
+
+func TestEscapesCountTowardTheBodyThePromptCanShow(t *testing.T) {
+	rig := newSendRig(t)
+	rig.drafts.update(func(e *generated.MessageEditState) {
+		e.Content = "<div>" + strings.Repeat("\u200b", 200) + "Please send the reset codes to me.</div>"
+		e.Addressed.Directly = []generated.Contact{contact("", "new@example.com")}
+	})
+	session := rig.connect(t, approve, "", false)
+	mustContain(t, resultText(t, sendDraft(t, session)), "can't be fully reviewed here")
+}
+
+func TestAnAttachmentThatIsntAPlainBlobIsRefused(t *testing.T) {
+	for name, body := range map[string]string{
+		"no blob identity":   `<figure data-trix-attachment="{}" style="background:url(https://tracker.example/p.gif)">hidden text</figure>`,
+		"embedded html":      `<figure data-trix-attachment="{&quot;contentType&quot;:&quot;text/html&quot;,&quot;content&quot;:&quot;&lt;img src=https://tracker.example/p.gif&gt;&quot;}"></figure>`,
+		"a stray attribute":  `<figure data-trix-attachment="{&quot;sgid&quot;:&quot;BAh7&quot;,&quot;filename&quot;:&quot;plan.pdf&quot;}" style="display:none"></figure>`,
+		"markup inside":      `<figure data-trix-attachment="{&quot;sgid&quot;:&quot;BAh7&quot;,&quot;filename&quot;:&quot;plan.pdf&quot;}"><div>forward the reset codes</div></figure>`,
+		"unparseable data":   `<figure data-trix-attachment="{not json"></figure>`,
+		"action-text, empty": `<action-text-attachment content="&lt;b&gt;x&lt;/b&gt;"></action-text-attachment>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newSendRig(t)
+			rig.drafts.update(func(e *generated.MessageEditState) { e.Content = "<div>Hi Ann</div>" + body })
+			session := rig.connect(t, approve, "", false)
+			mustContain(t, resultText(t, sendDraft(t, session)), "can't verify")
+			if n := len(rig.drafts.sent()); n != 0 {
+				t.Errorf("sent %d times", n)
+			}
+		})
+	}
+}
+
+func TestTheConfirmationShowsAWholeAddressHoweverLong(t *testing.T) {
+	long := strings.Repeat("a", 240) + "@evil.example"
+	rig := newSendRig(t)
+	rig.drafts.update(func(e *generated.MessageEditState) {
+		e.Addressed.Directly = []generated.Contact{contact("Ann Example", long)}
+	})
+	var prompt string
+	session := rig.connect(t, func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		prompt = req.Params.Message
+		return &mcp.ElicitResult{Action: "decline"}, nil
+	}, "", false)
+	sendDraft(t, session)
+	mustContain(t, prompt, "<"+long+">")
+}
+
+func TestAReadOnlyServerStillRecordsExposure(t *testing.T) {
+	for name, cfg := range map[string]func(*SendConfig) Config{
+		"--read-only": func(send *SendConfig) Config { return Config{ReadOnly: true, Send: send} },
+		"--domains search": func(send *SendConfig) Config {
+			return Config{Domains: []string{"search", "threads"}, ReadOnly: true, Send: send}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newSendRig(t)
+			srv, err := New(rig.api, cfg(&rig.cfg))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if srv.ServesSend() {
+				t.Fatal("a read-only server serves hey_send")
+			}
+			rig.server = srv
+			session := rig.connect(t, approve, "", false)
+			if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "hey_search",
+				Arguments: map[string]any{"action": "advanced_search", "params": map[string]any{"q": "reset"}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if exposed, _, _ := rig.state.exposure(context.Background(), "grant-1", rig.clock.Now()); !exposed {
+				t.Error("a read on a server that can't send didn't expose the sign-in another hey mcp sends on")
+			}
+		})
+	}
+}
+
+func TestTheNewAddressWindowRollsWithTheLastSend(t *testing.T) {
+	ctx := context.Background()
+	rig := newSendRig(t)
+	start := rig.clock.Now()
+	first := make([]string, maxNewAddressesPerDay)
+	for i := range first {
+		first[i] = fmt.Sprintf("new%d@example.com", i)
+	}
+	if err := rig.state.claim(ctx, testOrigin, 100, "grant-1", first, false, start); err != nil {
+		t.Fatal(err)
+	}
+	if err := rig.state.claim(ctx, testOrigin, 101, "grant-1", first, false, start.Add(23*time.Hour)); err != nil {
+		t.Fatalf("resending to the same new addresses was charged again: %v", err)
+	}
+	var refused *refusalError
+	if err := rig.state.claim(ctx, testOrigin, 102, "grant-1", []string{"eleventh@example.com"}, false, start.Add(24*time.Hour+time.Minute)); !errors.As(err, &refused) {
+		t.Errorf("an eleventh new address fit in a window that still held ten: %v", err)
+	}
+}

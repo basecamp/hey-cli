@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -26,8 +25,10 @@ type Config struct {
 	// Domains narrows the served domains by key ("boxes", "search", ...).
 	// Empty means all. Unknown keys are a startup error — fail closed.
 	Domains []string
-	// Send serves send_draft in its own hey_send tool (send.go), when the threads
-	// domain is served and the server isn't read-only. Nil serves no way to send.
+	// Send is set when the sign-in can send. It serves send_draft in its own hey_send
+	// tool (send.go) when the threads domain is served and the server isn't read-only,
+	// and either way records which reads expose the sign-in (exposure.go). Nil serves no
+	// way to send and records nothing.
 	Send *SendConfig
 }
 
@@ -53,18 +54,19 @@ func New(api API, cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("hold sending operations to drafts: %w", err)
 	}
 
+	// Exposure is recorded whenever the sign-in can send, whether or not this process
+	// serves hey_send: another hey mcp on the same sign-in may, and it reads the same
+	// state file.
 	var send *sender
-	if cfg.Send != nil && !cfg.ReadOnly && servesDomain(cfg.Domains, "threads") {
+	d := dispatcher{api: api}
+	if cfg.Send != nil {
 		if send, err = newSender(*cfg.Send); err != nil {
 			return nil, fmt.Errorf("serve send_draft: %w", err)
 		}
+		d.markExposed = send.markExposed
 	}
-
-	d := dispatcher{api: api}
-	if send != nil {
-		d.markExposed = func(ctx context.Context, action string) error {
-			return send.cfg.State.MarkExposed(ctx, send.cfg.Grant.Key, action, send.cfg.Now())
-		}
+	if cfg.ReadOnly || !servesDomain(cfg.Domains, "threads") {
+		send = nil
 	}
 
 	gw, err := gateway.New(cat.GatewayDomains(), gateway.Config{
