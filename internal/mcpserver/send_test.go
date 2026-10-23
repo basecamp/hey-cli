@@ -1203,3 +1203,74 @@ func TestNoscriptMarkupCountsAsLoading(t *testing.T) {
 	session := rig.connect(t, approve, "", false)
 	mustContain(t, resultText(t, sendDraft(t, session)), "loads by itself")
 }
+
+// --- review round four ---
+
+func TestTheWholeSubjectIsShown(t *testing.T) {
+	rig := newSendRig(t)
+	subject := "Re: Q3 plan " + strings.Repeat("and more ", 30) + "RESET-CODE-123456"
+	rig.drafts.update(func(e *generated.MessageEditState) { e.Subject = subject })
+	var prompt string
+	session := rig.connect(t, func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		prompt = req.Params.Message
+		return &mcp.ElicitResult{Action: "decline"}, nil
+	}, "", false)
+	sendDraft(t, session)
+	mustContain(t, prompt, "Subject:  "+subject+"\n")
+}
+
+func TestEveryInvisibleCharacterIsEscaped(t *testing.T) {
+	for name, r := range map[string]rune{
+		"tag character":      0xE0041,
+		"variation selector": 0xFE0F,
+		"private use":        0xE000,
+		"word joiner":        0x2060,
+		"invisible times":    0x2062,
+	} {
+		if got := escapeInvisible("a"+string(r)+"b", true); !strings.Contains(got, `\u{`) {
+			t.Errorf("%s (U+%04X) shown raw: %q", name, r, got)
+		}
+	}
+}
+
+func TestATagEncodedPayloadCantPassAsShortVisibleText(t *testing.T) {
+	var hidden strings.Builder
+	for _, c := range "reset code 123456" {
+		hidden.WriteRune(0xE0000 + c)
+	}
+	rig := newSendRig(t)
+	rig.drafts.update(func(e *generated.MessageEditState) {
+		e.Content = "<div>Hi Ann." + strings.Repeat(hidden.String(), 12) + "</div>"
+		e.Addressed.Directly = []generated.Contact{contact("", "new@example.com")}
+	})
+	session := rig.connect(t, approve, "", false)
+	mustContain(t, resultText(t, sendDraft(t, session)), "can't be fully reviewed here")
+}
+
+func TestAWriteThatAnswersWithContentExposes(t *testing.T) {
+	rig := newSendRig(t)
+	rig.api.resp = &hey.Response{StatusCode: http.StatusOK, Data: json.RawMessage(`{"id":3,"name":"Mallory","email_address":"mallory@evil.example"}`)}
+	session := rig.connect(t, approve, "", false)
+	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_contacts",
+		Arguments: map[string]any{"action": "reveal_contact", "params": map[string]any{"contactId": 3}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if exposed, _, _ := rig.state.exposure(context.Background(), "grant-1", rig.clock.Now()); !exposed {
+		t.Error("reveal_contact returned a contact without exposing the sign-in")
+	}
+
+	quiet := newSendRig(t)
+	quiet.api.resp = &hey.Response{StatusCode: http.StatusNoContent, Data: json.RawMessage(``)}
+	session = quiet.connect(t, approve, "", false)
+	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_threads",
+		Arguments: map[string]any{"action": "trash_topic", "params": map[string]any{"topicId": 9}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if exposed, _, _ := quiet.state.exposure(context.Background(), "grant-1", quiet.clock.Now()); exposed {
+		t.Error("a write that answered nothing exposed the sign-in")
+	}
+}
