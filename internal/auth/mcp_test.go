@@ -477,3 +477,29 @@ func TestOnlyAWebLinkIsOpened(t *testing.T) {
 		}
 	}
 }
+
+// A pinned manager authenticates only as the sign-in it started on: a later
+// `hey auth login --mcp` isn't adopted, by a reload or by a refresh.
+func TestAPinnedManagerRefusesAnotherSignIn(t *testing.T) {
+	rig := newMCPRig(t)
+	if _, err := rig.mcp.LoginMCP(context.Background(), quiet); err != nil {
+		t.Fatal(err)
+	}
+	first, _ := rig.mcp.StoredCredentials()
+	rig.mcp.PinGrant(first.GrantKey)
+
+	other := NewMCPManager(rig.server.URL, rig.server.Client(), t.TempDir(), testMCPClientID)
+	other.store = rig.mcp.store
+	other.wait = rig.mcp.wait
+	if _, err := other.LoginMCP(context.Background(), quiet); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/boxes.json", nil)
+	if err := rig.mcp.AuthenticateRequestFromStore(context.Background(), req); !errors.Is(err, ErrGrantChanged) {
+		t.Errorf("a reload adopted another sign-in: %v (Authorization set: %v)", err, req.Header.Get("Authorization") != "")
+	}
+	if err := rig.mcp.Refresh(context.Background()); !errors.Is(err, ErrGrantChanged) {
+		t.Errorf("a refresh adopted another sign-in: %v", err)
+	}
+}

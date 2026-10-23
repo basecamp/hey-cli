@@ -61,6 +61,10 @@ func requireMCPCredentials() (*auth.Credentials, error) {
 	if creds.AccessToken == "" && creds.RefreshToken == "" {
 		return nil, errMCPNotSignedIn()
 	}
+	if creds.GrantKey == "" {
+		// Every --mcp sign-in mints one; without it the process couldn't be pinned.
+		return nil, errMCPNotSignedIn()
+	}
 	return creds, nil
 }
 

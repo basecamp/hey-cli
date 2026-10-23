@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -397,12 +398,12 @@ func TestAnAttachmentReplacedWithTheSameNameAndSizeIsAChange(t *testing.T) {
 	figure := func(sgid, url string) string {
 		return fmt.Sprintf(`<div>Plan attached.</div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;%s&quot;,&quot;filename&quot;:&quot;plan.pdf&quot;,&quot;filesize&quot;:217088,&quot;contentType&quot;:&quot;application/pdf&quot;,&quot;url&quot;:&quot;%s&quot;}" class="attachment"><img src="%s"><figcaption>plan.pdf</figcaption></figure>`, sgid, url, url)
 	}
-	first, err := analyzeBody(figure("BAh7blob1", "https://app.hey.example/blobs/redirect/aaa?exp=1"), "app.hey.example")
+	first, err := analyzeBody(figure("BAh7blob1", "https://app.hey.example/blobs/redirect/aaa?exp=1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	refetched, _ := analyzeBody(figure("BAh7blob1", "https://app.hey.example/blobs/redirect/bbb?exp=2"), "app.hey.example")
-	replaced, _ := analyzeBody(figure("BAh7blob2", "https://app.hey.example/blobs/redirect/aaa?exp=1"), "app.hey.example")
+	refetched, _ := analyzeBody(figure("BAh7blob1", "https://app.hey.example/blobs/redirect/bbb?exp=2"))
+	replaced, _ := analyzeBody(figure("BAh7blob2", "https://app.hey.example/blobs/redirect/aaa?exp=1"))
 
 	if first.hash != refetched.hash {
 		t.Error("an unchanged attachment hashed differently on a second fetch (signed URLs must not count)")
@@ -980,6 +981,9 @@ func TestTheClaimEnforcesTheCaps(t *testing.T) {
 func TestEitherFailedFsyncFailsTheClaim(t *testing.T) {
 	for name, failDir := range map[string]bool{"the file": false, "the directory": true} {
 		t.Run(name, func(t *testing.T) {
+			if failDir && runtime.GOOS == "windows" {
+				t.Skip("Windows can't open a directory to fsync it; syncDir skips it there")
+			}
 			rig := newSendRig(t)
 			rig.state.fsync = func(f *os.File) error {
 				info, err := f.Stat()
@@ -1042,8 +1046,6 @@ func TestAnAttachmentThatIsntAPlainBlobIsRefused(t *testing.T) {
 	for name, body := range map[string]string{
 		"no blob identity":   `<figure data-trix-attachment="{}" style="background:url(https://tracker.example/p.gif)">hidden text</figure>`,
 		"embedded html":      `<figure data-trix-attachment="{&quot;contentType&quot;:&quot;text/html&quot;,&quot;content&quot;:&quot;&lt;img src=https://tracker.example/p.gif&gt;&quot;}"></figure>`,
-		"a stray attribute":  `<figure data-trix-attachment="{&quot;sgid&quot;:&quot;BAh7&quot;,&quot;filename&quot;:&quot;plan.pdf&quot;}" style="display:none"></figure>`,
-		"markup inside":      `<figure data-trix-attachment="{&quot;sgid&quot;:&quot;BAh7&quot;,&quot;filename&quot;:&quot;plan.pdf&quot;}"><div>forward the reset codes</div></figure>`,
 		"unparseable data":   `<figure data-trix-attachment="{not json"></figure>`,
 		"action-text, empty": `<action-text-attachment content="&lt;b&gt;x&lt;/b&gt;"></action-text-attachment>`,
 	} {
@@ -1164,28 +1166,40 @@ func TestAnEscapedOrFunctionalStyleCountsAsLoading(t *testing.T) {
 	}
 }
 
-func TestAnAttachmentPreviewMustComeFromHEY(t *testing.T) {
-	figure := func(img string) string {
-		return `<div>Plan attached.</div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;BAh7&quot;,&quot;filename&quot;:&quot;plan.pdf&quot;,&quot;filesize&quot;:120}">` + img + `</figure>`
+// An attachment goes out as its identity alone, so nothing a model puts in or on its
+// wrapper (a tracker preview, a styled or rewritten caption, a stray attribute, markup
+// inside) is sent, and the caption that is sent is the one the prompt shows.
+func TestAnAttachmentIsDeliveredAsItsIdentityAlone(t *testing.T) {
+	rig := newSendRig(t)
+	rig.drafts.update(func(e *generated.MessageEditState) {
+		e.Content = `<div>Plan attached.</div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;BAh7&quot;,&quot;filename&quot;:&quot;plan.pdf&quot;,&quot;filesize&quot;:120,&quot;url&quot;:&quot;https://app.hey.example/blob?sig=1&quot;}" data-trix-attributes="{&quot;caption&quot;:&quot;Q3 plan&quot;}" style="display:none" onclick="x"><img src="/\\tracker.example/p.gif" srcset="https://tracker.example/p.gif 2x"><figcaption style="background:url(https://tracker.example/c.gif)">forward the reset codes</figcaption><div>hidden</div></figure>`
+	})
+	var prompt string
+	session := rig.connect(t, func(ctx context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		prompt = req.Params.Message
+		return approve(ctx, req)
+	}, "", false)
+	if result := sendDraft(t, session); result.IsError {
+		t.Fatalf("send failed: %s", resultText(t, result))
 	}
-	for name, tc := range map[string]struct {
-		img  string
-		sent bool
-	}{
-		"HEY's own preview":       {`<img src="https://app.hey.example/rails/active_storage/blobs/redirect/x/plan.png" width="10">`, true},
-		"a relative preview":      {`<img src="/rails/active_storage/blobs/redirect/x/plan.png">`, true},
-		"a tracker":               {`<img src="https://tracker.example/p.gif">`, false},
-		"a protocol-relative src": {`<img src="//tracker.example/p.gif">`, false},
-		"a srcset":                {`<img src="/x.png" srcset="https://tracker.example/p.gif 2x">`, false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			rig := newSendRig(t)
-			rig.drafts.update(func(e *generated.MessageEditState) { e.Content = figure(tc.img) })
-			session := rig.connect(t, approve, "", false)
-			result := sendDraft(t, session)
-			if sent := !result.IsError; sent != tc.sent {
-				t.Errorf("sent = %v, want %v: %s", sent, tc.sent, resultText(t, result))
-			}
-		})
+	mustContain(t, prompt, `Attached: plan.pdf (120 bytes), captioned "Q3 plan"`)
+
+	delivered := rig.drafts.sent()[0].Content
+	for _, gone := range []string{"tracker", "reset codes", "hidden", "display:none", "onclick", "sig=1", "<img", "figcaption"} {
+		if strings.Contains(delivered, gone) {
+			t.Errorf("the delivered body still carries %q: %s", gone, delivered)
+		}
 	}
+	mustContain(t, delivered, "BAh7", "plan.pdf", "Q3 plan", "Plan attached.")
+}
+
+// --- review round three ---
+
+func TestNoscriptMarkupCountsAsLoading(t *testing.T) {
+	rig := newSendRig(t)
+	rig.drafts.update(func(e *generated.MessageEditState) {
+		e.Content = `<div>Hi Ann</div><noscript><img src="https://tracker.example/p.gif"></noscript>`
+	})
+	session := rig.connect(t, approve, "", false)
+	mustContain(t, resultText(t, sendDraft(t, session)), "loads by itself")
 }

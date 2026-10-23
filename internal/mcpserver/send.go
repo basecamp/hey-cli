@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -328,15 +327,6 @@ func (s *sender) notSent(draftID int64, why string) *mcp.CallToolResult {
 	return result
 }
 
-// heyHost is the host of the HEY this sender runs against.
-func (s *sender) heyHost() string {
-	u, err := url.Parse(s.cfg.Origin)
-	if err != nil {
-		return ""
-	}
-	return u.Host
-}
-
 func (s *sender) editURL(draftID int64) string {
 	return fmt.Sprintf("%s/messages/%d/edit", strings.TrimRight(s.cfg.Origin, "/"), draftID)
 }
@@ -408,7 +398,6 @@ type draftSnapshot struct {
 	actingSenderID int64
 	to, cc, bcc    []generated.Contact
 	subject        string
-	rawContent     string
 	body           reviewedBody
 	scheduled      time.Time
 	fingerprint    string
@@ -417,11 +406,12 @@ type draftSnapshot struct {
 // content is the delivery request: every field from the verified snapshot, so an edit
 // landing after the final fetch is overwritten by what was approved (D2). HEY replaces
 // the whole recipient set when addressed is present (haystack Entry::Addressed#address),
-// so a Bcc added concurrently is dropped rather than delivered.
+// so a Bcc added concurrently is dropped rather than delivered. The body is the one the
+// fingerprint hashed, attachments rebuilt from their identity (sendbody.go).
 func (d *draftSnapshot) content() hey.DraftContent {
 	return hey.DraftContent{
 		Subject:        d.subject,
-		Content:        d.rawContent,
+		Content:        d.body.delivered,
 		To:             emails(d.to),
 		CC:             emails(d.cc),
 		BCC:            emails(d.bcc),
@@ -445,21 +435,20 @@ func normalizedAddress(address string) string {
 	return strings.ToLower(strings.TrimSpace(address))
 }
 
-func snapshotOf(edit *generated.MessageEditState, heyHost string) (*draftSnapshot, error) {
-	body, err := analyzeBody(edit.Content, heyHost)
+func snapshotOf(edit *generated.MessageEditState) (*draftSnapshot, error) {
+	body, err := analyzeBody(edit.Content)
 	if err != nil {
 		return nil, err
 	}
 	snap := &draftSnapshot{
-		id:         edit.Id,
-		from:       edit.Sender,
-		to:         edit.Addressed.Directly,
-		cc:         edit.Addressed.Copied,
-		bcc:        edit.Addressed.Blindcopied,
-		subject:    edit.Subject,
-		rawContent: edit.Content,
-		body:       body,
-		scheduled:  edit.ScheduledDeliveryAt,
+		id:        edit.Id,
+		from:      edit.Sender,
+		to:        edit.Addressed.Directly,
+		cc:        edit.Addressed.Copied,
+		bcc:       edit.Addressed.Blindcopied,
+		subject:   edit.Subject,
+		body:      body,
+		scheduled: edit.ScheduledDeliveryAt,
 	}
 	// HEY omits sender when the draft is sent as its creator contact, and the identity
 	// the draft was saved as rides the send (cmd's draftContentFrom does the same).
@@ -529,7 +518,7 @@ func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *re
 	if edit == nil || edit.Id != draftID {
 		return refuse("not sent: %d isn't a draft HEY can send", draftID)
 	}
-	snap, err := snapshotOf(edit, s.heyHost())
+	snap, err := snapshotOf(edit)
 	if err != nil {
 		return refuse("not sent: %v", err)
 	}

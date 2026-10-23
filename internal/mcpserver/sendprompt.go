@@ -83,7 +83,11 @@ func attachmentList(attachments []attachment) string {
 	}
 	names := make([]string, 0, len(attachments))
 	for _, a := range attachments {
-		names = append(names, fmt.Sprintf("%s (%s)", inertLine(a.Filename), humanSize(a.Size)))
+		name := fmt.Sprintf("%s (%s)", inertLine(a.Filename), humanSize(a.Size))
+		if a.Caption != "" {
+			name += `, captioned "` + inertLine(a.Caption) + `"`
+		}
+		names = append(names, name)
 	}
 	return strings.Join(names, ", ")
 }
