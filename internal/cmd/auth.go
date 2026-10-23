@@ -52,6 +52,7 @@ func buildLoginCommand(path string) *cobra.Command {
 		token     string
 		cookie    string
 		noBrowser bool
+		mcp       bool
 	)
 
 	cmd := &cobra.Command{
@@ -60,14 +61,28 @@ func buildLoginCommand(path string) *cobra.Command {
 		Long: `Authenticate with the HEY server.
 
 Opens a browser for OAuth authentication against HEY's own OAuth server, using PKCE.
-Use --token or --cookie for non-interactive login.`,
+Use --token or --cookie for non-interactive login.
+
+--mcp signs in hey mcp instead, as its own app ("HEY MCP (local)" in HEY's Connected
+Apps), asking to read, write and send but nothing more. Its credential is kept apart
+from the CLI's, and hey mcp serves on it alone. It uses a device code where HEY
+offers one, and the browser otherwise. If you uncheck sending on HEY's page, hey mcp
+saves drafts but can't send them.`,
 		Example: strings.Join([]string{
 			"  " + path,
 			"  " + path + " --token YOUR_BEARER_TOKEN",
 			"  " + path + " --cookie SESSION_COOKIE_VALUE",
 			"  " + path + " --no-browser",
+			"  " + path + " --mcp",
 		}, "\n"),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if mcp {
+				if token != "" || cookie != "" {
+					return apierr.ErrUsage("--mcp signs in through HEY; it takes no --token or --cookie")
+				}
+				return loginMCP(cmd, noBrowser)
+			}
+
 			if token != "" {
 				if err := authMgr.LoginWithToken(token); err != nil {
 					return apierr.ErrAuth(fmt.Sprintf("could not save token: %v", err))
@@ -113,6 +128,7 @@ Use --token or --cookie for non-interactive login.`,
 	cmd.Flags().StringVar(&token, "token", "", "Pre-generated Bearer token")
 	cmd.Flags().StringVar(&cookie, "cookie", "", "Session cookie value from browser (__Host-session_token, or session_token)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser, print URL instead")
+	cmd.Flags().BoolVar(&mcp, "mcp", false, "Sign in hey mcp with its own credential (read, write and send)")
 
 	return cmd
 }
@@ -126,11 +142,19 @@ func newAuthLogoutCommand() *cobra.Command {
 // buildLogoutCommand constructs a logout command whose example reads as the
 // given path. Shared by `hey auth logout` and the top-level `hey logout`.
 func buildLogoutCommand(path string) *cobra.Command {
-	return &cobra.Command{
-		Use:     "logout",
-		Short:   "Clear stored credentials",
-		Example: "  " + path,
+	var mcp bool
+	cmd := &cobra.Command{
+		Use:   "logout",
+		Short: "Clear stored credentials",
+		Long: `Clear the CLI's stored credentials.
+
+--mcp signs hey mcp out instead: it revokes hey mcp's sign-in at HEY and removes its
+credential, leaving the CLI's alone.`,
+		Example: "  " + path + "\n  " + path + " --mcp",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if mcp {
+				return logoutMCP(cmd)
+			}
 			if err := authMgr.Logout(); err != nil {
 				return apierr.ErrAuth(fmt.Sprintf("could not clear credentials: %v", err))
 			}
@@ -139,6 +163,8 @@ func buildLogoutCommand(path string) *cobra.Command {
 			return writeMutation(cmd, "Logged out", nil)
 		},
 	}
+	cmd.Flags().BoolVar(&mcp, "mcp", false, "Sign hey mcp out: revoke its sign-in and remove its credential")
+	return cmd
 }
 
 // status subcommand
@@ -148,14 +174,16 @@ func newAuthStatusCommand() *cobra.Command {
 		Use:   "status",
 		Short: "Show authentication status",
 		Annotations: map[string]string{
-			"agent_notes": "Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing, so authenticated true does not prove HEY still accepts them. JSON answers authenticated, base_url, mail_account, account_source and install_id; method env_var when HEY_TOKEN is set; otherwise storage (keyring or file), auth_type, and expires_at, expired and refresh_available for a token. An expired token with refresh_available is refreshed by the next data command.",
+			"agent_notes": "Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing, so authenticated true does not prove HEY still accepts them. JSON answers authenticated, base_url, mail_account, account_source and install_id; method env_var when HEY_TOKEN is set; otherwise storage (keyring or file), auth_type, and expires_at, expired and refresh_available for a token. An expired token with refresh_available is refreshed by the next data command. mcp reports hey mcp's own sign-in the same way, with its scope and can_send; HEY_TOKEN never stands in for it.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mcpStatus := mcpCredentialStatus()
 			status := map[string]any{
 				"base_url":       cfg.BaseURL,
 				"mail_account":   cfg.AccountID,
 				"account_source": cfg.SourceOf("account_id"),
 				"authenticated":  false,
+				"mcp":            mcpStatus,
 			}
 
 			// The install identifier is install-scoped: it survives logout and
@@ -180,6 +208,7 @@ func newAuthStatusCommand() *cobra.Command {
 						fmt.Fprintf(w, "Install:   %s\n", installID)
 					}
 					fmt.Fprintln(w, "Status:    Logged in (via HEY_TOKEN env var)")
+					printMCPStatus(w, mcpStatus)
 					return nil
 				}
 				return writeOK(status, output.WithSummary("Logged in via HEY_TOKEN"))
@@ -199,6 +228,7 @@ func newAuthStatusCommand() *cobra.Command {
 						fmt.Fprintf(w, "Install:   %s\n", installID)
 					}
 					fmt.Fprintln(w, "Status:    Not logged in")
+					printMCPStatus(w, mcpStatus)
 					return nil
 				}
 				return writeOK(status, output.WithSummary("Not logged in"),
@@ -268,6 +298,7 @@ func newAuthStatusCommand() *cobra.Command {
 				} else {
 					fmt.Fprintln(w, "Storage:   file")
 				}
+				printMCPStatus(w, mcpStatus)
 				return nil
 			}
 

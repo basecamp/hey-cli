@@ -5,12 +5,17 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
+	"time"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/mcpserver"
 )
 
@@ -30,12 +35,19 @@ func newMCPCommand() *mcpCommand {
 		Use:   "mcp",
 		Short: "Serve HEY to MCP clients over stdio",
 		Long: "Run an MCP (Model Context Protocol) server on stdin/stdout, serving HEY mail,\n" +
-			"contacts, and todos as tools backed by your signed-in account.\n\n" +
-			"It never sends mail. create_message, create_reply and update_message only save\n" +
-			"drafts, and a request to send, schedule or triage in the same call is refused\n" +
-			"before HEY is contacted. Updating a scheduled draft clears its schedule. Send a\n" +
-			"draft yourself from HEY or with `hey draft send <id>`. --read-only drops every\n" +
-			"write action, drafts included.\n\n" +
+			"contacts, and todos as tools.\n\n" +
+			"hey mcp has its own sign-in, separate from the CLI's: run `hey auth login --mcp`\n" +
+			"first. It signs in as \"HEY MCP (local)\", which can read, write and send but\n" +
+			"can't reach settings, forwarding, trash or HEY World, and shows in HEY's Connected\n" +
+			"Apps on its own. hey mcp never uses the CLI's credential or HEY_TOKEN.\n\n" +
+			"create_message, create_reply and update_message only save drafts, and a request\n" +
+			"to send, schedule or triage in the same call is refused before HEY is contacted.\n" +
+			"Updating a scheduled draft clears its schedule. hey_send's send_draft is the one\n" +
+			"way to deliver: it asks you to confirm each email in your MCP client, showing its\n" +
+			"recipients, subject and body, and sends exactly what you approved, once. A client\n" +
+			"that can't show a confirmation gets the draft's link in HEY instead. send_draft\n" +
+			"is served only when the sign-in was granted sending. --read-only drops every\n" +
+			"write action, drafts and sending included.\n\n" +
 			"Register it with an MCP client as a stdio server, e.g.:\n\n" +
 			"  claude mcp add hey -- hey mcp",
 		Args: cobra.NoArgs,
@@ -86,18 +98,48 @@ func (a mcpAPI) Delete(ctx context.Context, path string) (*hey.Response, error) 
 }
 
 func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
-	if err := requireAuth(); err != nil {
-		return err
-	}
-
-	// The same account scoping the shared client got in the root command's
-	// pre-run, applied to the no-retry twin.
-	writes, err := clientForAccountSelection(cmd.Context(), newSDKClient(hey.WithMaxRetries(0)), cfg.AccountID)
+	// hey mcp serves on its own credential, never the CLI's (mcp_auth.go).
+	creds, err := requireMCPCredentials()
 	if err != nil {
 		return err
 	}
 
-	srv, err := mcpserver.New(mcpAPI{reads: sdk, writes: writes}, mcpserver.Config{ReadOnly: c.readOnly, Domains: c.domains})
+	ctx := cmd.Context()
+	reads, err := clientForAccountSelection(ctx, newMCPSDKClient(), cfg.AccountID)
+	if err != nil {
+		return err
+	}
+	writes, err := clientForAccountSelection(ctx, newMCPSDKClient(hey.WithMaxRetries(0)), cfg.AccountID)
+	if err != nil {
+		return err
+	}
+
+	// The tools follow the grant: without write, nothing that writes is served; without
+	// send (and read, which send_draft's review needs), no hey_send.
+	readOnly := c.readOnly || !auth.HasScope(creds.Scope, "write")
+	serverCfg := mcpserver.Config{ReadOnly: readOnly, Domains: c.domains}
+	// The sign-in's local key is the principal send safety counts against, so a
+	// credential without one serves no send.
+	canSend := auth.HasScope(creds.Scope, "read", "send") && creds.GrantKey != ""
+	if canSend && !readOnly {
+		state, stateErr := mcpserver.OpenSendState(config.StateDir())
+		if stateErr != nil {
+			return stateErr
+		}
+		// An undated sign-in makes no recipient known: only mail sent before it does.
+		var grantedAt time.Time
+		if creds.GrantedAt > 0 {
+			grantedAt = time.Unix(creds.GrantedAt, 0)
+		}
+		serverCfg.Send = &mcpserver.SendConfig{
+			Drafts: mcpDrafts{reads: reads, writes: writes},
+			State:  state,
+			Grant:  mcpserver.Grant{Key: creds.GrantKey, GrantedAt: grantedAt},
+			Origin: strings.TrimRight(cfg.BaseURL, "/"),
+		}
+	}
+
+	srv, err := mcpserver.New(mcpAPI{reads: reads, writes: writes}, serverCfg)
 	if err != nil {
 		return err
 	}
@@ -111,7 +153,43 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	logger.Info("MCP server running on stdio", "tools", len(srv.Domains()), "read_only", c.readOnly)
+	logger.Info("MCP server running on stdio", "tools", len(srv.Domains()), "read_only", readOnly, "send_draft", srv.ServesSend())
+	if !canSend {
+		logger.Info("send_draft isn't served: hey mcp's sign-in wasn't granted sending. To allow it, run `hey auth login --mcp` again and leave sending checked.")
+	}
 
 	return session.Wait()
+}
+
+// newMCPSDKClient builds a client like the CLI's, authenticated with hey mcp's own
+// credential instead. It keeps no response cache: the cache is the CLI credential's, and
+// what one credential fetched isn't the other's to read.
+func newMCPSDKClient(extra ...hey.ClientOption) *hey.Client {
+	uncached := *sdkClientCfg
+	uncached.CacheEnabled = false
+	uncached.CacheDir = ""
+	opts := append(append([]hey.ClientOption{}, sdkClientOpts...), hey.WithAuthStrategy(&cliAuthStrategy{mgr: mcpAuthMgr}))
+	return hey.NewClient(&uncached, nil, append(opts, extra...)...)
+}
+
+// mcpDrafts is send_draft's view of the SDK: reads through the retrying client, the send
+// through the one that never retries, because a retried send can deliver twice.
+type mcpDrafts struct {
+	reads, writes *hey.Client
+}
+
+func (d mcpDrafts) GetEdit(ctx context.Context, draftID int64) (*generated.MessageEditState, error) {
+	return d.reads.Messages().GetEdit(ctx, draftID)
+}
+
+func (d mcpDrafts) SendDraft(ctx context.Context, draftID int64, draft hey.DraftContent) (*generated.SentMessage, error) {
+	return d.writes.Messages().SendDraft(ctx, draftID, draft)
+}
+
+func (d mcpDrafts) Identity(ctx context.Context) (*generated.Identity, error) {
+	return d.reads.Identity().GetIdentity(ctx)
+}
+
+func (d mcpDrafts) Search(ctx context.Context, params hey.SearchParams) (*generated.AdvancedSearchResult, error) {
+	return d.reads.Search().Search(ctx, params)
 }

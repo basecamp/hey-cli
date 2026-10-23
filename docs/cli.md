@@ -61,6 +61,16 @@ hey auth logout   # clear credentials
 
 `hey login` and `hey logout` are top-level shortcuts for `hey auth login` and `hey auth logout`.
 
+`hey mcp` has a sign-in of its own, kept apart from the CLI's and limited to reading,
+writing and sending (see [agents.md](agents.md#its-own-sign-in)):
+
+```bash
+hey auth login --mcp    # sign hey mcp in
+hey auth logout --mcp   # revoke hey mcp's sign-in and remove it
+```
+
+`hey auth status` reports both.
+
 ### Linked accounts
 
 One HEY login exposes every mail account linked to that identity. List the available

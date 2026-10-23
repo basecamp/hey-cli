@@ -42,6 +42,9 @@ var _ API = (*hey.Client)(nil)
 // three. Failures are in-band isError results per MCP convention.
 type dispatcher struct {
 	api API
+	// markExposed records that a read may have returned an unscreened sender's words
+	// (exposure.go). Nil when nothing is served that exposure could tighten.
+	markExposed func(ctx context.Context, action string) error
 }
 
 func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.Operation, params map[string]any) (*mcp.CallToolResult, error) {
@@ -77,6 +80,13 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 			return gateway.ErrorResult("%s", unsettledDraft(full.Action, err)), nil
 		}
 		return gateway.ErrorResult("%v", err), nil
+	}
+	// The exposure marker lands before the content leaves (D6). A read not in the
+	// table exposes: it can't be shown not to.
+	if exposes, classified := readExposes[full.ID]; d.markExposed != nil && full.ReadOnly && (exposes || !classified) {
+		if err := d.markExposed(ctx, full.Action); err != nil {
+			return gateway.ErrorResult("hey mcp can't return %s right now: it couldn't record that the answer may include mail from an unscreened sender (%v)", full.Action, err), nil
+		}
 	}
 	if draft {
 		if !savedAsDraft(resp) {
