@@ -63,7 +63,7 @@ func New(api API, cfg Config) (*Server, error) {
 		if send, err = newSender(*cfg.Send); err != nil {
 			return nil, fmt.Errorf("serve send_draft: %w", err)
 		}
-		d.markExposed = send.markExposed
+		d = dispatcher{api: api, markExposed: send.markExposed}
 	}
 	if cfg.ReadOnly || !servesDomain(cfg.Domains, "threads") {
 		send = nil

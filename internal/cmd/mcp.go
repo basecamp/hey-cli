@@ -141,6 +141,11 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 				if loadErr != nil {
 					return "", loadErr
 				}
+				// A refresh that narrowed the grant below sending is a different
+				// sign-in as far as sending goes: refuse before claiming.
+				if !mcpCanSend(stored) {
+					return "", nil
+				}
 				return stored.GrantKey, nil
 			},
 		}

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -81,14 +82,15 @@ var loadingTags = map[atom.Atom]bool{
 // loadingAttributes name a URL a client loads by itself.
 var loadingAttributes = []string{"src", "srcset", "background", "poster", "lowsrc", "dynsrc", "data", "xlink:href", "action", "formaction"}
 
-// analyzeBody reads a draft's raw content.
-func analyzeBody(content string) (reviewedBody, error) {
+// analyzeBody reads a draft's raw content. heyHost is the HEY host the draft lives
+// on: an attachment's preview image may load only from there.
+func analyzeBody(content, heyHost string) (reviewedBody, error) {
 	nodes, err := html.ParseFragment(strings.NewReader(content), &html.Node{Type: html.ElementNode, Data: "body", DataAtom: atom.Body})
 	if err != nil {
 		return reviewedBody{}, fmt.Errorf("read the draft's body: %w", err)
 	}
 
-	w := &bodyWalker{lossless: true}
+	w := &bodyWalker{lossless: true, heyHost: heyHost}
 	for _, n := range nodes {
 		w.walk(n)
 	}
@@ -110,6 +112,7 @@ type bodyWalker struct {
 	attachments     []attachment
 	remote          string
 	unverifiable    string
+	heyHost         string
 }
 
 func (w *bodyWalker) walk(n *html.Node) {
@@ -130,7 +133,7 @@ func (w *bodyWalker) walk(n *html.Node) {
 		return
 	}
 
-	a, isAttachment, problem := attachmentOf(n)
+	a, isAttachment, problem := attachmentOf(n, w.heyHost)
 	if problem != "" && w.unverifiable == "" {
 		w.unverifiable = problem
 	}
@@ -194,8 +197,10 @@ func loadsByItself(attr html.Attribute) bool {
 		return true
 	}
 	if key == "style" {
+		// CSS escapes spell url( without its letters (u\72l(...)), so a style with an
+		// escape, or any function call at all, counts as loading. Trix writes no style.
 		value := strings.ToLower(attr.Val)
-		return strings.Contains(value, "url(") || strings.Contains(value, "image-set(") || strings.Contains(value, "@import")
+		return strings.ContainsAny(value, "\\(") || strings.Contains(value, "@import")
 	}
 	return false
 }
@@ -206,7 +211,7 @@ func loadsByItself(attr html.Attribute) bool {
 // carries an embedded email body as a filename-less text/html attachment whose markup
 // is in its JSON), embedded content, an attribute Trix doesn't write on one, or
 // anything inside but its preview image and caption.
-func attachmentOf(n *html.Node) (attachment, bool, string) {
+func attachmentOf(n *html.Node, heyHost string) (attachment, bool, string) {
 	var a attachment
 	var allowed map[string]bool
 	var embedded bool
@@ -245,24 +250,45 @@ func attachmentOf(n *html.Node) (attachment, bool, string) {
 			return a, true, name + " carries " + attr.Key
 		}
 	}
-	if !plainAttachmentChildren(n) {
+	if !plainAttachmentChildren(n, heyHost) {
 		return a, true, name + " wraps markup of its own"
 	}
 	return a, true, ""
 }
 
 // plainAttachmentChildren reports whether an attachment holds only what Trix renders
-// in one: whitespace, a preview image, and a caption of plain text.
-func plainAttachmentChildren(n *html.Node) bool {
+// in one: whitespace, a preview image served by HEY itself, and a caption of plain text.
+func plainAttachmentChildren(n *html.Node, heyHost string) bool {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		switch {
 		case c.Type == html.TextNode && strings.TrimSpace(c.Data) == "":
-		case c.Type == html.ElementNode && c.DataAtom == atom.Img && c.FirstChild == nil:
+		case c.Type == html.ElementNode && c.DataAtom == atom.Img && c.FirstChild == nil && heyPreview(c, heyHost):
 		case c.Type == html.ElementNode && c.DataAtom == atom.Figcaption:
 			for t := c.FirstChild; t != nil; t = t.NextSibling {
 				if t.Type != html.TextNode {
 					return false
 				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// heyPreview reports whether img is a preview HEY serves: a src on HEY's own host (or
+// relative to it) and nothing but its size and alt text besides.
+func heyPreview(img *html.Node, heyHost string) bool {
+	for _, attr := range img.Attr {
+		switch attr.Key {
+		case "width", "height", "alt":
+		case "src":
+			u, err := url.Parse(attr.Val)
+			if err != nil || (u.Host != "" && !strings.EqualFold(u.Host, heyHost)) || (u.Host == "" && !strings.HasPrefix(attr.Val, "/")) || strings.HasPrefix(attr.Val, "//") {
+				return false
+			}
+			if u.Scheme != "" && u.Scheme != "https" && u.Scheme != "http" {
+				return false
 			}
 		default:
 			return false

@@ -33,6 +33,8 @@ type fakeHEYOAuth struct {
 	pollErrors []string
 	// grantedScope is the token response's scope; "-" leaves it out.
 	grantedScope string
+	// deviceBody replaces the device authorization response when set.
+	deviceBody string
 
 	deviceRequests url.Values
 	polls          []url.Values
@@ -59,6 +61,10 @@ func (f *fakeHEYOAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if f.deviceStatus != 0 {
 			w.WriteHeader(f.deviceStatus)
 			fmt.Fprintf(w, `{"error":%q}`, f.deviceError)
+			return
+		}
+		if f.deviceBody != "" {
+			fmt.Fprint(w, f.deviceBody)
 			return
 		}
 		fmt.Fprint(w, `{"device_code":"secret-device-code","user_code":"WDJB-MJHT","verification_uri":"https://hey.example/device","verification_uri_complete":"https://hey.example/device?user_code=WDJB-MJHT","expires_in":600,"interval":5}`)
@@ -436,6 +442,38 @@ func TestHasScopeReadsTheExpandedSet(t *testing.T) {
 	} {
 		if got := HasScope(tc.granted, tc.want...); got != tc.ok {
 			t.Errorf("HasScope(%q, %v) = %v, want %v", tc.granted, tc.want, got, tc.ok)
+		}
+	}
+}
+
+// The link and code come from HEY's answer: what reaches the terminal is sanitized, and
+// the device code, a secret, never does.
+func TestDeviceLoginSanitizesWhatItShows(t *testing.T) {
+	rig := newMCPRig(t)
+	rig.hey.deviceBody = `{"device_code":"secret-device-code","user_code":"WDJB\u001b]52;c;cGF5bG9hZA==\u0007-MJHT","verification_uri":"https://hey.example/device\u001b[2J\nFake: approved","expires_in":600,"interval":5}`
+	var shown strings.Builder
+	opts := LoginOptions{NoBrowser: true, Logger: func(msg string) { shown.WriteString(msg) }}
+	if _, err := rig.mcp.LoginMCP(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	out := shown.String()
+	if strings.ContainsAny(out, "\x1b\x07") || strings.Contains(out, "\nFake: approved") {
+		t.Errorf("control sequences reached the terminal: %q", out)
+	}
+	if strings.Contains(out, "secret-device-code") {
+		t.Error("the device code was shown")
+	}
+}
+
+func TestOnlyAWebLinkIsOpened(t *testing.T) {
+	for link, want := range map[string]bool{
+		"https://app.hey.com/device?user_code=WDJB-MJHT": true,
+		"file:///etc/passwd":                             false,
+		"javascript:alert(1)":                            false,
+		"/device":                                        false,
+	} {
+		if got := webLink(link); got != want {
+			t.Errorf("webLink(%q) = %v, want %v", link, got, want)
 		}
 	}
 }

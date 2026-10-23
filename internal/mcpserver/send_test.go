@@ -38,6 +38,7 @@ type fakeDrafts struct {
 	editErr  error
 	sends    []hey.DraftContent
 	sendErr  error
+	sentAs   *generated.SentMessage
 	sentTo   map[string]time.Time
 	searches int
 }
@@ -92,6 +93,9 @@ func (f *fakeDrafts) SendDraft(_ context.Context, _ int64, draft hey.DraftConten
 	if f.sendErr != nil {
 		return nil, f.sendErr
 	}
+	if f.sentAs != nil {
+		return f.sentAs, nil
+	}
 	return &generated.SentMessage{Id: 5, TopicId: 900}, nil
 }
 
@@ -111,7 +115,8 @@ func (f *fakeDrafts) Search(_ context.Context, params hey.SearchParams) (*genera
 		return &generated.AdvancedSearchResult{}, nil
 	}
 	return &generated.AdvancedSearchResult{Matches: []generated.SearchMatch{{Entries: []generated.Entry{{
-		CreatedAt: at,
+		CreatedAt: at.Add(-time.Hour),
+		ActiveAt:  at,
 		Creator:   generated.Contact{EmailAddress: "jeremy@hey.example"},
 		Addressed: generated.Addressed{Directly: []generated.Contact{{EmailAddress: params.To}}},
 	}}}}}, nil
@@ -392,12 +397,12 @@ func TestAnAttachmentReplacedWithTheSameNameAndSizeIsAChange(t *testing.T) {
 	figure := func(sgid, url string) string {
 		return fmt.Sprintf(`<div>Plan attached.</div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;%s&quot;,&quot;filename&quot;:&quot;plan.pdf&quot;,&quot;filesize&quot;:217088,&quot;contentType&quot;:&quot;application/pdf&quot;,&quot;url&quot;:&quot;%s&quot;}" class="attachment"><img src="%s"><figcaption>plan.pdf</figcaption></figure>`, sgid, url, url)
 	}
-	first, err := analyzeBody(figure("BAh7blob1", "https://app.hey.example/blobs/redirect/aaa?exp=1"))
+	first, err := analyzeBody(figure("BAh7blob1", "https://app.hey.example/blobs/redirect/aaa?exp=1"), "app.hey.example")
 	if err != nil {
 		t.Fatal(err)
 	}
-	refetched, _ := analyzeBody(figure("BAh7blob1", "https://app.hey.example/blobs/redirect/bbb?exp=2"))
-	replaced, _ := analyzeBody(figure("BAh7blob2", "https://app.hey.example/blobs/redirect/aaa?exp=1"))
+	refetched, _ := analyzeBody(figure("BAh7blob1", "https://app.hey.example/blobs/redirect/bbb?exp=2"), "app.hey.example")
+	replaced, _ := analyzeBody(figure("BAh7blob2", "https://app.hey.example/blobs/redirect/aaa?exp=1"), "app.hey.example")
 
 	if first.hash != refetched.hash {
 		t.Error("an unchanged attachment hashed differently on a second fetch (signed URLs must not count)")
@@ -1117,5 +1122,70 @@ func TestTheNewAddressWindowRollsWithTheLastSend(t *testing.T) {
 	var refused *refusalError
 	if err := rig.state.claim(ctx, testOrigin, 102, "grant-1", []string{"eleventh@example.com"}, false, start.Add(24*time.Hour+time.Minute)); !errors.As(err, &refused) {
 		t.Errorf("an eleventh new address fit in a window that still held ten: %v", err)
+	}
+}
+
+// --- review round two ---
+
+func TestADeliveryHEYKeptAsADraftIsntReportedSent(t *testing.T) {
+	rig := newSendRig(t)
+	rig.drafts.sentAs = &generated.SentMessage{Id: 5} // the redirect to the edit page
+	session := rig.connect(t, approve, "", false)
+	result := sendDraft(t, session)
+	if !result.IsError || strings.Contains(resultText(t, result), `"sent": true`) {
+		t.Fatalf("a draft HEY kept was reported sent: %s", resultText(t, result))
+	}
+	mustContain(t, resultText(t, result), "kept the draft")
+}
+
+func TestADraftMadeBeforeTheSignInButSentAfterDoesntMakeARecipientKnown(t *testing.T) {
+	rig := newSendRig(t)
+	rig.drafts.sentTo["ann@example.com"] = grantedAt.Add(time.Hour) // created an hour before, delivered an hour after
+	var prompt string
+	session := rig.connect(t, func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		prompt = req.Params.Message
+		return &mcp.ElicitResult{Action: "decline"}, nil
+	}, "", false)
+	sendDraft(t, session)
+	mustContain(t, prompt, "<ann@example.com> (new: never emailed before)")
+}
+
+func TestAnEscapedOrFunctionalStyleCountsAsLoading(t *testing.T) {
+	for name, style := range map[string]string{
+		"css escape":    `background:u\72l(https://tracker.example/p.gif)`,
+		"function call": `background:image(https://tracker.example/p.gif)`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newSendRig(t)
+			rig.drafts.update(func(e *generated.MessageEditState) { e.Content = `<div style="` + style + `">Hi Ann</div>` })
+			session := rig.connect(t, approve, "", false)
+			mustContain(t, resultText(t, sendDraft(t, session)), "loads by itself")
+		})
+	}
+}
+
+func TestAnAttachmentPreviewMustComeFromHEY(t *testing.T) {
+	figure := func(img string) string {
+		return `<div>Plan attached.</div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;BAh7&quot;,&quot;filename&quot;:&quot;plan.pdf&quot;,&quot;filesize&quot;:120}">` + img + `</figure>`
+	}
+	for name, tc := range map[string]struct {
+		img  string
+		sent bool
+	}{
+		"HEY's own preview":       {`<img src="https://app.hey.example/rails/active_storage/blobs/redirect/x/plan.png" width="10">`, true},
+		"a relative preview":      {`<img src="/rails/active_storage/blobs/redirect/x/plan.png">`, true},
+		"a tracker":               {`<img src="https://tracker.example/p.gif">`, false},
+		"a protocol-relative src": {`<img src="//tracker.example/p.gif">`, false},
+		"a srcset":                {`<img src="/x.png" srcset="https://tracker.example/p.gif 2x">`, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newSendRig(t)
+			rig.drafts.update(func(e *generated.MessageEditState) { e.Content = figure(tc.img) })
+			session := rig.connect(t, approve, "", false)
+			result := sendDraft(t, session)
+			if sent := !result.IsError; sent != tc.sent {
+				t.Errorf("sent = %v, want %v: %s", sent, tc.sent, resultText(t, result))
+			}
+		})
 	}
 }

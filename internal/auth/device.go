@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/basecamp/hey-cli/internal/terminal"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
@@ -62,9 +63,13 @@ func (m *Manager) LoginDevice(ctx context.Context, opts LoginOptions) error {
 	if link == "" {
 		link = authorization.VerificationURI
 	}
-	opts.log(fmt.Sprintf("\nTo sign in, open %s\nand check that HEY shows this code: %s\n", link, authorization.UserCode))
+	// Both come from HEY's answer, so what reaches the terminal is sanitized, and only
+	// a web link is handed to the browser.
+	opts.log(fmt.Sprintf("\nTo sign in, open %s\nand check that HEY shows this code: %s\n", terminal.SanitizeLine(link), terminal.SanitizeLine(authorization.UserCode)))
 	if !opts.NoBrowser {
-		if browserErr := openBrowser(link); browserErr != nil {
+		if !webLink(link) {
+			opts.log("HEY's sign-in link isn't a web address, so it wasn't opened.\n")
+		} else if browserErr := openBrowser(link); browserErr != nil {
 			opts.log("Couldn't open the browser automatically; open the link above.\n")
 		}
 	}
@@ -108,6 +113,12 @@ func (m *Manager) LoginDevice(ctx context.Context, opts LoginOptions) error {
 			return fmt.Errorf("device sign-in failed: %s", code)
 		}
 	}
+}
+
+// webLink reports whether link is an absolute http or https URL.
+func webLink(link string) bool {
+	u, err := url.Parse(link)
+	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
 }
 
 // requestDeviceAuthorization asks HEY for a device code (POST /oauth/device_authorizations).
