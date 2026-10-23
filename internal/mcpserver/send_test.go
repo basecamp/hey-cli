@@ -115,7 +115,7 @@ func (f *fakeDrafts) Search(_ context.Context, params hey.SearchParams) (*genera
 		return &generated.AdvancedSearchResult{}, nil
 	}
 	return &generated.AdvancedSearchResult{Matches: []generated.SearchMatch{{Entries: []generated.Entry{{
-		CreatedAt: at.Add(-time.Hour),
+		CreatedAt: at.Add(-2 * time.Hour),
 		ActiveAt:  at,
 		Creator:   generated.Contact{EmailAddress: "jeremy@hey.example"},
 		Addressed: generated.Addressed{Directly: []generated.Contact{{EmailAddress: params.To}}},
