@@ -34,6 +34,11 @@ type reviewedBody struct {
 	attachments []attachment
 	// remote names the first reference a mail client would fetch on open, or "".
 	remote string
+	// unverifiable names the first attachment element that isn't a plain blob
+	// attachment (no sgid or filename, embedded HTML content, or markup Trix doesn't
+	// write around one), or "". Its contents can't be reduced to a blob's identity, so
+	// such a draft isn't sent.
+	unverifiable string
 	// hash is the sha256 of the body with each attachment reduced to its identity and
 	// the volatile attributes (signed URLs) dropped, so two fetches of an unchanged draft
 	// hash alike and a changed attachment doesn't.
@@ -90,11 +95,12 @@ func analyzeBody(content string) (reviewedBody, error) {
 
 	sum := sha256.Sum256([]byte(w.canonical.String()))
 	return reviewedBody{
-		text:        tidyText(w.text.String()),
-		lossless:    w.lossless && len(w.attachments) == 0,
-		attachments: w.attachments,
-		remote:      w.remote,
-		hash:        hex.EncodeToString(sum[:]),
+		text:         tidyText(w.text.String()),
+		lossless:     w.lossless && len(w.attachments) == 0,
+		attachments:  w.attachments,
+		remote:       w.remote,
+		unverifiable: w.unverifiable,
+		hash:         hex.EncodeToString(sum[:]),
 	}, nil
 }
 
@@ -103,6 +109,7 @@ type bodyWalker struct {
 	lossless        bool
 	attachments     []attachment
 	remote          string
+	unverifiable    string
 }
 
 func (w *bodyWalker) walk(n *html.Node) {
@@ -123,7 +130,11 @@ func (w *bodyWalker) walk(n *html.Node) {
 		return
 	}
 
-	if a, ok := attachmentOf(n); ok {
+	a, isAttachment, problem := attachmentOf(n)
+	if problem != "" && w.unverifiable == "" {
+		w.unverifiable = problem
+	}
+	if isAttachment && problem == "" {
 		// The attachment's own markup (the preview image on a signed URL, the caption
 		// Trix derives) is HEY's, not the sender's: reduce it to the blob's identity.
 		w.attachments = append(w.attachments, a)
@@ -190,31 +201,88 @@ func loadsByItself(attr html.Attribute) bool {
 }
 
 // attachmentOf reads a Trix attachment element: a figure carrying data-trix-attachment,
-// or an action-text-attachment.
-func attachmentOf(n *html.Node) (attachment, bool) {
-	if n.DataAtom == atom.Figure {
-		raw := attrValue(n, "data-trix-attachment")
-		if raw == "" {
-			return attachment{}, false
+// or an action-text-attachment. It answers whether n is one, and a problem when it is
+// one whose contents can't be reduced to a blob's identity: no sgid or filename (Trix
+// carries an embedded email body as a filename-less text/html attachment whose markup
+// is in its JSON), embedded content, an attribute Trix doesn't write on one, or
+// anything inside but its preview image and caption.
+func attachmentOf(n *html.Node) (attachment, bool, string) {
+	var a attachment
+	var allowed map[string]bool
+	var embedded bool
+	switch {
+	case n.DataAtom == atom.Figure && hasAttr(n, "data-trix-attachment"):
+		var data map[string]any
+		if json.Unmarshal([]byte(attrValue(n, "data-trix-attachment")), &data) != nil {
+			return a, true, "a figure whose attachment data doesn't parse"
 		}
-		var data struct {
-			SGID        string `json:"sgid"`
-			Filename    string `json:"filename"`
-			Filesize    any    `json:"filesize"`
-			ContentType string `json:"contentType"`
-		}
-		_ = json.Unmarshal([]byte(raw), &data)
-		var attributes struct {
-			Caption string `json:"caption"`
-		}
+		var attributes map[string]any
 		_ = json.Unmarshal([]byte(attrValue(n, "data-trix-attributes")), &attributes)
-		return attachment{SGID: data.SGID, Filename: data.Filename, Size: sizeOf(data.Filesize), ContentType: data.ContentType, Caption: attributes.Caption}, true
-	}
-	if n.Data == "action-text-attachment" {
+		_, embedded = data["content"]
+		a = attachment{SGID: asText(data["sgid"]), Filename: asText(data["filename"]), Size: sizeOf(data["filesize"]), ContentType: asText(data["contentType"]), Caption: asText(attributes["caption"])}
+		allowed = map[string]bool{"data-trix-attachment": true, "data-trix-attributes": true, "data-trix-content-type": true, "class": true}
+	case n.Data == "action-text-attachment":
 		size, _ := strconv.ParseInt(attrValue(n, "filesize"), 10, 64)
-		return attachment{SGID: attrValue(n, "sgid"), Filename: attrValue(n, "filename"), Size: size, ContentType: attrValue(n, "content-type"), Caption: attrValue(n, "caption")}, true
+		embedded = hasAttr(n, "content")
+		a = attachment{SGID: attrValue(n, "sgid"), Filename: attrValue(n, "filename"), Size: size, ContentType: attrValue(n, "content-type"), Caption: attrValue(n, "caption")}
+		allowed = map[string]bool{"sgid": true, "filename": true, "filesize": true, "content-type": true, "caption": true, "url": true, "presentation": true, "previewable": true, "width": true, "height": true}
+	default:
+		return a, false, ""
 	}
-	return attachment{}, false
+
+	name := a.Filename
+	if name == "" {
+		name = "an unnamed attachment"
+	}
+	switch {
+	case embedded:
+		return a, true, name + " carries embedded content"
+	case a.SGID == "" || a.Filename == "":
+		return a, true, name + " has no blob identity"
+	}
+	for _, attr := range n.Attr {
+		if !allowed[attr.Key] {
+			return a, true, name + " carries " + attr.Key
+		}
+	}
+	if !plainAttachmentChildren(n) {
+		return a, true, name + " wraps markup of its own"
+	}
+	return a, true, ""
+}
+
+// plainAttachmentChildren reports whether an attachment holds only what Trix renders
+// in one: whitespace, a preview image, and a caption of plain text.
+func plainAttachmentChildren(n *html.Node) bool {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		switch {
+		case c.Type == html.TextNode && strings.TrimSpace(c.Data) == "":
+		case c.Type == html.ElementNode && c.DataAtom == atom.Img && c.FirstChild == nil:
+		case c.Type == html.ElementNode && c.DataAtom == atom.Figcaption:
+			for t := c.FirstChild; t != nil; t = t.NextSibling {
+				if t.Type != html.TextNode {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func hasAttr(n *html.Node, key string) bool {
+	for _, attr := range n.Attr {
+		if attr.Key == key {
+			return true
+		}
+	}
+	return false
+}
+
+func asText(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 func sizeOf(v any) int64 {

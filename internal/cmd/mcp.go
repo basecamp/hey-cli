@@ -115,13 +115,13 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// The tools follow the grant: without write, nothing that writes is served; without
-	// send (and read, which send_draft's review needs), no hey_send.
+	// send, no hey_send.
 	readOnly := c.readOnly || !auth.HasScope(creds.Scope, "write")
 	serverCfg := mcpserver.Config{ReadOnly: readOnly, Domains: c.domains}
-	// The sign-in's local key is the principal send safety counts against, so a
-	// credential without one serves no send.
-	canSend := auth.HasScope(creds.Scope, "read", "send") && creds.GrantKey != ""
-	if canSend && !readOnly {
+	// Send safety is configured whenever the sign-in can send, read-only or not: this
+	// process records exposure for any other hey mcp on the same sign-in that sends.
+	canSend := mcpCanSend(creds)
+	if canSend {
 		state, stateErr := mcpserver.OpenSendState(config.StateDir())
 		if stateErr != nil {
 			return stateErr
@@ -136,6 +136,13 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 			State:  state,
 			Grant:  mcpserver.Grant{Key: creds.GrantKey, GrantedAt: grantedAt},
 			Origin: strings.TrimRight(cfg.BaseURL, "/"),
+			CurrentGrant: func(context.Context) (string, error) {
+				stored, loadErr := mcpAuthMgr.StoredCredentials()
+				if loadErr != nil {
+					return "", loadErr
+				}
+				return stored.GrantKey, nil
+			},
 		}
 	}
 

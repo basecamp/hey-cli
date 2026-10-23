@@ -53,7 +53,9 @@ func (s *sender) prompt(snap *draftSnapshot, outcome *reviewOutcome) string {
 // recipientLine shows a recipient as "Name" <address>, so the address the mail goes to is
 // always visible beside whatever name the draft carries.
 func recipientLine(c generated.Contact, fresh map[string]bool) string {
-	address := "<" + inertLine(c.EmailAddress) + ">"
+	// The address is escaped but never truncated: the person has to see all of where
+	// the mail goes.
+	address := "<" + escapeInvisible(c.EmailAddress, false) + ">"
 	line := address
 	if name := strings.TrimSpace(c.Name); name != "" && !strings.EqualFold(name, c.EmailAddress) {
 		line = `"` + strings.ReplaceAll(inertLine(name), `"`, `\"`) + `" ` + address
