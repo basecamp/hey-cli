@@ -42,6 +42,21 @@ type Credentials struct {
 	// travels with the tokens: every config directory that shares this keychain entry
 	// refreshes as the same install.
 	InstallID string `json:"install_id,omitempty"`
+
+	// The fields below are set only by a scoped sign-in, hey mcp's (mcp.go). The CLI's own
+	// credential asks for no scope, holds full, and leaves them empty.
+
+	// Scope is what HEY granted these tokens, space-separated, e.g. "read write send".
+	Scope string `json:"scope,omitempty"`
+	// ClientID is the OAuth client the tokens were issued to, which a refresh names.
+	ClientID string `json:"client_id,omitempty"`
+	// GrantKey names this sign-in locally. hey mcp keys its send safety state (caps and
+	// exposure) on it, so a new sign-in, which took the person through consent again,
+	// starts a new budget.
+	GrantKey string `json:"grant_key,omitempty"`
+	// GrantedAt is when the sign-in completed, in Unix seconds. hey mcp counts a
+	// recipient as known only from mail sent before it.
+	GrantedAt int64 `json:"granted_at,omitempty"`
 }
 
 // Store handles credential storage, preferring system keychain.
