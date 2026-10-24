@@ -81,6 +81,12 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		}
 		return gateway.ErrorResult("%v", err), nil
 	}
+	// A write whose success is one exact status is checked first, so nothing below
+	// reports a redirect's 200 as applied.
+	if want, ok := acknowledgedBy[full.ID]; ok && resp.StatusCode != want {
+		return gateway.ErrorResult("%s was not acknowledged: HEY answered HTTP %d, not %d, so nothing was changed",
+			full.Action, resp.StatusCode, want), nil
+	}
 	// The exposure marker lands before the content leaves (D6). A read not in the
 	// table exposes: it can't be shown not to. So does a write that answers with a body
 	// (reveal_contact answers the contact): what HEY returns is content, whatever the
@@ -104,10 +110,6 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 			return gateway.ErrorResult("%s", unconfirmedDraft(full.Action, resp)), nil
 		}
 		return gateway.JSONResult(draftResult(resp))
-	}
-	if want, ok := acknowledgedBy[full.ID]; ok && resp.StatusCode != want {
-		return gateway.ErrorResult("%s was not acknowledged: HEY answered HTTP %d, not %d, so nothing was changed",
-			full.Action, resp.StatusCode, want), nil
 	}
 	if len(bytes.TrimSpace(resp.Data)) == 0 {
 		result := map[string]any{"status": resp.StatusCode}

@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+	"golang.org/x/text/unicode/norm"
 )
 
 // What send_draft reads out of a draft's body (sending-safety D2): the text the
@@ -344,20 +345,33 @@ func asText(v any) string {
 	return s
 }
 
-// plainOf is text as it goes when sent as plain text: trailing spaces and tabs dropped
-// from each line, and every invisible character removed, so nothing in it is unseen.
+// plainOf is text as it goes when sent as plain text: every invisible character
+// removed, compatibility-normalized (NFKC, so a no-break space is a space and a
+// decomposed letter is one letter, and two spellings that look alike are one), and
+// trailing whitespace dropped from each line, so nothing in it is unseen.
 func plainOf(text string) string {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
-		// Invisible characters go first, so none can shield whitespace from the trim.
-		lines[i] = strings.TrimRightFunc(strings.Map(func(r rune) rune {
-			if invisible(r) {
-				return -1
-			}
-			return r
-		}, line), unicode.IsSpace)
+		lines[i] = plainLine(line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// plainLine is one line of plainOf. Invisible characters go first, so none can shield
+// whitespace from the trim.
+func plainLine(line string) string {
+	visible := strings.Map(func(r rune) rune {
+		if invisible(r) {
+			return -1
+		}
+		return r
+	}, line)
+	return strings.TrimRightFunc(norm.NFKC.String(visible), unicode.IsSpace)
+}
+
+// plainSubject is a subject as it goes on the plain path: one plain line.
+func plainSubject(subject string) string {
+	return plainLine(strings.ReplaceAll(strings.ReplaceAll(subject, "\r", " "), "\n", " "))
 }
 
 // plainHTML is the body made from plain text: its lines, escaped, with a break between

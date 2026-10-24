@@ -1411,3 +1411,44 @@ func TestAWriteHEYAppliedIsAcknowledgedWhenItsMarkerFails(t *testing.T) {
 		t.Error("the withheld answer was returned")
 	}
 }
+
+// --- review round ten ---
+
+// On the plain path, text that looks alike goes alike: a no-break space is a space,
+// and a decomposed letter is one, in the body and the subject.
+func TestThePlainPathNormalizesLookalikeText(t *testing.T) {
+	rig := newSendRig(t)
+	rig.drafts.update(func(e *generated.MessageEditState) {
+		e.Subject = "Re:\u00a0Q3 plan, cafe\u0301"
+		e.Content = "<div>Hi\u00a0Ann, cafe\u0301</div>"
+		e.Addressed.Directly = []generated.Contact{contact("", "new@example.com")}
+	})
+	session := rig.connect(t, approve, "", false)
+	if result := sendDraft(t, session); result.IsError {
+		t.Fatalf("send failed: %s", resultText(t, result))
+	}
+	sent := rig.drafts.sent()[0]
+	if sent.Subject != "Re: Q3 plan, caf\u00e9" {
+		t.Errorf("subject %q, want it normalized", sent.Subject)
+	}
+	if sent.Content != "<div>Hi Ann, caf\u00e9</div>" {
+		t.Errorf("body %q, want it normalized", sent.Content)
+	}
+}
+
+func TestARenameHEYRedirectedIsntReportedAppliedWhenTheMarkerFails(t *testing.T) {
+	rig := newSendRig(t)
+	rig.state.fsync = func(*os.File) error { return errors.New("disk full") }
+	rig.api.resp = &hey.Response{StatusCode: http.StatusOK, Data: json.RawMessage(`{"id":9,"name":"Merged"}`)}
+	session := rig.connect(t, approve, "", false)
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_threads",
+		Arguments: map[string]any{"action": "rename_topic", "params": map[string]any{"topicId": 9, "topic": map[string]any{"name": "Q3"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text := textContent(t, result); !result.IsError || strings.Contains(text, "applied") {
+		t.Errorf("a rename HEY didn't acknowledge was reported applied: %s", text)
+	}
+}
