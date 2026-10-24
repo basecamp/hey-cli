@@ -156,10 +156,11 @@ func escapeInvisible(s string, keepNewlines bool) string {
 
 // invisible reports a rune that shows as nothing or reorders what's around it: every
 // format character (Unicode Cf: bidi controls, zero-width characters, tag characters,
-// the soft hyphen), variation selectors, private-use characters, and the controls and
+// the soft hyphen), variation selectors, private-use characters, the rest of Unicode's
+// default-ignorable set (the combining grapheme joiner, Hangul fillers), and the controls and
 // separators below. A class, not a list, so the next invisible character is caught too.
 func invisible(r rune) bool {
-	if unicode.In(r, unicode.Cf, unicode.Co, unicode.Variation_Selector) {
+	if unicode.In(r, unicode.Cf, unicode.Co, unicode.Variation_Selector, unicode.Other_Default_Ignorable_Code_Point) {
 		return true
 	}
 	switch {
