@@ -87,6 +87,15 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 	// verb. A draft save's answer is this server's own.
 	if d.markExposed != nil && !draft && exposingAnswer(full, resp) {
 		if err := d.markExposed(ctx, full.Action); err != nil {
+			if !full.ReadOnly {
+				// HEY already applied the write: say so, so it isn't retried, and
+				// withhold only the answer.
+				return gateway.JSONResult(map[string]any{
+					"applied": true,
+					"status":  resp.StatusCode,
+					"note":    fmt.Sprintf("HEY applied %s. Its answer is withheld because hey mcp couldn't record that it may include mail from an unscreened sender (%v). Don't retry it.", full.Action, err),
+				})
+			}
 			return gateway.ErrorResult("hey mcp can't return %s right now: it couldn't record that the answer may include mail from an unscreened sender (%v)", full.Action, err), nil
 		}
 	}

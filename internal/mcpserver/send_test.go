@@ -1370,3 +1370,44 @@ func TestARefusalNamesNoDraftText(t *testing.T) {
 		t.Errorf("the refusal carried the draft's filename: %s", text)
 	}
 }
+
+// --- review round nine ---
+
+func TestACommentIsNeverSent(t *testing.T) {
+	rig := newSendRig(t)
+	rig.drafts.update(func(e *generated.MessageEditState) {
+		e.Content = `<div>Hi Ann<!--[if mso]><img src="https://tracker.example/p.gif"><![endif]--></div><!-- top-level -->`
+	})
+	session := rig.connect(t, approve, "", false)
+	if result := sendDraft(t, session); result.IsError {
+		t.Fatalf("send failed: %s", resultText(t, result))
+	}
+	if got := rig.drafts.sent()[0].Content; strings.Contains(got, "<!--") || strings.Contains(got, "tracker") {
+		t.Errorf("a comment was delivered: %s", got)
+	}
+}
+
+func TestThePlainBodyKeepsTheSpacingShown(t *testing.T) {
+	if got, want := plainHTML("  indented\ta  b"), "<div>&nbsp;&nbsp;indented&nbsp;&nbsp;&nbsp;&nbsp;a &nbsp;b</div>"; got != want {
+		t.Errorf("plainHTML = %q, want %q", got, want)
+	}
+}
+
+func TestAWriteHEYAppliedIsAcknowledgedWhenItsMarkerFails(t *testing.T) {
+	rig := newSendRig(t)
+	rig.state.fsync = func(*os.File) error { return errors.New("disk full") }
+	rig.api.resp = &hey.Response{StatusCode: http.StatusCreated, Data: json.RawMessage(`{"id":44,"title":"Call Ann"}`)}
+	session := rig.connect(t, approve, "", false)
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_todos",
+		Arguments: map[string]any{"action": "create_calendar_todo", "params": map[string]any{"calendar_todo": map[string]any{"title": "Call Ann"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := textContent(t, result)
+	mustContain(t, text, `"applied": true`, "Don't retry")
+	if strings.Contains(text, "Call Ann") {
+		t.Error("the withheld answer was returned")
+	}
+}

@@ -117,8 +117,16 @@ func analyzeBody(content string) (reviewedBody, error) {
 		w.walk(n)
 	}
 
+	for _, c := range w.comments {
+		if c.Parent != nil {
+			c.Parent.RemoveChild(c)
+		}
+	}
 	var delivered bytes.Buffer
 	for _, n := range nodes {
+		if n.Type == html.CommentNode {
+			continue
+		}
 		if err := html.Render(&delivered, n); err != nil {
 			return reviewedBody{}, fmt.Errorf("render the draft's body: %w", err)
 		}
@@ -140,6 +148,7 @@ func analyzeBody(content string) (reviewedBody, error) {
 }
 
 type bodyWalker struct {
+	comments     []*html.Node
 	text         strings.Builder
 	lossless     bool
 	attachments  []attachment
@@ -153,7 +162,9 @@ func (w *bodyWalker) walk(n *html.Node) {
 		w.text.WriteString(n.Data)
 		return
 	case html.CommentNode:
-		w.lossless = false
+		// Never shown, and not sent: a conditional comment is markup Outlook renders
+		// (<!--[if mso]><img src=...><![endif]-->).
+		w.comments = append(w.comments, n)
 		return
 	case html.ElementNode:
 	default:
@@ -358,9 +369,30 @@ func plainHTML(text string) string {
 		if i > 0 {
 			b.WriteString("<br>")
 		}
-		b.WriteString(html.EscapeString(line))
+		b.WriteString(keepSpaces(html.EscapeString(line)))
 	}
 	b.WriteString("</div>")
+	return b.String()
+}
+
+// keepSpaces makes the spaces HTML would collapse hold: a leading space, and every
+// space after another, become non-breaking, and a tab becomes four, so the recipient
+// sees the spacing the confirmation showed.
+func keepSpaces(line string) string {
+	var b strings.Builder
+	previous := ' ' // a line's first space is leading
+	for _, r := range line {
+		switch {
+		case r == '\t':
+			b.WriteString("&nbsp;&nbsp;&nbsp;&nbsp;")
+			r = ' '
+		case r == ' ' && previous == ' ':
+			b.WriteString("&nbsp;")
+		default:
+			b.WriteRune(r)
+		}
+		previous = r
+	}
 	return b.String()
 }
 

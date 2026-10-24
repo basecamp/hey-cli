@@ -156,8 +156,11 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 			CurrentGrant: func(ctx context.Context) (string, error) {
 				// Renew a token about to expire now, before the claim, rather than
 				// after it: a renewal can narrow the grant, and the send then must
-				// not go ahead. A failure leaves the stored state to answer.
-				_, _ = mcpAuthMgr.AccessToken(ctx)
+				// not go ahead. A token that can't be made live refuses too, so a
+				// draft that certainly wasn't sent isn't claimed.
+				if _, tokenErr := mcpAuthMgr.AccessToken(ctx); tokenErr != nil {
+					return "", tokenErr
+				}
 				stored, loadErr := mcpAuthMgr.StoredCredentials()
 				if loadErr != nil {
 					return "", loadErr
