@@ -598,17 +598,18 @@ func CredentialStorageError(context string, err error) error {
 }
 
 // keyringRefusedHint names where the process runs rather than the login, because a
-// new login lands in the same Keychain. Codex marks the commands it sandboxes with
-// CODEX_SANDBOX.
+// new login lands in the same Keychain. The refusal comes from the desktop session, so
+// the restart advice holds inside Codex's sandbox too; there it comes after the step
+// that lets hey out of the sandbox.
 func keyringRefusedHint() string {
+	session := "the macOS Keychain won't hand your login to a process outside your Mac's desktop session, " +
+		"such as one started over SSH or by an agent's background server launched from there."
+	restart := "For Codex, quit it, run `codex app-server daemon restart` in Terminal on the Mac, then start Codex again."
 	if inCodexSandbox() {
-		return "Signing in again won't help: Codex's sandbox keeps hey from the Keychain. " +
-			"Let Codex run hey outside its sandbox."
+		return "Signing in again won't help. Let Codex run hey outside its sandbox. If it still fails there, " +
+			session + " " + restart
 	}
-	return "Signing in again won't help: the macOS Keychain won't hand your login to a process " +
-		"outside your Mac's desktop session, such as one started over SSH or by an agent's background " +
-		"server launched from there. Run hey from Terminal on the Mac. For Codex, quit it, run " +
-		"`codex app-server daemon restart` in Terminal on the Mac, then start Codex again."
+	return "Signing in again won't help: " + session + " Run hey from Terminal on the Mac. " + restart
 }
 
 // NotLoggedInHint is the remedy for a missing login. Codex's sandbox hides the system

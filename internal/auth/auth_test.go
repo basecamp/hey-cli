@@ -1416,8 +1416,8 @@ func TestAKeychainRefusalSaysSigningInAgainWontHelp(t *testing.T) {
 		},
 	}
 	sandboxes := map[string]struct{ value, want string }{
-		"outside a sandbox":      {value: "", want: "codex app-server daemon restart"},
-		"inside Codex's sandbox": {value: "seatbelt", want: "Codex's sandbox keeps hey from the Keychain"},
+		"outside a sandbox":      {value: "", want: "Run hey from Terminal on the Mac"},
+		"inside Codex's sandbox": {value: "seatbelt", want: "Let Codex run hey outside its sandbox"},
 	}
 	for name, operation := range operations {
 		for place, sandbox := range sandboxes {
@@ -1446,6 +1446,10 @@ func TestAKeychainRefusalSaysSigningInAgainWontHelp(t *testing.T) {
 				}
 				if !strings.HasPrefix(classified.Hint, "Signing in again won't help") || !strings.Contains(classified.Hint, sandbox.want) {
 					t.Errorf("hint = %q, want it to rule out a new login and contain %q", classified.Hint, sandbox.want)
+				}
+				// The refusal is about the desktop session, so its remedy holds in the sandbox too.
+				if !strings.Contains(classified.Hint, "codex app-server daemon restart") {
+					t.Errorf("hint = %q, want the background-server restart", classified.Hint)
 				}
 			})
 		}
