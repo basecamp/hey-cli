@@ -28,7 +28,11 @@ func (s *sender) prompt(snap *draftSnapshot, outcome *reviewOutcome) string {
 	fmt.Fprintf(&b, "  Cc:       %s\n", recipientList(snap.cc, outcome.newAddresses))
 	fmt.Fprintf(&b, "  Bcc:      %s\n", recipientList(snap.bcc, outcome.newAddresses))
 	// Delivered text is shown whole: only display names, which aren't sent, are capped.
-	fmt.Fprintf(&b, "  Subject:  %s\n", inertWhole(snap.subject))
+	subject := snap.subject
+	if outcome.plain {
+		subject = plainSubject(subject)
+	}
+	fmt.Fprintf(&b, "  Subject:  %s\n", inertWhole(subject))
 	fmt.Fprintf(&b, "  Attached: %s\n", attachmentList(snap.body.attachments))
 	b.WriteString("  Body:\n")
 

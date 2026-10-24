@@ -421,12 +421,12 @@ type draftSnapshot struct {
 // fingerprint hashed, attachments rebuilt from their identity, or, when plain, the
 // plain text the confirmation showed (sendbody.go).
 func (d *draftSnapshot) content(plain bool) hey.DraftContent {
-	body := d.body.delivered
+	body, subject := d.body.delivered, d.subject
 	if plain {
-		body = d.body.plainHTML
+		body, subject = d.body.plainHTML, plainSubject(d.subject)
 	}
 	return hey.DraftContent{
-		Subject:        d.subject,
+		Subject:        subject,
 		Content:        body,
 		To:             emails(d.to),
 		CC:             emails(d.cc),
