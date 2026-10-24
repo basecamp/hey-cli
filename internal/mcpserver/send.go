@@ -70,7 +70,8 @@ type SendConfig struct {
 	Origin string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
-	// CurrentGrant answers the sign-in's key as stored now. When it no longer matches
+	// CurrentGrant answers the sign-in's key as stored now, renewing a token about to
+	// expire first, so the send that may follow goes out on a live one. When it no longer matches
 	// Grant.Key (hey mcp was signed in again or out since this process started, and the
 	// token the client authenticates with may be the new one), sends and exposing reads
 	// are refused until hey mcp restarts, so caps and exposure never count against a
@@ -254,6 +255,12 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 		return gateway.ErrorResult("not sent: the draft changed since you approved it (its recipients, sender, subject, body or attachments differ). Call send_draft again to review it as it is now"), nil
 	}
 
+	// The review's reads may have refreshed the token, and a refresh can narrow the
+	// grant. Check again just before claiming, so a send HEY would refuse doesn't
+	// block the draft for a day.
+	if err = s.checkGrant(ctx); err != nil {
+		return gateway.ErrorResult("not sent: %v", err), nil
+	}
 	if err = s.cfg.State.claim(ctx, s.cfg.Origin, draftID, s.cfg.Grant.Key, outcome.newList, !outcome.plain, s.cfg.Now()); err != nil {
 		var refused *refusalError
 		if errors.As(err, &refused) {

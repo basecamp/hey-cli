@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
@@ -238,7 +239,7 @@ func attachmentOf(n *html.Node) (attachment, bool, string) {
 	case n.DataAtom == atom.Figure && hasAttr(n, "data-trix-attachment"):
 		var data map[string]any
 		if json.Unmarshal([]byte(attrValue(n, "data-trix-attachment")), &data) != nil {
-			return a, true, "a figure whose attachment data doesn't parse"
+			return a, true, "an attachment's data doesn't parse"
 		}
 		var attributes map[string]any
 		_ = json.Unmarshal([]byte(attrValue(n, "data-trix-attributes")), &attributes)
@@ -252,15 +253,13 @@ func attachmentOf(n *html.Node) (attachment, bool, string) {
 		return a, false, ""
 	}
 
-	name := a.Filename
-	if name == "" {
-		name = "an unnamed attachment"
-	}
+	// The problem names no filename: it reaches the model, and a filename is the
+	// draft's text, not this server's.
 	switch {
 	case embedded:
-		return a, true, name + " carries embedded content"
+		return a, true, "an attachment carries embedded content"
 	case a.SGID == "" || a.Filename == "":
-		return a, true, name + " has no blob identity"
+		return a, true, "an attachment has no blob identity"
 	}
 	return a, true, ""
 }
@@ -339,12 +338,13 @@ func asText(v any) string {
 func plainOf(text string) string {
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
-		lines[i] = strings.Map(func(r rune) rune {
+		// Invisible characters go first, so none can shield whitespace from the trim.
+		lines[i] = strings.TrimRightFunc(strings.Map(func(r rune) rune {
 			if invisible(r) {
 				return -1
 			}
 			return r
-		}, strings.TrimRight(line, " \t"))
+		}, line), unicode.IsSpace)
 	}
 	return strings.Join(lines, "\n")
 }

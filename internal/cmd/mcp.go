@@ -153,7 +153,11 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 			State:  state,
 			Grant:  mcpserver.Grant{Key: creds.GrantKey, GrantedAt: grantedAt},
 			Origin: origin,
-			CurrentGrant: func(context.Context) (string, error) {
+			CurrentGrant: func(ctx context.Context) (string, error) {
+				// Renew a token about to expire now, before the claim, rather than
+				// after it: a renewal can narrow the grant, and the send then must
+				// not go ahead. A failure leaves the stored state to answer.
+				_, _ = mcpAuthMgr.AccessToken(ctx)
 				stored, loadErr := mcpAuthMgr.StoredCredentials()
 				if loadErr != nil {
 					return "", loadErr
@@ -222,9 +226,8 @@ func (d mcpDrafts) GetEdit(ctx context.Context, draftID int64) (*generated.Messa
 }
 
 func (d mcpDrafts) SendDraft(ctx context.Context, draftID int64, draft hey.DraftContent) (*generated.SentMessage, error) {
-	// Refresh a token that's about to expire now, so the one request goes out with a
-	// live one. A failure here leaves the send to answer for itself.
-	_, _ = mcpAuthMgr.AccessToken(ctx)
+	// The token was renewed just before the claim (CurrentGrant), so this one request
+	// goes out on a live one.
 	return d.sends.Messages().SendDraft(ctx, draftID, draft)
 }
 
