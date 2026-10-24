@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -140,8 +141,15 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 		if creds.GrantedAt > 0 {
 			grantedAt = time.Unix(creds.GrantedAt, 0)
 		}
+		// The delivery goes through a client of its own that can't resend: the SDK
+		// answers a 401 by refreshing and resending once, and a send is one request
+		// (D2.4). The token is refreshed before the send instead.
+		sends, sendsErr := clientForAccountSelection(ctx, newMCPSDKClient(hey.WithMaxRetries(0), hey.WithAuthStrategy(onceAuthStrategy{mgr: mcpAuthMgr})), cfg.AccountID)
+		if sendsErr != nil {
+			return sendsErr
+		}
 		serverCfg.Send = &mcpserver.SendConfig{
-			Drafts: mcpDrafts{reads: reads, writes: writes},
+			Drafts: mcpDrafts{reads: reads, sends: sends},
 			State:  state,
 			Grant:  mcpserver.Grant{Key: creds.GrantKey, GrantedAt: grantedAt},
 			Origin: origin,
@@ -194,9 +202,19 @@ func newMCPSDKClient(extra ...hey.ClientOption) *hey.Client {
 }
 
 // mcpDrafts is send_draft's view of the SDK: reads through the retrying client, the send
-// through the one that never retries, because a retried send can deliver twice.
+// through one that never retries or resends, because a second request can deliver twice.
 type mcpDrafts struct {
-	reads, writes *hey.Client
+	reads, sends *hey.Client
+}
+
+// onceAuthStrategy authenticates like cliAuthStrategy but offers the SDK no refresh,
+// so a 401 surfaces instead of being answered with a resend.
+type onceAuthStrategy struct {
+	mgr *auth.Manager
+}
+
+func (a onceAuthStrategy) Authenticate(ctx context.Context, req *http.Request) error {
+	return a.mgr.AuthenticateRequest(ctx, req)
 }
 
 func (d mcpDrafts) GetEdit(ctx context.Context, draftID int64) (*generated.MessageEditState, error) {
@@ -204,7 +222,10 @@ func (d mcpDrafts) GetEdit(ctx context.Context, draftID int64) (*generated.Messa
 }
 
 func (d mcpDrafts) SendDraft(ctx context.Context, draftID int64, draft hey.DraftContent) (*generated.SentMessage, error) {
-	return d.writes.Messages().SendDraft(ctx, draftID, draft)
+	// Refresh a token that's about to expire now, so the one request goes out with a
+	// live one. A failure here leaves the send to answer for itself.
+	_, _ = mcpAuthMgr.AccessToken(ctx)
+	return d.sends.Messages().SendDraft(ctx, draftID, draft)
 }
 
 func (d mcpDrafts) Identity(ctx context.Context) (*generated.Identity, error) {
