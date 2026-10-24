@@ -579,11 +579,57 @@ func credentialLoadError(err error) error {
 	if errors.Is(err, ErrCredentialsNotFound) {
 		return errNotAuthenticated(err)
 	}
-	return fmt.Errorf("could not read stored credentials: %w", err)
+	return CredentialStorageError("could not read stored credentials", err)
+}
+
+// CredentialStorageError reports a credential store that could not be read. It is not
+// an authentication failure, so it keeps its own exit status; a keyring refusal gets
+// the hint that stops a caller from asking for another login.
+func CredentialStorageError(context string, err error) error {
+	if errors.Is(err, ErrKeyringRefused) {
+		return &apierr.Error{
+			Code:    apierr.CodeUnknown,
+			Message: fmt.Sprintf("%s: %v", context, err),
+			Hint:    keyringRefusedHint(),
+			Cause:   err,
+		}
+	}
+	return fmt.Errorf("%s: %w", context, err)
+}
+
+// keyringRefusedHint names where the process runs rather than the login, because a
+// new login lands in the same Keychain. Codex marks the commands it sandboxes with
+// CODEX_SANDBOX.
+func keyringRefusedHint() string {
+	if inCodexSandbox() {
+		return "Signing in again won't help: Codex's sandbox keeps hey from the Keychain. " +
+			"Let Codex run hey outside its sandbox."
+	}
+	return "Signing in again won't help: the macOS Keychain won't hand your login to a process " +
+		"outside your Mac's desktop session, such as one started over SSH or by an agent's background " +
+		"server launched from there. Run hey from Terminal on the Mac. For Codex, quit it, run " +
+		"`codex app-server daemon restart` in Terminal on the Mac, then start Codex again."
+}
+
+// NotLoggedInHint is the remedy for a missing login. Codex's sandbox hides the system
+// keyring, so a login that is saved reads as missing there.
+func NotLoggedInHint() string {
+	if inCodexSandbox() {
+		return "Codex's sandbox hides the system keyring, so a saved login looks missing here. " +
+			"If `hey auth status` in Terminal says you're logged in, let Codex run hey outside its sandbox; " +
+			"otherwise run `hey auth login` in Terminal."
+	}
+	return "Run: hey auth login"
+}
+
+func inCodexSandbox() bool {
+	return os.Getenv("CODEX_SANDBOX") != ""
 }
 
 func errNotAuthenticated(cause error) *apierr.Error {
-	return errNoCredential(fmt.Sprintf("not authenticated: %v", cause), cause)
+	err := errNoCredential(fmt.Sprintf("not authenticated: %v", cause), cause)
+	err.Hint = NotLoggedInHint()
+	return err
 }
 
 // errRefusedGrant reports a refresh token the server answered invalid_grant for.

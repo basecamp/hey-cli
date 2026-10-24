@@ -188,7 +188,7 @@ func newAuthStatusCommand() *cobra.Command {
 			store := authMgr.GetStore()
 			creds, err := store.Load(authMgr.CredentialKey())
 			if err != nil && !errors.Is(err, auth.ErrCredentialsNotFound) {
-				return fmt.Errorf("could not read authentication status: %w", err)
+				return auth.CredentialStorageError("could not read authentication status", err)
 			}
 			if errors.Is(err, auth.ErrCredentialsNotFound) || (creds.AccessToken == "" && creds.SessionCookie == "") {
 				if writer.IsStyled() {

@@ -287,6 +287,7 @@ func TestRequireAuthPromptsOnlyWhenInteractiveAndStyled(t *testing.T) {
 	isolateAgents(t)
 	server := quietServer(t)
 	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("CODEX_SANDBOX", "")
 	t.Setenv("HEY_NO_KEYRING", "1")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -349,6 +350,23 @@ func TestRequireAuthPromptsOnlyWhenInteractiveAndStyled(t *testing.T) {
 		}
 		if *asked != 0 {
 			t.Errorf("prompt shown %d times for machine output", *asked)
+		}
+	})
+
+	t.Run("inside Codex's sandbox the hint names the sandbox", func(t *testing.T) {
+		t.Setenv("CODEX_SANDBOX", "seatbelt")
+		stubInteractive(t, false)
+		prev := writer
+		writer = output.New(output.Options{Format: output.FormatJSON, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		t.Cleanup(func() { writer = prev })
+
+		err := requireAuth()
+		var cliErr *apierr.Error
+		if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeAuth {
+			t.Fatalf("error = %v, want auth", err)
+		}
+		if !strings.Contains(cliErr.Hint, "Codex's sandbox hides the system keyring") {
+			t.Errorf("hint = %q", cliErr.Hint)
 		}
 	})
 
