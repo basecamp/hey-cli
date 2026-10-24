@@ -1274,3 +1274,22 @@ func TestAWriteThatAnswersWithContentExposes(t *testing.T) {
 		t.Error("a write that answered nothing exposed the sign-in")
 	}
 }
+
+// --- review round five ---
+
+func TestWhitespaceThePromptCantShowIsUnseen(t *testing.T) {
+	for name, body := range map[string]string{
+		"trailing spaces in a pre":  "<pre>Hi Ann\n" + strings.Repeat("\t \t  \n", 3) + "</pre>",
+		"a long run of blank lines": "<div>Hi Ann</div>" + strings.Repeat("<br>", 1600),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rig := newSendRig(t)
+			rig.drafts.update(func(e *generated.MessageEditState) {
+				e.Content = body
+				e.Addressed.Directly = []generated.Contact{contact("", "new@example.com")}
+			})
+			session := rig.connect(t, approve, "", false)
+			mustContain(t, resultText(t, sendDraft(t, session)), "can't be fully reviewed here")
+		})
+	}
+}

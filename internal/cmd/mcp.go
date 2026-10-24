@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -126,6 +125,12 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	// process records exposure for any other hey mcp on the same sign-in that sends.
 	canSend := mcpCanSend(creds)
 	if canSend {
+		// Claims are keyed by origin, so it has one spelling: https://app.hey.com and
+		// https://app.hey.com:443 are the same HEY.
+		origin, originErr := config.Origin(cfg.BaseURL)
+		if originErr != nil {
+			return originErr
+		}
 		state, stateErr := mcpserver.OpenSendState(config.StateDir())
 		if stateErr != nil {
 			return stateErr
@@ -139,7 +144,7 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 			Drafts: mcpDrafts{reads: reads, writes: writes},
 			State:  state,
 			Grant:  mcpserver.Grant{Key: creds.GrantKey, GrantedAt: grantedAt},
-			Origin: strings.TrimRight(cfg.BaseURL, "/"),
+			Origin: origin,
 			CurrentGrant: func(context.Context) (string, error) {
 				stored, loadErr := mcpAuthMgr.StoredCredentials()
 				if loadErr != nil {

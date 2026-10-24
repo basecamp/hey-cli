@@ -117,9 +117,10 @@ func analyzeBody(content string) (reviewedBody, error) {
 		}
 	}
 	sum := sha256.Sum256(delivered.Bytes())
+	text, hidesWhitespace := plainText(w.text.String())
 	return reviewedBody{
-		text:         tidyText(w.text.String()),
-		lossless:     w.lossless && len(w.attachments) == 0,
+		text:         text,
+		lossless:     w.lossless && len(w.attachments) == 0 && !hidesWhitespace,
 		attachments:  w.attachments,
 		remote:       w.remote,
 		unverifiable: w.unverifiable,
@@ -324,22 +325,17 @@ func asText(v any) string {
 	return s
 }
 
-// tidyText trims trailing space from each line and collapses runs of blank lines.
-func tidyText(s string) string {
-	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
-	var out []string
-	blank := 0
-	for _, line := range lines {
-		line = strings.TrimRight(line, " \t")
-		if line == "" {
-			blank++
-			if blank > 1 {
-				continue
-			}
-		} else {
-			blank = 0
+// plainText is the text the prompt shows: the rendering with its line endings
+// normalized and the one newline its last block ends with dropped, and nothing else changed,
+// so every space and blank line the body delivers is in what the prompt shows and is
+// measured. hidesWhitespace reports trailing spaces or tabs on a line, which a prompt
+// can't show and a <pre> can carry data in.
+func plainText(s string) (string, bool) {
+	s = strings.TrimSuffix(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	for line := range strings.SplitSeq(s, "\n") {
+		if strings.TrimRight(line, " \t") != line {
+			return s, true
 		}
-		out = append(out, line)
 	}
-	return strings.Trim(strings.Join(out, "\n"), "\n")
+	return s, false
 }
