@@ -22,6 +22,12 @@ const DefaultMCPClientID = ""
 // and digits.
 var mcpClientIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{1,64}$`)
 
+// Origin is baseURL's canonical origin (scheme and host lowercased, default port
+// dropped), so one HEY has one spelling wherever it keys state.
+func Origin(baseURL string) (string, error) {
+	return serverOrigin(baseURL)
+}
+
 // MCPClientID resolves the local MCP client id for the HEY at baseURL, and where it came
 // from: HEY_MCP_CLIENT_ID, then the global config's "mcp_client_ids" entry for that
 // origin, then DefaultMCPClientID. It is read from the global config only, never a

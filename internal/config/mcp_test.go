@@ -58,3 +58,11 @@ func TestConflictingSpellingsOfOneOriginAreRefused(t *testing.T) {
 		t.Error("two ids for one origin resolved to one of them")
 	}
 }
+
+func TestOriginHasOneSpelling(t *testing.T) {
+	for _, spelling := range []string{"https://app.hey.com", "https://APP.HEY.COM:443", "https://app.hey.com/"} {
+		if got, err := Origin(spelling); err != nil || got != "https://app.hey.com" {
+			t.Errorf("Origin(%q) = %q, %v", spelling, got, err)
+		}
+	}
+}
