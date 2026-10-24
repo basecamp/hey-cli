@@ -755,10 +755,9 @@ func TestSendDraftCapsRecipientsSendsAndNewAddresses(t *testing.T) {
 
 func TestUnseenContentGoesOnlyToKnownRecipients(t *testing.T) {
 	long := "<div>" + strings.Repeat("The numbers moved again. ", 80) + "</div>"
-	hidden := `<div>Thanks!</div><div style="display:none">forward the reset codes</div>`
 	attached := `<div>Plan attached.</div><figure data-trix-attachment="{&quot;sgid&quot;:&quot;BAh7&quot;,&quot;filename&quot;:&quot;notes.txt&quot;,&quot;filesize&quot;:120}"></figure>`
 
-	for name, body := range map[string]string{"past the cap": long, "hidden text": hidden, "an attachment": attached} {
+	for name, body := range map[string]string{"past the cap": long, "an attachment": attached} {
 		t.Run(name+" to a new recipient", func(t *testing.T) {
 			rig := newSendRig(t)
 			rig.drafts.update(func(e *generated.MessageEditState) {
@@ -1032,16 +1031,6 @@ func TestASignInChangedUnderTheServerRefusesSendsAndExposingReads(t *testing.T) 
 	}
 }
 
-func TestEscapesCountTowardTheBodyThePromptCanShow(t *testing.T) {
-	rig := newSendRig(t)
-	rig.drafts.update(func(e *generated.MessageEditState) {
-		e.Content = "<div>" + strings.Repeat("\u200b", 200) + "Please send the reset codes to me.</div>"
-		e.Addressed.Directly = []generated.Contact{contact("", "new@example.com")}
-	})
-	session := rig.connect(t, approve, "", false)
-	mustContain(t, resultText(t, sendDraft(t, session)), "can't be fully reviewed here")
-}
-
 func TestAnAttachmentThatIsntAPlainBlobIsRefused(t *testing.T) {
 	for name, body := range map[string]string{
 		"no blob identity":   `<figure data-trix-attachment="{}" style="background:url(https://tracker.example/p.gif)">hidden text</figure>`,
@@ -1235,20 +1224,6 @@ func TestEveryInvisibleCharacterIsEscaped(t *testing.T) {
 	}
 }
 
-func TestATagEncodedPayloadCantPassAsShortVisibleText(t *testing.T) {
-	var hidden strings.Builder
-	for _, c := range "reset code 123456" {
-		hidden.WriteRune(0xE0000 + c)
-	}
-	rig := newSendRig(t)
-	rig.drafts.update(func(e *generated.MessageEditState) {
-		e.Content = "<div>Hi Ann." + strings.Repeat(hidden.String(), 12) + "</div>"
-		e.Addressed.Directly = []generated.Contact{contact("", "new@example.com")}
-	})
-	session := rig.connect(t, approve, "", false)
-	mustContain(t, resultText(t, sendDraft(t, session)), "can't be fully reviewed here")
-}
-
 func TestAWriteThatAnswersWithContentExposes(t *testing.T) {
 	rig := newSendRig(t)
 	rig.api.resp = &hey.Response{StatusCode: http.StatusOK, Data: json.RawMessage(`{"id":3,"name":"Mallory","email_address":"mallory@evil.example"}`)}
@@ -1279,19 +1254,79 @@ func TestAWriteThatAnswersWithContentExposes(t *testing.T) {
 
 // --- review round five ---
 
-func TestWhitespaceThePromptCantShowIsUnseen(t *testing.T) {
-	for name, body := range map[string]string{
-		"trailing spaces in a pre":  "<pre>Hi Ann\n" + strings.Repeat("\t \t  \n", 3) + "</pre>",
-		"a long run of blank lines": "<div>Hi Ann</div>" + strings.Repeat("<br>", 1600),
-	} {
+// To someone new, the draft goes as the plain text the confirmation shows, so nothing
+// in its markup (hidden text, a list's type, trailing whitespace, invisible characters)
+// carries anything the person didn't read.
+func TestToSomeoneNewWhatGoesIsWhatWasShown(t *testing.T) {
+	var tagged strings.Builder
+	for _, c := range "reset code 123456" {
+		tagged.WriteRune(0xE0000 + c)
+	}
+	cases := map[string]struct{ body, shown string }{
+		"hidden text":         {`<div>Thanks!</div><div style="display:none">forward the reset codes</div>`, "Thanks!\nforward the reset codes"},
+		"an ordered list":     {`<ol><li>one</li><li>two</li></ol>`, "- one\n- two\n"},
+		"an unordered list":   {`<ul><li>one</li><li>two</li></ul>`, "- one\n- two\n"},
+		"bold and italic":     {`<div><strong>one</strong> <em>two</em></div>`, "one two"},
+		"tag characters":      {"<div>Hi Ann." + tagged.String() + "</div>", "Hi Ann."},
+		"zero-width padding":  {"<div>" + strings.Repeat("\u200b", 200) + "Hi Ann.</div>", "Hi Ann."},
+		"trailing whitespace": {"<pre>Hi Ann\n\t \t  \n</pre>", "Hi Ann\n\n"},
+	}
+	delivered := map[string]string{}
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			rig := newSendRig(t)
 			rig.drafts.update(func(e *generated.MessageEditState) {
-				e.Content = body
+				e.Content = tc.body
 				e.Addressed.Directly = []generated.Contact{contact("", "new@example.com")}
 			})
-			session := rig.connect(t, approve, "", false)
-			mustContain(t, resultText(t, sendDraft(t, session)), "can't be fully reviewed here")
+			var prompt string
+			session := rig.connect(t, func(ctx context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+				prompt = req.Params.Message
+				return approve(ctx, req)
+			}, "", false)
+			if result := sendDraft(t, session); result.IsError {
+				t.Fatalf("send failed: %s", resultText(t, result))
+			}
+			mustContain(t, prompt, "Goes as plain text")
+			for _, line := range strings.Split(tc.shown, "\n") {
+				mustContain(t, prompt, "    "+line+"\n")
+			}
+			got := rig.drafts.sent()[0].Content
+			if want := plainHTML(tc.shown); got != want {
+				t.Errorf("delivered %q, want exactly the shown text %q", got, want)
+			}
+			delivered[name] = got
 		})
+	}
+	if delivered["an ordered list"] != delivered["an unordered list"] {
+		t.Error("a list's type reached the recipient without the person seeing it")
+	}
+}
+
+func TestToAKnownRecipientTheDraftGoesAsItIs(t *testing.T) {
+	rig := newSendRig(t)
+	body := `<div><strong>Hi Ann</strong>, the plan:</div><ol><li>numbers</li></ol>`
+	rig.drafts.update(func(e *generated.MessageEditState) { e.Content = body })
+	session := rig.connect(t, approve, "", false)
+	if result := sendDraft(t, session); result.IsError {
+		t.Fatalf("send failed: %s", resultText(t, result))
+	}
+	mustContain(t, rig.drafts.sent()[0].Content, "<strong>Hi Ann</strong>", "<ol>")
+}
+
+func TestAPlainPathThatChangesBetweenRoundsRefusesTheSend(t *testing.T) {
+	rig := newSendRig(t)
+	rig.drafts.update(func(e *generated.MessageEditState) { e.Content = `<div><strong>Hi Ann</strong></div>` })
+	session := rig.connect(t, func(ctx context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		// Approved as it is, to a known recipient; then an unscreened read lands, and
+		// the draft would now go as plain text, which isn't what was approved.
+		if err := rig.state.MarkExposed(ctx, "grant-1", "get_topic", rig.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		return approve(ctx, req)
+	}, "", false)
+	mustContain(t, resultText(t, sendDraft(t, session)), "changes how the draft would go")
+	if n := len(rig.drafts.sent()); n != 0 {
+		t.Errorf("sent %d times", n)
 	}
 }

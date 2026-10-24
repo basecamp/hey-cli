@@ -32,7 +32,11 @@ func (s *sender) prompt(snap *draftSnapshot, outcome *reviewOutcome) string {
 	fmt.Fprintf(&b, "  Attached: %s\n", attachmentList(snap.body.attachments))
 	b.WriteString("  Body:\n")
 
-	body := inertBody(snap.body.text)
+	text := snap.body.text
+	if outcome.plain {
+		text = snap.body.plainText
+	}
+	body := inertBody(text)
 	total := utf8.RuneCountInString(body)
 	if total > bodyPromptCap {
 		body = string([]rune(body)[:bodyPromptCap]) + " …"
@@ -43,7 +47,10 @@ func (s *sender) prompt(snap *draftSnapshot, outcome *reviewOutcome) string {
 	if total > bodyPromptCap {
 		fmt.Fprintf(&b, "    [first %s characters of %s · open the full draft in HEY: %s]\n", thousands(bodyPromptCap), thousands(total), s.editURL(snap.id))
 	}
-	if !snap.body.lossless {
+	switch {
+	case outcome.plain:
+		b.WriteString("  Goes as plain text: the draft's formatting isn't sent, so what's above is all of it.\n")
+	case !snap.body.lossless:
 		fmt.Fprintf(&b, "  Some of this draft can't be shown here; open it in HEY to see all of it: %s\n", s.editURL(snap.id))
 	}
 	if len(outcome.newAddresses) > 0 {
