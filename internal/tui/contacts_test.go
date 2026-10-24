@@ -12,9 +12,12 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
 
 type recordedTUIContacts struct {
@@ -287,7 +290,7 @@ func TestContactsViewOpensDetailWithAliasesAndNote(t *testing.T) {
 	view, _ := contactsWithTestServer(t)
 	loadTUIContacts(t, view)
 	openTUIContact(t, view)
-	if !view.inDetail || view.detail.ID != 7 || len(view.detail.Aliases) != 1 || view.note != "Prefers email" {
+	if !view.inDetail || view.detail.ID != 7 || len(view.detail.Aliases) != 1 || view.note.String() != "Prefers email" {
 		t.Errorf("detail = open:%v contact:%+v note:%q", view.inDetail, view.detail, view.note)
 	}
 	rendered := view.View()
@@ -492,8 +495,8 @@ func TestContactsViewEditsAndDeletesNote(t *testing.T) {
 	view.noteForm.input.SetValue("Prefers a call")
 	save := view.HandleContentKey(keyPress("ctrl+s"))
 	saved, _ := view.Update(save())
-	if toast := deliverToView(view, saved); view.noteForm != nil || view.note != "Prefers a call" || toast != "Private note saved" {
-		t.Errorf("note save state = form:%v note:%q toast:%q", view.noteForm, view.note, toast)
+	if toast := deliverToView(view, saved); view.noteForm != nil || view.note.String() != "Prefers a call" || !view.noteMarkdownLossless || toast != "Private note saved" {
+		t.Errorf("note save state = form:%v note:%q lossless:%v toast:%q", view.noteForm, view.note, view.noteMarkdownLossless, toast)
 	}
 	if deleteCmd := view.HandleContentKey(keyPress("x")); deleteCmd != nil || !view.confirmNoteDelete || !strings.Contains(view.notice, "permanently delete") {
 		t.Fatal("first x should request note deletion confirmation")
@@ -503,13 +506,209 @@ func TestContactsViewEditsAndDeletesNote(t *testing.T) {
 		t.Fatal("second x should delete the note")
 	}
 	deleted, _ := view.Update(deleteCmd())
-	if toast := deliverToView(view, deleted); view.note != "" || toast != "Private note deleted" {
-		t.Errorf("note delete state = note:%q toast:%q", view.note, toast)
+	if toast := deliverToView(view, deleted); !view.note.IsEmpty() || !view.noteMarkdownLossless || toast != "Private note deleted" {
+		t.Errorf("note delete state = note:%q lossless:%v toast:%q", view.note, view.noteMarkdownLossless, toast)
 	}
 	requests, _ := recorded.snapshot()
 	joined := strings.Join(requests, "\n")
 	if !strings.Contains(joined, "PATCH /contacts/7/note.json") || !strings.Contains(joined, "DELETE /contacts/7/note.json") {
 		t.Errorf("requests = %v", requests)
+	}
+}
+
+// anniversaryNoteHTML is a note as HEY serves one written in its web app: Trix HTML inside
+// the trix-content wrapper, with the plain `note` beside it flattened by to_plain_text.
+const (
+	anniversaryNoteHTML  = "<div class=\"trix-content\">\n  <div><strong>Anniversary:</strong> June 12<br><br></div>\n<ul>\n<li>Prefers texts after six</li>\n</ul>\n</div>\n"
+	anniversaryNotePlain = "Anniversary: June 12\n\n• Prefers texts after six"
+)
+
+// contactNoteServer serves contact 31 with the given note and answers a note write the
+// way HEY does, with the HTML it was sent wrapped for Trix. It keeps each note written.
+func contactNoteServer(t *testing.T, note, noteHTML string) (*contactsView, func() []string) {
+	t.Helper()
+	var mu sync.Mutex
+	var written []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case req.Method == http.MethodGet && req.URL.Path == "/contacts/31.json":
+			_, _ = w.Write([]byte(`{"id":31,"name":"Maria Lopez","email_address":"maria@example.com","aliases":[]}`))
+		case req.Method == http.MethodGet && req.URL.Path == "/contacts/31/note.json":
+			_ = json.NewEncoder(w).Encode(map[string]any{"contact_id": 31, "note": note, "note_html": noteHTML})
+		case req.Method == http.MethodPatch && req.URL.Path == "/contacts/31/note.json":
+			var body struct {
+				Contact struct {
+					Note string `json:"note"`
+				} `json:"contact"`
+			}
+			_ = json.NewDecoder(req.Body).Decode(&body)
+			mu.Lock()
+			written = append(written, body.Contact.Note)
+			mu.Unlock()
+			sent := htmlutil.ToText(body.Contact.Note)
+			_ = json.NewEncoder(w).Encode(map[string]any{"contact_id": 31, "note": sent, "note_html": "<div class=\"trix-content\">\n  " + body.Contact.Note + "\n</div>\n"})
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	vc := testVC()
+	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	view := newContactsView(vc)
+	view.Resize(vc.width, vc.height)
+	view.Update(view.requestContactDetail(31)())
+	if !view.inDetail || view.detail.ID != 31 {
+		t.Fatalf("contact 31 did not open: %+v", view.detail)
+	}
+	return view, func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), written...)
+	}
+}
+
+func saveContactNote(t *testing.T, view *contactsView) {
+	t.Helper()
+	save := view.HandleContentKey(keyPress("ctrl+s"))
+	if save == nil {
+		t.Fatalf("ctrl+s did not save the note: %q", view.noteForm.status)
+	}
+	saved, _ := view.Update(save())
+	if toast := deliverToView(view, saved); toast != "Private note saved" || view.noteForm != nil {
+		t.Fatalf("note save = toast:%q form open:%v", toast, view.noteForm != nil)
+	}
+}
+
+func TestContactsViewNoteEditorKeepsFormattingWrittenInHEY(t *testing.T) {
+	view, written := contactNoteServer(t, anniversaryNotePlain, anniversaryNoteHTML)
+	view.HandleContentKey(keyPress("n"))
+	edited := view.noteForm.input.Value()
+	for _, want := range []string{"**Anniversary:** June 12", "- Prefers texts after six"} {
+		if !strings.Contains(edited, want) {
+			t.Errorf("note editor = %q, want it to hold %q", edited, want)
+		}
+	}
+
+	saveContactNote(t, view)
+	notes := written()
+	if len(notes) != 1 {
+		t.Fatalf("notes written = %q", notes)
+	}
+	for _, want := range []string{"<strong>Anniversary:</strong> June 12", "<ul>", "<li>Prefers texts after six</li>"} {
+		if !strings.Contains(notes[0], want) {
+			t.Errorf("saved note = %q, want it to keep %q", notes[0], want)
+		}
+	}
+	if strings.Contains(notes[0], "•") {
+		t.Errorf("saved note = %q, want a list rather than the plain text's bullet", notes[0])
+	}
+}
+
+func TestContactsViewNoteEditorAddsToAFormattedNote(t *testing.T) {
+	view, written := contactNoteServer(t, anniversaryNotePlain, anniversaryNoteHTML)
+	view.HandleContentKey(keyPress("n"))
+	view.noteForm.input.SetValue(view.noteForm.input.Value() + "\n- Allergic to *peanuts*")
+
+	saveContactNote(t, view)
+	notes := written()
+	if len(notes) != 1 {
+		t.Fatalf("notes written = %q", notes)
+	}
+	for _, want := range []string{"<strong>Anniversary:</strong>", "<li>Prefers texts after six</li>", "<li>Allergic to <em>peanuts</em></li>"} {
+		if !strings.Contains(notes[0], want) {
+			t.Errorf("saved note = %q, want it to hold %q", notes[0], want)
+		}
+	}
+
+	shown := ansi.Strip(view.View())
+	for _, want := range []string{"Anniversary:", "Prefers texts after six", "Allergic to peanuts"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("detail after save = %q, want %q", shown, want)
+		}
+	}
+	if strings.Contains(shown, "**") {
+		t.Errorf("detail after save = %q, want the note rendered rather than its Markdown", shown)
+	}
+}
+
+func TestContactsViewShowsANoteRenderedFromItsFormatting(t *testing.T) {
+	view, _ := contactNoteServer(t, anniversaryNotePlain, anniversaryNoteHTML)
+	shown := ansi.Strip(view.View())
+	for _, want := range []string{"Anniversary: June 12", "Prefers texts after six"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("detail = %q, want %q", shown, want)
+		}
+	}
+	if strings.Contains(shown, "**") || strings.Contains(shown, "- Prefers") {
+		t.Errorf("detail = %q, want the note rendered rather than its Markdown", shown)
+	}
+}
+
+func TestContactsViewEmptyNoteCannotBeSaved(t *testing.T) {
+	view, written := contactNoteServer(t, "", "")
+	if !view.note.IsEmpty() || !strings.Contains(ansi.Strip(view.View()), "(empty)") {
+		t.Fatalf("empty note = %q, detail = %q", view.note, ansi.Strip(view.View()))
+	}
+	view.HandleContentKey(keyPress("n"))
+	if value := view.noteForm.input.Value(); value != "" {
+		t.Errorf("note editor = %q, want it empty", value)
+	}
+	if save := view.HandleContentKey(keyPress("ctrl+s")); save != nil {
+		t.Error("an empty note should not be saved")
+	}
+	if notes := written(); len(notes) != 0 {
+		t.Errorf("notes written = %q", notes)
+	}
+}
+
+func TestContactsViewNoteStripsEscapeSequences(t *testing.T) {
+	const payload = "\x1b]0;Owned\x07\x1b[31mCall after six\x1b[0m"
+	view, _ := contactNoteServer(t, payload, "<div class=\"trix-content\"><div><strong>"+payload+"</strong></div></div>")
+
+	shown := view.View()
+	if strings.Contains(shown, "\x1b]0;") || strings.Contains(shown, "\x07") {
+		t.Errorf("detail carries the note's escape sequences: %q", shown)
+	}
+	if plain := ansi.Strip(shown); !strings.Contains(plain, "Call after six") || strings.Contains(plain, "Owned") {
+		t.Errorf("detail = %q, want the text without the sequences", plain)
+	}
+
+	view.HandleContentKey(keyPress("n"))
+	if view.noteForm != nil || !strings.Contains(view.notice, "Markdown cannot preserve") {
+		t.Errorf("unsafe note edit = form:%v notice:%q, want a refusal", view.noteForm, view.notice)
+	}
+}
+
+func TestContactsViewRefusesToEditANoteMarkdownCannotPreserve(t *testing.T) {
+	view, written := contactNoteServer(t, "Project Status", `<div class="trix-content"><table><tr><td>Project Status</td></tr></table></div>`)
+	if view.noteMarkdownLossless {
+		t.Fatal("a table should not be safe to edit as Markdown")
+	}
+
+	if cmd := view.HandleContentKey(keyPress("n")); cmd != nil || view.noteForm != nil {
+		t.Fatalf("lossy note edit = cmd:%v form:%v, want neither", cmd != nil, view.noteForm)
+	}
+	if !strings.Contains(view.notice, "Markdown cannot preserve") || !strings.Contains(view.notice, "--note-html") {
+		t.Errorf("lossy note notice = %q", view.notice)
+	}
+	if notes := written(); len(notes) != 0 {
+		t.Errorf("lossy note wrote %q", notes)
+	}
+}
+
+func TestContactNoteMarkdownKeepsPlainTextLiteral(t *testing.T) {
+	source := &generated.ContactNote{Note: "Call *after* six\nNever before"}
+	note := contactNoteMarkdown(source)
+	if got := htmlutil.FromMarkdown(note.String()); !strings.Contains(got, "*after*") || !strings.Contains(got, "<br>") {
+		t.Errorf("plain note saved as %q, want the asterisks literal and the line break kept", got)
+	}
+	if !contactNoteMarkdownLossless(source) {
+		t.Error("the plain-text fallback should be safe to edit as Markdown")
+	}
+	if !contactNoteMarkdown(nil).IsEmpty() || !contactNoteMarkdownLossless(nil) {
+		t.Error("a missing note should read as an empty, lossless note")
 	}
 }
 
@@ -587,7 +786,7 @@ func TestContactsViewHelpBindings(t *testing.T) {
 		}
 	}
 	view.inDetail = true
-	view.note = "Private"
+	view.note = htmlutil.ToMarkdown("<p>Private</p>")
 	view.confirmNoteDelete = true
 	keys = map[string]bool{}
 	for _, binding := range view.HelpBindings() {

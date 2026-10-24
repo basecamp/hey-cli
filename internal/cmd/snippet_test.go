@@ -1,12 +1,18 @@
 package cmd
 
 import (
+	"encoding/json"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
+	"github.com/basecamp/hey-cli/internal/htmlutil"
 )
 
 const snippetsJSON = `[
@@ -217,4 +223,119 @@ func snippetMutationHandler(t *testing.T, method, path string, validate func(*ht
 		w.Header().Set("Location", "/snippets")
 		w.WriteHeader(http.StatusFound)
 	})
+}
+
+// snippetStore stands in for HEY's snippets: it keeps what was written and lists it the
+// way _snippet.jbuilder does, with content_html inside Action Text's layout.
+type snippetStore struct {
+	mu       sync.Mutex
+	snippets map[int64]string
+	nextID   int64
+	writes   []string
+}
+
+func newSnippetStore(t *testing.T) (http.Handler, *snippetStore) {
+	t.Helper()
+	store := &snippetStore{snippets: map[int64]string{44: "<div>Office hours are <strong>Monday through Thursday</strong>.</div>"}, nextID: 45}
+	return http.HandlerFunc(store.serve), store
+}
+
+func (s *snippetStore) serve(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/snippets.json":
+		listed := make([]generated.Snippet, 0, len(s.snippets))
+		for _, id := range slices.Sorted(maps.Keys(s.snippets)) {
+			listed = append(listed, generated.Snippet{
+				Id:          id,
+				Name:        "Office hours",
+				Content:     htmlutil.ToText(s.snippets[id]),
+				ContentHtml: "<div class=\"trix-content\">\n  " + s.snippets[id] + "\n</div>\n",
+			})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(listed)
+	case r.Method == http.MethodPost && r.URL.Path == "/snippets":
+		s.save(w, r, s.nextID)
+		s.nextID++
+	case r.Method == http.MethodPatch && r.URL.Path == "/snippets/44":
+		s.save(w, r, 44)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *snippetStore) save(w http.ResponseWriter, r *http.Request, id int64) {
+	if err := r.ParseForm(); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	content := r.PostForm.Get("snippet[content]")
+	s.writes = append(s.writes, content)
+	s.snippets[id] = content
+	w.Header().Set("Location", "/snippets")
+	w.WriteHeader(http.StatusFound)
+}
+
+func (s *snippetStore) snapshot() (snippets map[int64]string, writes []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return maps.Clone(s.snippets), append([]string(nil), s.writes...)
+}
+
+func (s *snippetStore) newest() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Max(slices.Collect(maps.Keys(s.snippets)))
+}
+
+func listedSnippetHTML(t *testing.T, handler http.Handler, id int64) string {
+	t.Helper()
+	response, err := runJSONCommand(t, handler, "snippet", "list")
+	if err != nil {
+		t.Fatalf("snippet list: %v", err)
+	}
+	for _, item := range response.Data.([]any) {
+		snippet := item.(map[string]any)
+		if snippet["id"] == float64(id) {
+			return snippet["content_html"].(string)
+		}
+	}
+	t.Fatalf("snippet %d not listed in %#v", id, response.Data)
+	return ""
+}
+
+// content_html is served inside HEY's editor wrapper, and writing it back used to store
+// the wrapper too, so the snippet sank one div deeper on every round trip. Each trip reads
+// the newest snippet: the one updated, or the copy just created from the one before it.
+func TestSnippetHTMLRoundTripDoesNotNest(t *testing.T) {
+	for name, args := range map[string][]string{
+		"update": {"snippet", "update", "44"},
+		"create": {"snippet", "create", "--name", "Office hours"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			handler, store := newSnippetStore(t)
+			for range 3 {
+				content := listedSnippetHTML(t, handler, store.newest())
+				if _, err := runJSONCommand(t, handler, append(args, "--content-html", content+"<div>Closed on Fridays.</div>")...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			newest := store.newest()
+			snippets, writes := store.snapshot()
+			for _, written := range writes {
+				if strings.Contains(written, "trix-content") {
+					t.Errorf("wrote %q, want HEY's wrapper taken off", written)
+				}
+			}
+			if last := snippets[newest]; strings.Count(last, "Closed on Fridays.") != 3 || !strings.Contains(last, "<strong>Monday through Thursday</strong>") {
+				t.Errorf("snippet %d = %q, want the content and every addition", newest, last)
+			}
+			if listed := listedSnippetHTML(t, handler, newest); strings.Count(listed, "trix-content") != 1 {
+				t.Errorf("content_html = %q, want one wrapper", listed)
+			}
+		})
+	}
 }

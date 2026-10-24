@@ -243,6 +243,37 @@ func TestMoveRejectsUnknownDestination(t *testing.T) {
 	if len(recorded.requests) != 1 || recorded.requests[0] != "GET /boxes.json" {
 		t.Errorf("requests = %v, want only box discovery", recorded.requests)
 	}
+	// The hint names the boxes a thread can be moved to, which Bubble Up is not.
+	if !strings.Contains(cliErr.Hint, "imbox, feed, papertrail, setaside, or replylater") {
+		t.Errorf("hint = %q, want the move destinations", cliErr.Hint)
+	}
+	if strings.Contains(cliErr.Hint, "bubbleup") {
+		t.Errorf("hint = %q offers Bubble Up, which move refuses", cliErr.Hint)
+	}
+	if !strings.Contains(cliErr.Hint, "hey bubble up") {
+		t.Errorf("hint = %q, want hey bubble up for Bubble Up", cliErr.Hint)
+	}
+}
+
+// Trash is not a box, so --to trash matches nothing; the hint sends the threads to the
+// command that trashes them rather than to a search of Trash.
+func TestMoveToTrashPointsAtHeyTrash(t *testing.T) {
+	server, recorded := moveServer(t)
+
+	_, err := runMove(t, server, "12345", "--to", "trash")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != "not_found" {
+		t.Fatalf("--to trash should produce a not-found error, got %v", err)
+	}
+	if !strings.Contains(cliErr.Hint, "hey trash <box-item-id>") {
+		t.Errorf("hint = %q, want hey trash", cliErr.Hint)
+	}
+	if strings.Contains(cliErr.Hint, "hey search") {
+		t.Errorf("hint = %q points a move at a search", cliErr.Hint)
+	}
+	if recorded.moved() {
+		t.Error("--to trash sent a move request")
+	}
 }
 
 func TestMoveReportsServerFailure(t *testing.T) {

@@ -123,6 +123,8 @@ hey contact add --alias
 hey contact add --email
 hey contact add --name
 hey contact bundle
+hey contact deliver
+hey contact deliver --to
 hey contact hide
 hey contact list
 hey contact list --all
@@ -133,6 +135,9 @@ hey contact note set
 hey contact note set --note
 hey contact note set --note-html
 hey contact note show
+hey contact photo
+hey contact photo remove
+hey contact photo set
 hey contact show
 hey contact show-again
 hey contact threads
@@ -186,6 +191,8 @@ hey event day
 hey event day --all
 hey event day --limit
 hey event delete
+hey event delete --apply-to
+hey event delete --occurrence
 hey event edit
 hey event edit --all-day
 hey event edit --allow-plain-notes
@@ -372,6 +379,8 @@ hey stop-ignoring
 hey thread
 hey thread read
 hey thread read --allow-partial
+hey thread update
+hey thread update --name
 hey timetrack
 hey timetrack categories
 hey timetrack category

@@ -25,7 +25,7 @@ func newContactsBundleCommand() *contactsBundleCommand {
 		Short: "Bundle a contact's mail",
 		Long:  "Group mail from a contact into one bundle in HEY instead of listing every thread separately.",
 		Annotations: map[string]string{
-			"agent_notes": "Bundling is a per-contact preference. HEY applies it when the contact's delivery setting supports bundles. Reverse it with `hey contact unbundle <id>`.",
+			"agent_notes": "Bundling is a per-contact preference. HEY bundles only a contact with no box preference or one sent to the Paper Trail; for any other it answers success and changes nothing. Reverse it with `hey contact unbundle <id>`.",
 		},
 		Example: `  hey contact bundle 12345`,
 		RunE:    bundleCommand.run,

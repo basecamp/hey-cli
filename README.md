@@ -92,6 +92,8 @@ hey setup codex                         # skill for Codex
 claude mcp add hey -- hey mcp           # HEY as MCP tools, on your signed-in account
 ```
 
+`hey mcp` saves drafts and never sends mail. You send a draft from HEY or with `hey draft send <id>`.
+
 ## Docs
 
 - [docs/install.md](docs/install.md): installing, upgrading, completions, Windows

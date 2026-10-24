@@ -58,7 +58,10 @@ func newSearchCommand() *searchCommand {
 		Short: "Search email threads and messages",
 		Long:  "Search email threads and matching messages. Combine an optional free-text query with advanced refinements.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns one result per thread. id is the box item ID for organization actions when the thread has an active box item, topic_id opens the thread, and messages contains the matching message summaries. Use `hey search filters` to discover box, date, label, and attachment values.",
+			"agent_notes": "Returns one result per thread. id is the box item ID for organization actions, omitted when you have no box item for the thread; topic_id opens the thread, and messages contains the matching message summaries. topic_id also works with hey reply and hey forward. Each result also carries subject and updated_at, and each message its message id, creator, created_at and summary. " +
+				"Use `hey search filters` to discover box, date, label, and attachment values. It lists years from 2020 to this one, and the CLI refuses any year but 20xx. " +
+				"An unrecognized --in, --date or --attachment is refused as a usage error naming the values it accepts, before any search is sent; for --in that includes Set Aside, Reply Later, Bubble Up and a name no box has, never not_found. An --in spelling other than a short name or a kind, such as a display name, costs one box list read. --label is not checked, so read hey search filters when unsure of a label. " +
+				"--all stops after 100 pages, and the notice then names the --page value to continue from.",
 		},
 		Example: `  hey search "quarterly planning"
   hey search --from jane@example.com --date last_30_days
@@ -77,7 +80,7 @@ func newSearchCommand() *searchCommand {
 	flags.StringVar(&searchCommand.to, "to", "", "Recipient name or email address")
 	flags.StringVar(&searchCommand.subject, "subject", "", "Words in the subject")
 	flags.StringVar(&searchCommand.date, "date", "", "Date range: last_7_days, last_30_days, last_90_days, or year")
-	flags.StringVar(&searchCommand.in, "in", "", "Box: imbox, feed, papertrail, or trash")
+	flags.StringVar(&searchCommand.in, "in", "", "Box: imbox, feed, papertrail, or trash (or the kind or name of one of those three boxes)")
 	flags.StringVar(&searchCommand.label, "label", "", "Label name")
 	flags.StringVar(&searchCommand.attachment, "attachment", "", "Attachment kind: any, images, pdfs, calendar_invites, documents, spreadsheets, presentations, media, or zip_files")
 	flags.IntVar(&searchCommand.page, "page", 1, "Results page")
@@ -96,8 +99,15 @@ func (c *searchCommand) run(cmd *cobra.Command, args []string) error {
 	if !hasSearchCriteria(params) {
 		return apierr.ErrUsage("provide a query or at least one search refinement")
 	}
-	if err := validateSearchParams(params); err != nil {
+	if err := validateSearchParams(&params); err != nil {
 		return err
+	}
+	if params.In != "" {
+		in, err := resolveSearchIn(cmd.Context(), params.In)
+		if err != nil {
+			return err
+		}
+		params.In = in
 	}
 
 	read := searchPageReader(params)
@@ -165,7 +175,9 @@ func hasSearchCriteria(params hey.SearchParams) bool {
 		params.Date != "" || params.In != "" || params.Label != "" || params.Attachment != ""
 }
 
-func validateSearchParams(params hey.SearchParams) error {
+// validateSearchParams refuses what HEY would misread before anything is sent. --in is
+// resolved after it by resolveSearchIn, which may have to read the box list.
+func validateSearchParams(params *hey.SearchParams) error {
 	if params.Page < 1 {
 		return apierr.ErrUsage("--page must be at least 1")
 	}
@@ -176,13 +188,6 @@ func validateSearchParams(params hey.SearchParams) error {
 			if !searchYearPattern.MatchString(params.Date) {
 				return apierr.ErrUsage("--date must be last_7_days, last_30_days, last_90_days, or a four-digit year beginning with 20")
 			}
-		}
-	}
-	if params.In != "" {
-		switch params.In {
-		case "imbox", "feed", "papertrail", "trash":
-		default:
-			return apierr.ErrUsage("--in must be imbox, feed, papertrail, or trash")
 		}
 	}
 	// HEY answers an unrecognized attachment kind with a 500, and the kinds are plural:

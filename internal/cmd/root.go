@@ -176,7 +176,7 @@ func newRootCmd() *cobra.Command {
 	root.CompletionOptions.HiddenDefaultCmd = true
 
 	root.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output JSON with metadata")
-	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Write the original HTML to a pipe or file (thread read, journal read, contact show, contact note show)")
+	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Write the original HTML to a pipe or file (thread read, journal read, and a contact's note via contact show or contact note show)")
 	root.PersistentFlags().BoolVar(&quietFlag, "quiet", false, "Output result data only")
 	root.PersistentFlags().BoolVar(&idsOnly, "ids-only", false, "Output only IDs, one per line")
 	root.PersistentFlags().BoolVar(&countFlag, "count", false, "Output only the count of results")
@@ -426,7 +426,9 @@ func requireAuth() error {
 			return nil
 		}
 	}
-	return apierr.ErrAuth("Not logged in")
+	notLoggedIn := apierr.ErrAuth("Not logged in")
+	notLoggedIn.Hint = auth.NotLoggedInHint()
+	return notLoggedIn
 }
 
 // migrateOldCredentials migrates credentials from the old config.json format

@@ -1,8 +1,16 @@
 package smoke_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -92,6 +100,79 @@ func TestContactLifecycleAndPrivateNote(t *testing.T) {
 		t.Error("hidden contact was not shown again")
 	}
 	contactWriteJSON(t, "contact", "hide", id)
+
+	// Screened Out is terminal for this lifecycle: exercise every other contact
+	// write before denying future mail from the disposable contact.
+	for _, destination := range []string{"papertrail", "feed", "imbox", "screened-out"} {
+		delivered := dataAs[struct {
+			ID          int    `json:"id"`
+			Destination string `json:"destination"`
+		}](t, contactWriteJSON(t, "contact", "deliver", id, "--to", destination))
+		if delivered.ID != created.ID || delivered.Destination != destination {
+			t.Errorf("accepted contact delivery to %s was not returned", destination)
+		}
+	}
+}
+
+func TestContactPhoto(t *testing.T) {
+	unique := fmt.Sprintf("%d", time.Now().UnixNano())
+	created := dataAs[struct {
+		ID        int    `json:"id"`
+		AvatarURL string `json:"avatar_url"`
+	}](t, contactWriteJSON(t, "contact", "add", "--name", "Priya Shah", "--email", "priya.shah+"+unique+"@example.com"))
+	id := intStr(created.ID)
+	t.Cleanup(func() {
+		_, _, _ = hey(t, "contact", "photo", "remove", id)
+		_, _, _ = hey(t, "contact", "hide", id)
+	})
+
+	portrait := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for x := 0; x < 64; x++ {
+		for y := 0; y < 64; y++ {
+			portrait.Set(x, y, color.RGBA{R: uint8(x * 4), G: 96, B: uint8(y * 4), A: 255})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, portrait); err != nil {
+		t.Fatal(err)
+	}
+	photo := filepath.Join(t.TempDir(), "priya-shah.png")
+	if err := os.WriteFile(photo, encoded.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	withPhoto := dataAs[struct {
+		ID        int    `json:"id"`
+		AvatarURL string `json:"avatar_url"`
+	}](t, contactWriteJSON(t, "contact", "photo", "set", id, photo))
+	if withPhoto.ID != created.ID {
+		t.Fatalf("photo set answered contact %d, want %d", withPhoto.ID, created.ID)
+	}
+	// The avatar URL carries a version of whatever the avatar is drawn from.
+	if withPhoto.AvatarURL == "" || withPhoto.AvatarURL == created.AvatarURL {
+		t.Errorf("avatar_url did not change after setting a photo: %q", withPhoto.AvatarURL)
+	}
+	// The URL changes with the blob whether or not HEY can resize it; one it cannot is
+	// answered with the contact's initials as SVG. So fetch it: the photo is a raster.
+	// The avatar route needs no session.
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get(withPhoto.AvatarURL)
+	if err != nil {
+		t.Fatalf("fetch avatar: %v", err)
+	}
+	_ = resp.Body.Close()
+	if contentType := resp.Header.Get("Content-Type"); resp.StatusCode != http.StatusOK || !strings.HasPrefix(contentType, "image/") || strings.Contains(contentType, "svg") {
+		t.Errorf("avatar answered %d %q, want the uploaded photo as a raster image", resp.StatusCode, contentType)
+	}
+
+	contactWriteJSON(t, "contact", "photo", "remove", id)
+	withoutPhoto := dataAs[struct {
+		AvatarURL string `json:"avatar_url"`
+	}](t, heyJSON(t, "contact", "show", id))
+	if withoutPhoto.AvatarURL != created.AvatarURL {
+		t.Errorf("avatar_url after removing the photo = %q, want the default %q", withoutPhoto.AvatarURL, created.AvatarURL)
+	}
+	// Removing again, from a contact with no photo, still succeeds.
+	contactWriteJSON(t, "contact", "photo", "remove", id)
 }
 
 func TestContactThreads(t *testing.T) {
@@ -149,6 +230,13 @@ func TestContactCommandsValidateInput(t *testing.T) {
 	heyFail(t, "contact", "update", "12345")
 	heyFail(t, "contact", "show", "not-an-id")
 	heyFail(t, "contact", "threads", "not-an-id")
+	heyFail(t, "contact", "deliver", "12345")
+	heyFail(t, "contact", "deliver", "12345", "--to", "later")
+	heyFail(t, "contact", "deliver", "not-an-id", "--to", "imbox")
 	heyFail(t, "contact", "bundle", "not-an-id")
 	heyFail(t, "contact", "unbundle", "0")
+	heyFail(t, "contact", "photo", "set", "12345")
+	heyFail(t, "contact", "photo", "set", "not-an-id", "priya-shah.png")
+	heyFail(t, "contact", "photo", "set", "12345", filepath.Join(t.TempDir(), "missing.png"))
+	heyFail(t, "contact", "photo", "remove", "not-an-id")
 }

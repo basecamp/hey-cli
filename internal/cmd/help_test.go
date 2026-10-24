@@ -52,6 +52,9 @@ func TestEmailCommandHelpKeepsPostingAsAnInternalTerm(t *testing.T) {
 					command.Annotations["agent_notes"],
 					command.NonInheritedFlags().FlagUsages(),
 				}, "\n")
+				// A wire name in backticks is what the JSON or the environment
+				// literally carries, so naming it is not terminology.
+				text = strings.NewReplacer("`postings`", "", "`posting`", "", "`posting_id`", "", "`HEY_POSTING_ID`", "").Replace(text)
 				if strings.Contains(strings.ToLower(text), "posting") {
 					t.Errorf("%s exposes internal posting terminology:\n%s", command.CommandPath(), text)
 				}
@@ -83,7 +86,7 @@ func TestContactCommandHelpUsesHEYTerminology(t *testing.T) {
 	if strings.Contains(lower, "reveal") || strings.Contains(lower, "delete a contact") {
 		t.Errorf("contact help exposes internal or destructive terminology:\n%s", text.String())
 	}
-	for _, want := range []string{"hide a contact", "show a hidden contact again", "bundle a contact's mail", "list a contact's mail separately", "delete a private contact note"} {
+	for _, want := range []string{"hide a contact", "show a hidden contact again", "choose where a contact's email arrives", "bundle a contact's mail", "list a contact's mail separately", "delete a private contact note"} {
 		if !strings.Contains(lower, want) {
 			t.Errorf("contact help missing %q:\n%s", want, text.String())
 		}
@@ -107,7 +110,7 @@ USAGE
 CORE COMMANDS
   tui       Launch the interactive terminal UI
   box       List HEY boxes and their email threads
-  thread    Read email threads
+  thread    Read and rename email threads
   reply     Reply to a thread
   compose   Write and send a new email
   search    Search email threads and messages

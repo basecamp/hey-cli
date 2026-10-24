@@ -44,15 +44,38 @@ func newReplyCommand() *replyCommand {
 	replyCommand.cmd = &cobra.Command{
 		Use:   "reply <thread-id>",
 		Short: "Reply to a thread",
-		Long: `Reply to a thread's latest entry.
+		Long: `Reply to a thread's latest emailed message.
+
+A note or share notice posted after it is skipped, as HEY's web app skips it: both are
+internal — visible to everyone with access to the thread, never emailed. A thread holding
+nothing else is refused.
 
 The reply is addressed the way HEY's own web app addresses one: everyone that entry was
-addressed to, with whoever wrote it on the To line. Repeatable --to, --cc and --bcc
+addressed to, with whoever wrote it on the To line, minus your own addresses. If HEY's
+prefill is unavailable or names no one, a send falls back to the message's own recipients,
+which can include you. Repeatable --to, --cc and --bcc
 values add or move recipients on those lines; each value can also be comma-separated.
 --replace-recipients uses only the explicitly supplied recipients instead. A dry run
-resolves and prints the complete envelope without requiring a message or sending one.`,
+resolves and prints the complete envelope without requiring a message or sending one.
+
+A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
+or a top-level domain HEY does not know — is refused before anything is sent.
+
+A send answers the reply's id and the topic_id of the thread it landed on, with its
+subject and delayed (true while Undo Send holds it back). That thread is a new one when
+HEY breaks the reply out of this one, as HEY for Domains does when a reply changes who is
+on the thread. Whatever HEY's answer leaves out is left out here too, and the "view"
+breadcrumb then points at the thread replied to.
+
+While Undo Send holds a message back (delayed), HEY leaves it out of its thread:
+hey thread read shows the thread without it, and a thread it started answers not_found,
+until the message goes out. Read the thread again then.
+
+If HEY refuses the send — usually because the account has reached its sending limit —
+it keeps the message as a draft; the command then fails with not_delivered (exit 7),
+naming the draft, which hey draft send sends later.`,
 		Annotations: map[string]string{
-			"agent_notes": "Replies to the latest entry in a thread, addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line, minus the acting user's own addresses. Repeatable --to/--cc/--bcc flags merge explicit recipients into that prefill; --replace-recipients uses only the explicit lists. --dry-run is read-only, needs no message, and returns the resolved sender, recipients, subject, account, thread and entry. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text. The message is Markdown; use --message-html to send raw HTML instead. --draft saves the reply as a draft, carries the resolved recipients, and answers the draft ID for hey draft show/edit/send/delete.",
+			"agent_notes": "Replies to the latest emailed message in a thread — never a note (kind \"comment\") or share notice (kind \"access_notice\"), which are internal to the thread and never emailed; a thread with no emailed message is refused as not_found. The reply is addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line, minus the acting user's own addresses. Repeatable --to/--cc/--bcc flags merge explicit recipients into that prefill; --replace-recipients uses only the explicit lists. --dry-run is read-only, needs no message, and returns the resolved sender, recipients, subject, account, thread and entry. A dry run does not read the original message body; run --dry-run --json first when changing the envelope. When HEY's reply prefill is unavailable a dry run will not guess the original lists and is refused as a usage error; pass --replace-recipients with explicit --to, --cc or --bcc addresses. A reply HEY cannot address is refused as a usage error unless an explicit --to, --cc or --bcc recipient makes it addressable. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text. Without -m or --message-html the message is read from stdin when stdin is not a terminal, and $EDITOR opens when it is. The message is Markdown; use --message-html to send raw HTML instead. --draft saves the reply as a draft, carries the resolved recipients, and answers the draft ID for hey draft show/edit/send/delete. A send answers the reply's id and the topic_id of the thread it landed on — a new thread when HEY breaks the reply out of this one — as HEY's answer names them. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
 		},
 		Example: `  hey reply 12345 -m "Friday works for me — I'll send an agenda."
   hey reply 12345 --to support@example.com -m "The replacement is on the way."
@@ -61,7 +84,7 @@ resolves and prints the complete envelope without requiring a message or sending
   hey reply 12345 -m "Drafting a longer answer — sending tomorrow." --draft
   echo "Longer reply from a file or a heredoc" | hey reply 12345`,
 		RunE: replyCommand.run,
-		Args: usageExactOneArg(),
+		Args: recipientsChecked(usageExactOneArg()),
 	}
 
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message as Markdown (or opens $EDITOR)")
@@ -161,17 +184,15 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 		}
 		return writeDraftSaved(cmd, draftID, len(c.attachments))
 	}
-	if err = replySDK.Entries().CreateReply(ctx, target.EntryID, target.ActingSenderID, target.Subject, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
+	sent, err := replySDK.Entries().CreateReply(ctx, target.EntryID, target.ActingSenderID, target.Subject, message, target.Addressed.To, target.Addressed.CC, target.Addressed.BCC)
+	if err != nil {
 		return apierr.FromSDK(err)
 	}
-
-	return writeMutation(cmd, sentWithAttachmentsSummary("Reply sent", len(c.attachments)), nil,
-		output.WithBreadcrumbs(output.Breadcrumb{
-			Action:      "view",
-			Command:     fmt.Sprintf("hey thread read %d", threadID),
-			Description: "View the full thread",
-		}),
-	)
+	if err := confirmSent(ctx, replySDK, sent); err != nil {
+		return err
+	}
+	summary := sentWithAttachmentsSummary("Reply sent", len(c.attachments))
+	return writeMessageSent(cmd, messageSent{line: summary, summary: summary, thread: threadID}, sent)
 }
 
 func parseReplyAddresses(values []string) []string {

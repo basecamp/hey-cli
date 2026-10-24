@@ -124,10 +124,16 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 				_, _ = w.Write([]byte(`{"contact":{"id":88,"name":"GitHub","email_address":"notifications@example.com"},"postings":[{"id":512,"kind":"topic","name":"Nightly build is green again","app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
 			}
 		case "/imbox/seen.json":
-			if r.URL.Query().Get("page") == "" {
+			switch r.URL.Query().Get("page") {
+			case "":
 				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":611,"kind":"topic","name":"Weekly team sync notes","seen":true,"app_url":"https://app.hey.com/topics/100","created_at":"2026-08-20T09:00:00Z","creator":{"id":21,"name":"Claire Lee"}}],"next_history_url":"/imbox?page=seen-page-2"}`))
-			} else {
-				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":612,"kind":"topic","name":"Invoice #2041 from Fastmail","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}]}`))
+			case "seen-page-2":
+				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":612,"kind":"topic","name":"Invoice #2041 from Fastmail","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}],"next_history_url":"/imbox?page=seen-page-3"}`))
+			case "seen-page-3":
+				_, _ = w.Write([]byte(`{"id":1,"postings":[{"id":613,"kind":"topic","name":"Travel receipt","seen":true,"app_url":"https://app.hey.com/topics/102","created_at":"2026-08-17T11:00:00Z","creator":{"id":23,"name":"Jamie Rivera"}}]}`))
+			default:
+				t.Errorf("unexpected Previously Seen page %q", r.URL.Query().Get("page"))
+				http.Error(w, "unexpected page", http.StatusBadRequest)
 			}
 		case "/contacts/88.json":
 			_, _ = w.Write([]byte(`{"id":88,"name":"GitHub","entries_title":"All threads with GitHub","postings":[{"id":513,"kind":"topic","name":"Deploy failed on main","seen":true,"app_url":"https://app.hey.com/topics/100","created_at":"2026-08-25T09:00:00Z","creator":{"id":88,"name":"GitHub"}},{"id":514,"kind":"topic","name":"Nightly build is green again","seen":true,"app_url":"https://app.hey.com/topics/101","created_at":"2026-08-24T21:00:00Z","creator":{"id":88,"name":"GitHub"}}]}`))
@@ -135,6 +141,10 @@ func mailWithTestServer(t *testing.T, status int) (*mailView, *recordedMailReque
 			_, _ = w.Write([]byte(`[{"id":501,"kind":"message","summary":"Hello world","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}]`))
 		case "/messages/501.json":
 			_, _ = w.Write([]byte(`{"id":501,"subject":"Hello world","content":"<p>Message body</p>","created_at":"2026-08-19T09:00:00Z","creator":{"id":10,"name":"Alice"}}`))
+		case "/topics/101/entries.json":
+			_, _ = w.Write([]byte(`[{"id":502,"kind":"message","summary":"Invoice #2041","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}]`))
+		case "/messages/502.json":
+			_, _ = w.Write([]byte(`{"id":502,"subject":"Invoice #2041 from Fastmail","content":"<p>Invoice attached</p>","created_at":"2026-08-18T15:00:00Z","creator":{"id":22,"name":"Fastmail Billing"}}`))
 		default:
 			if r.Method == http.MethodDelete {
 				for _, value := range strings.Split(r.URL.Query().Get("posting_ids"), ",") {
@@ -294,6 +304,40 @@ func TestMailViewHandlesTopicLoaded(t *testing.T) {
 	}
 }
 
+// A thread opens on its newest message, where whatever brought the reader to it arrived,
+// rather than on the first message of a conversation they have mostly read already.
+func TestOpeningAThreadShowsItsLatestMessage(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.width = 80
+	v.vc.height = 12
+	v.topicViewport.SetWidth(80)
+	v.Update(topicLoadedMsg{
+		boxID:   1,
+		topicID: 100,
+		title:   "Quarterly planning",
+		entries: []mail.Entry{
+			{ID: 1, Creator: mail.Contact{Name: "Maria Gonzalez"}, Body: htmlutil.ToMarkdown(strings.Repeat("<p>Here are the numbers for the quarter.</p>", 8))},
+			{ID: 2, Creator: mail.Contact{Name: "Sam Rivera"}, Body: htmlutil.ToMarkdown(strings.Repeat("<p>Thanks, a few questions on the forecast.</p>", 8))},
+			{ID: 3, Creator: mail.Contact{Name: "Ana Ortiz"}, Body: htmlutil.ToMarkdown(strings.Repeat("<p>Thursday at ten works for me.</p>", 8))},
+		},
+	})
+
+	if len(v.entryOffsets) != 3 {
+		t.Fatalf("entry offsets = %v", v.entryOffsets)
+	}
+	if got, want := v.topicViewport.YOffset(), v.entryOffsets[2]; got != want {
+		t.Errorf("thread opened at line %d, want the latest message at %d", got, want)
+	}
+	if !strings.Contains(ansi.Strip(v.topicViewport.View()), "Ana Ortiz") {
+		t.Errorf("the latest message is not on screen: %q", ansi.Strip(v.topicViewport.View()))
+	}
+
+	v.HandleContentKey(keyPress("k"))
+	if got, want := v.topicViewport.YOffset(), v.entryOffsets[1]; got != want {
+		t.Errorf("k should walk back to the message before it: offset %d, want %d", got, want)
+	}
+}
+
 // A thread heads its messages with the centered subject, and a blank line
 // separates each message header from the content under it.
 func TestThreadViewShowsSubjectAndSpacesTheHeader(t *testing.T) {
@@ -448,7 +492,7 @@ func TestMailViewKeepsAPartialThreadsNoticeAndLeavesItUnseen(t *testing.T) {
 	}
 }
 
-func TestLinkDestinationMustFitFooterBeforeOpening(t *testing.T) {
+func TestLinkFooterShowsTheWholeDestinationBeforeOpening(t *testing.T) {
 	v := newMailView(testVC())
 	v.inThread = true
 	v.topicID = 100
@@ -496,20 +540,16 @@ func TestLinkDestinationMustFitFooterBeforeOpening(t *testing.T) {
 
 	v.vc.width = 24
 	footer, visible = v.LinkFooter()
-	if !visible || v.linkDestinationReviewable() || strings.Contains(footer, destination) {
-		t.Errorf("narrow link footer = %q visible=%v reviewable=%v", footer, visible, v.linkDestinationReviewable())
+	if !visible || !v.linkDestinationReviewable() || !strings.Contains(strings.ReplaceAll(footer, "\n", ""), destination) {
+		t.Errorf("narrow link footer = %q visible=%v reviewable=%v, want the whole destination wrapped", footer, visible, v.linkDestinationReviewable())
 	}
-	opened = ""
-	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil || opened != "" {
-		t.Errorf("hidden destination opened: handled=%v command=%v destination=%q", handled, cmd != nil, opened)
+	for _, line := range strings.Split(footer, "\n") {
+		if lipgloss.Width(line) > v.vc.width {
+			t.Errorf("wrapped footer line %q is wider than %d", line, v.vc.width)
+		}
 	}
-
-	v.vc.width = 3
-	if v.linkDestinationReviewable() {
-		t.Error("destination wider than a tiny terminal was marked reviewable")
-	}
-	if cmd, handled := v.handleLinkKey(keyPress("enter")); !handled || cmd != nil {
-		t.Errorf("tiny terminal opened destination: handled=%v command=%v", handled, cmd != nil)
+	if !strings.HasSuffix(footer, "(press Enter to visit)") {
+		t.Errorf("wrapped footer = %q, want it to end with the action", footer)
 	}
 
 	v.selectedLink = -1
@@ -3000,9 +3040,9 @@ func TestMailViewDownloadsBeforeExplicitExternalOpen(t *testing.T) {
 		t.Fatalf("loading a thread opened an attachment: %v", events)
 	}
 
-	open := v.HandleContentKey(keyPress("o"))
+	open := v.HandleContentKey(keyPress("enter"))
 	if open == nil {
-		t.Fatal("o should open the selected attachment")
+		t.Fatal("Enter should open the selected attachment")
 	}
 	if len(events) != 0 {
 		t.Fatalf("handling the key opened an attachment before the command ran: %v", events)
@@ -3019,6 +3059,61 @@ func TestMailViewDownloadsBeforeExplicitExternalOpen(t *testing.T) {
 	}
 	if toast := deliverToView(v, answer); toast != "Opened attachment chart.png" {
 		t.Errorf("open toast = %q", toast)
+	}
+}
+
+func TestMailViewOnlySavesAttachmentsThatCouldRunAProgram(t *testing.T) {
+	for _, filename := range []string{
+		"Invoice.terminal",
+		"setup.command",
+		"report.pdf.command",
+		"Shortcut.webloc",
+		"launcher.desktop",
+		"install.sh",
+		"invoice.bat",
+		"invoice.lnk",
+		"invoice.hta",
+		"Invoice.TERMINAL",
+		"Invoice.terminal. ",
+		"README",
+	} {
+		t.Run(filename, func(t *testing.T) {
+			v := mailWithPostings()
+			var events []string
+			v.vc.newAttachmentTempDir = func() (string, error) {
+				events = append(events, "download")
+				return t.TempDir(), nil
+			}
+			v.vc.saveAttachment = func(context.Context, string, string, bool) (int64, error) {
+				events = append(events, "save")
+				return 128, nil
+			}
+			v.vc.openAttachment = func(string) error {
+				events = append(events, "open")
+				return nil
+			}
+			v.Update(topicLoadedMsg{
+				boxID:       1,
+				topicID:     100,
+				title:       "Quarterly planning",
+				entries:     []mail.Entry{{ID: 501, Creator: mail.Contact{Name: "Alice"}}},
+				attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: filename, URL: "/rails/blobs/payload"}},
+			})
+
+			open := v.HandleContentKey(keyPress("enter"))
+			if open == nil {
+				t.Fatal("Enter should still answer for the selected attachment")
+			}
+			if _, consumed := v.Update(open()); !consumed {
+				t.Fatal("attachment open result was not consumed")
+			}
+			if len(events) != 0 {
+				t.Errorf("Enter on %q = %v, want nothing downloaded or opened", filename, events)
+			}
+			if !strings.Contains(v.notice, "Could not open attachment") || !strings.Contains(v.notice, "press s to save it") {
+				t.Errorf("refusal notice = %q", v.notice)
+			}
+		})
 	}
 }
 
@@ -3041,7 +3136,7 @@ func TestMailViewDoesNotOpenAttachmentWhenDownloadFails(t *testing.T) {
 		attachments: []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "chart.png", URL: "/rails/blobs/chart.png"}},
 	})
 
-	open := v.HandleContentKey(keyPress("o"))
+	open := v.HandleContentKey(keyPress("enter"))
 	v.Update(open())
 	if openCalls != 0 {
 		t.Errorf("opener was called %d times after download failure", openCalls)
@@ -3077,8 +3172,8 @@ func TestMailViewAlwaysRendersAttachmentPanelAndTextMarker(t *testing.T) {
 	})
 
 	view := v.View()
-	for _, want := range []string{"Image: ", "Attachments", "chart.png", "image/png", "1.5 KB"} {
-		if !strings.Contains(view, want) {
+	for _, want := range []string{"📷 chart.png", "Attachments", "chart.png", "image/png", "1.5 KB"} {
+		if !strings.Contains(stripANSI(view), want) {
 			t.Errorf("thread view does not contain %q: %q", want, view)
 		}
 	}
@@ -4207,9 +4302,20 @@ func TestMailViewJumpsToPreviouslySeen(t *testing.T) {
 	if recorded.path != "/imbox/seen.json" || recorded.rawQueries[len(recorded.rawQueries)-1] != "page=seen-page-2" {
 		t.Errorf("read %s?%s, want /imbox/seen.json?page=seen-page-2", recorded.path, recorded.rawQueries[len(recorded.rawQueries)-1])
 	}
-	v.Update(appended)
+	more, _ = v.Update(appended)
 	if len(v.seenList.postings) != 2 || v.seenList.postings[1].TopicID != 101 {
 		t.Fatalf("grown seen postings = %+v", v.seenList.postings)
+	}
+	if v.seenNextPage != "/imbox?page=seen-page-3" {
+		t.Errorf("nextPage = %q, want /imbox?page=seen-page-3", v.seenNextPage)
+	}
+	appended, ok = runCmd(more).(seenAppendedMsg)
+	if !ok || appended.err != nil {
+		t.Fatalf("growing the seen list again returned %#v", appended)
+	}
+	v.Update(appended)
+	if len(v.seenList.postings) != 3 || v.seenList.postings[2].TopicID != 102 {
+		t.Fatalf("twice-grown seen postings = %+v", v.seenList.postings)
 	}
 	if v.seenNextPage != "" {
 		t.Errorf("nextPage = %q, want none after the last page", v.seenNextPage)
@@ -4241,12 +4347,58 @@ func TestMailViewJumpsToPreviouslySeen(t *testing.T) {
 }
 
 func TestMailViewPreviouslySeenIsANoOpWhileOpen(t *testing.T) {
-	v, _ := mailWithTestServer(t, http.StatusNoContent)
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
 
 	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
 	v.Update(loaded)
+	requestCount := len(recorded.requests)
 	if cmd := v.handleBoxShortcut("9"); cmd != nil {
 		t.Error("9 on the seen screen should do nothing")
+	}
+	if len(recorded.requests) != requestCount {
+		t.Errorf("9 made %d requests, want no refetch", len(recorded.requests)-requestCount)
+	}
+}
+
+func TestMailViewPreviouslySeenShortcutClosesItsThread(t *testing.T) {
+	v, recorded := mailWithTestServer(t, http.StatusNoContent)
+
+	loaded, _ := runCmd(v.handleBoxShortcut("9")).(seenLoadedMsg)
+	more, _ := v.Update(loaded)
+	v.Update(runCmd(more))
+	v.seenList.moveDown()
+	v.Update(runCmd(v.HandleContentKey(keyPress("enter"))))
+	if !v.inThread || !v.seenActive {
+		t.Fatalf("thread state = open:%v seen:%v, want a thread open from Previously Seen", v.inThread, v.seenActive)
+	}
+	seenIDs := postingIDsOf(v.seenList.postings)
+	seenCursor := v.seenList.cursor
+	seenPostingID := v.seenList.selectedPosting().ID
+	seenNextPage := v.seenNextPage
+	seenMoreID := v.seenMoreID
+	seenLoadingMore := v.seenLoadingMore
+	if seenNextPage == "" || !seenLoadingMore {
+		t.Fatalf("Previously Seen has no pending page: next=%q loading=%v", seenNextPage, seenLoadingMore)
+	}
+	requestCount := len(recorded.requests)
+
+	if cmd := v.handleBoxShortcut("9"); cmd == nil {
+		t.Fatal("9 in a thread opened from Previously Seen should be handled")
+	}
+	if v.inThread || !v.seenActive {
+		t.Errorf("9 landed on open:%v seen:%v, want the Previously Seen list", v.inThread, v.seenActive)
+	}
+	if ids := postingIDsOf(v.seenList.postings); !slices.Equal(ids, seenIDs) || v.seenList.cursor != seenCursor {
+		t.Errorf("Previously Seen list changed: postings=%v cursor=%d, want postings=%v cursor=%d", ids, v.seenList.cursor, seenIDs, seenCursor)
+	}
+	if posting := v.seenList.selectedPosting(); posting == nil || posting.ID != seenPostingID {
+		t.Errorf("Previously Seen selection = %+v, want posting %d", posting, seenPostingID)
+	}
+	if v.seenNextPage != seenNextPage || v.seenMoreID != seenMoreID || v.seenLoadingMore != seenLoadingMore {
+		t.Errorf("Previously Seen pagination = next:%q request:%d loading:%v, want next:%q request:%d loading:%v", v.seenNextPage, v.seenMoreID, v.seenLoadingMore, seenNextPage, seenMoreID, seenLoadingMore)
+	}
+	if len(recorded.requests) != requestCount {
+		t.Errorf("9 made %d requests, want no refetch", len(recorded.requests)-requestCount)
 	}
 }
 

@@ -18,7 +18,8 @@ const Name = "hey-cli"
 // Config selects the served tool surface.
 type Config struct {
 	// ReadOnly drops every write action from the catalog and refuses write
-	// dispatch outright.
+	// dispatch outright. Without it, the operations that can deliver mail
+	// still only save drafts (drafts.go).
 	ReadOnly bool
 	// Domains narrows the served domains by key ("boxes", "search", ...).
 	// Empty means all. Unknown keys are a startup error — fail closed.
@@ -41,6 +42,9 @@ func New(api API, cfg Config) (*Server, error) {
 	cat, err := loadCatalog()
 	if err != nil {
 		return nil, fmt.Errorf("derive catalog: %w", err)
+	}
+	if err = holdToDrafts(cat); err != nil {
+		return nil, fmt.Errorf("hold sending operations to drafts: %w", err)
 	}
 
 	gw, err := gateway.New(cat.GatewayDomains(), gateway.Config{

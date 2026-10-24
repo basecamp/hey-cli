@@ -41,8 +41,8 @@ func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
 			name:        "cookie",
 			initial:     &auth.Credentials{SessionCookie: "old-cookie", OAuthType: "cookie"},
 			replacement: &auth.Credentials{SessionCookie: "new-cookie", OAuthType: "cookie"},
-			first:       "session_token=old-cookie",
-			second:      "session_token=new-cookie",
+			first:       "__Host-session_token=old-cookie; session_token=old-cookie",
+			second:      "__Host-session_token=new-cookie; session_token=new-cookie",
 		},
 	}
 

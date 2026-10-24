@@ -46,7 +46,7 @@ var sourceParser = goldmark.New(goldmark.WithExtensions(extension.GFM, extension
 // way glamour would count it.
 func prepareSource(md string) (safe, forGlamour string, deep bool) {
 	safe = stripControls(md)
-	forGlamour, depth := neutralizeEntities(safe)
+	forGlamour, depth := neutralizeEntities(wholeBareLinks(safe))
 	return safe, forGlamour, depth > maxNestingDepth
 }
 
@@ -96,7 +96,7 @@ const (
 func neutralizeEntities(md string) (string, int) {
 	source := []byte(md)
 	spans, depth := textSpans(sourceParser.Parser().Parse(text.NewReader(source)))
-	if !strings.Contains(md, "&") {
+	if !strings.ContainsAny(md, `&\`) {
 		return md, depth
 	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
@@ -177,10 +177,19 @@ func underImage(n ast.Node) bool {
 // five characters it reads as. Alt text glamour shows as written, so the one decode
 // ToMarkdown's "&amp;" needs is done here, and only that one: nothing else in alt text
 // is touched, so an entity the email spelled out stays the characters it was.
+//
+// glamour resolves backslash escapes from a list of its own rather than CommonMark's,
+// and the list has no "\~" or "\=" — both of which ToMarkdown writes, the first before
+// every tilde in prose — so it shows the backslash. Those two are written as the
+// character references for the same characters instead, which glamour's decode turns
+// back into a tilde or an equals sign that no parser then sees as syntax. "\@", which
+// ToMarkdown never writes and wholeBareLinks writes in an address it declines to link,
+// is spelled the same way, so that glamour's linkify does not find an @ there either. An escaped
+// backslash is matched first and kept, so that "\\~" stays a backslash and a tilde.
 var (
 	codeAmpersands = strings.NewReplacer("&", "&amp;")
-	textAmpersands = strings.NewReplacer("&amp;", "&amp;", `\&`, "&amp;", "&", "&amp;")
-	altAmpersands  = strings.NewReplacer("&amp;", "&")
+	textAmpersands = strings.NewReplacer(`\\`, `\\`, `\~`, "&#126;", `\=`, "&#61;", `\@`, "&#64;",
+		"&amp;", "&amp;", `\&`, "&amp;", "&", "&amp;")
 )
 
 func neutralized(s string, kind spanKind) string {
@@ -188,8 +197,47 @@ func neutralized(s string, kind spanKind) string {
 	case codeSpan:
 		return codeAmpersands.Replace(s)
 	case altSpan:
-		return altAmpersands.Replace(s)
+		return neutralizedAlt(s)
 	default:
 		return textAmpersands.Replace(s)
 	}
+}
+
+// neutralizedAlt does for alt text what glamour will not: alt text is shown as its
+// source reads, entities and all, so ToMarkdown's "&amp;" becomes the "&" it stands for
+// and "\=" an equals sign. A tilde cannot simply lose its backslash, because the alt is
+// parsed before it is shown and "~~closed~~" would turn into strikethrough and lose the
+// tildes; and a character reference would be shown as written. A run of escaped tildes
+// goes into a code span instead, which glamour shows as the text it holds — code spans
+// only ever hold a whole run, so two of them never sit side by side to close each other.
+func neutralizedAlt(s string) string {
+	if !strings.ContainsAny(s, `\&`) {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	for i := 0; i < len(s); {
+		switch {
+		case strings.HasPrefix(s[i:], `\\`):
+			b.WriteString(`\\`)
+			i += 2
+		case strings.HasPrefix(s[i:], `\~`):
+			tildes := 0
+			for strings.HasPrefix(s[i:], `\~`) {
+				tildes++
+				i += 2
+			}
+			b.WriteString("`" + strings.Repeat("~", tildes) + "`")
+		case strings.HasPrefix(s[i:], `\=`):
+			b.WriteByte('=')
+			i += 2
+		case strings.HasPrefix(s[i:], "&amp;"):
+			b.WriteByte('&')
+			i += len("&amp;")
+		default:
+			b.WriteByte(s[i])
+			i++
+		}
+	}
+	return b.String()
 }

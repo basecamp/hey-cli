@@ -13,6 +13,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
@@ -76,12 +77,13 @@ type topicCommand struct {
 func newThreadCommand() *cobra.Command {
 	thread := &cobra.Command{
 		Use:   "thread",
-		Short: "Read email threads",
+		Short: "Read and rename email threads",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: read. Thread IDs come from hey box view. Use the same ID with hey reply or hey forward.",
+			"agent_notes": "Subcommands: read, update. Thread IDs come from hey box view. Use the same ID with hey reply or hey forward.",
 		},
 	}
 	thread.AddCommand(newThreadsCommand().cmd)
+	thread.AddCommand(newThreadUpdateCommand().cmd)
 	return thread
 }
 
@@ -91,11 +93,13 @@ func newThreadsCommand() *topicCommand {
 		Use:   "read <thread-id>",
 		Short: "Read a thread",
 		Long: "Read every entry in a thread, oldest first. JSON entries keep the " +
-			"creator as the account user and, when HEY used another From address, " +
-			"include that address as sender. Entries also include To/CC/BCC recipients " +
-			"and, for inbound mail, received_via with the exact account delivery addresses HEY recorded.",
+			"creator as the entry's author (the external sender for inbound mail) and, when you sent " +
+			"from another address, include that address as sender. Entries also include To/CC/BCC recipients " +
+			"and, for inbound mail, received_via with the exact account delivery addresses HEY recorded. " +
+			"An entry's kind is message for mail; a note (comment) or share notice (access_notice) is " +
+			"internal to the thread and never emailed, and the text formats label it so.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; the creator is the account user, while a non-default send-as address is the optional sender on a hydrated entry. Each entry whose message was read carries recipients as to, cc and bcc contact lists. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
+			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown, converted from HEY's Trix HTML so headings, lists, quotes, tables and code survive and links keep their URLs (read a body as structure, not flattened text); the creator is the entry's author (the external sender for inbound mail, your own contact for mail you sent), while a non-default send-as address you sent from is the optional sender on a hydrated entry; take the From address from sender.email_address when sender is present and from creator.email_address otherwise. Each entry whose message was read carries recipients as to, cc and bcc contact lists. A known-empty line is []; an entry whose message was not read omits recipients. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact; received_via is omitted for sent and generated messages and for an entry whose message was not read. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. It is refused (usage error) when stdout is a terminal, so redirect it to a file or a pipe. A bundle row's own id is not a thread: hey thread read on it answers not_found with a hint naming the bundle and hey bundle view. Each entry's kind says what it is: message for mail, while comment (a note) and access_notice (a share notice) are internal — visible to everyone with access to the thread, never emailed — and --markdown, styled and --html output head them as a note or share notice rather than with a From line. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey thread read 12345
   hey thread read 12345 --json
@@ -193,7 +197,12 @@ func printThreadStyled(w io.Writer, entries []threadEntry, notice string) {
 		if i > 0 {
 			fmt.Fprintln(w, strings.Repeat("─", threadEntrySeparatorWidth))
 		}
-		fmt.Fprintf(w, "From: %s  [%s]  #%d\n", terminal.SanitizeLine(threadEntrySender(e)), e.CreatedAt, e.ID)
+		author := terminal.SanitizeLine(threadEntrySender(e))
+		if heading, tag, internal := mail.InternalEntryLabel(e.Kind, author); internal {
+			fmt.Fprintf(w, "%s  [%s]  #%d  (%s)\n", heading, e.CreatedAt, e.ID, tag)
+		} else {
+			fmt.Fprintf(w, "From: %s  [%s]  #%d\n", author, e.CreatedAt, e.ID)
+		}
 		fmt.Fprintln(w)
 		switch {
 		case !e.Body.IsEmpty():
@@ -236,7 +245,12 @@ func writeThreadMarkdown(w io.Writer, threadID int64, entries []threadEntry, not
 	for _, e := range entries {
 		var b strings.Builder
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "## From: %s — %s (#%d)\n\n", markdownSafeText(threadEntrySender(e)), e.CreatedAt, e.ID)
+		author := markdownSafeText(threadEntrySender(e))
+		if heading, tag, internal := mail.InternalEntryLabel(e.Kind, author); internal {
+			fmt.Fprintf(&b, "## %s — %s (#%d)\n\n*(%s)*\n\n", heading, e.CreatedAt, e.ID, tag)
+		} else {
+			fmt.Fprintf(&b, "## From: %s — %s (#%d)\n\n", author, e.CreatedAt, e.ID)
+		}
 		if err := write(b.String()); err != nil {
 			return err
 		}
@@ -309,9 +323,13 @@ func writeThreadHTML(w io.Writer, threadID int64, entries []threadEntry, notice 
 	for _, e := range entries {
 		sender := html.EscapeString(terminal.SanitizeLine(threadEntrySender(e)))
 		createdAt := html.EscapeString(e.CreatedAt)
+		byline := "From: " + sender + " — " + createdAt
+		if heading, tag, internal := mail.InternalEntryLabel(e.Kind, sender); internal {
+			byline = heading + " — " + createdAt + " (" + tag + ")"
+		}
 		var header strings.Builder
-		fmt.Fprintf(&header, "<article id=\"entry-%d\" data-entry-id=\"%d\" data-created-at=\"%s\" data-body-state=\"%s\">\n<header>\n<div>From: %s — %s</div>\n",
-			e.ID, e.ID, createdAt, html.EscapeString(e.BodyState), sender, createdAt)
+		fmt.Fprintf(&header, "<article id=\"entry-%d\" data-entry-id=\"%d\" data-kind=\"%s\" data-created-at=\"%s\" data-body-state=\"%s\">\n<header>\n<div>%s</div>\n",
+			e.ID, e.ID, html.EscapeString(e.Kind), createdAt, html.EscapeString(e.BodyState), byline)
 		if e.Recipients != nil {
 			writeThreadRecipientRows(&header, e.Recipients)
 		}

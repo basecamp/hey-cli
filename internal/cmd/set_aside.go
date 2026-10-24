@@ -97,7 +97,7 @@ func newSetAsideGroupCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "group",
 		Short: "List and manage groups in Set Aside",
-		Long:  "Gather Set Aside threads into groups, list the groups, and break them up.",
+		Long:  "Gather Set Aside threads into groups, list the groups, and delete them.",
 		Example: `  hey set-aside group list
   hey set-aside group view 42
   hey set-aside group create 12345 67890
@@ -132,7 +132,7 @@ func newSetAsideGroupListCommand() *setAsideGroupListCommand {
 		Short: "List the groups in Set Aside",
 		Long:  "List the groups in Set Aside with how many threads each one holds. Groups have no name in HEY; a group is identified by its ID and its threads.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns group IDs with their thread counts. Use an ID with hey set-aside group view, add and delete.",
+			"agent_notes": "Returns group IDs with their thread counts. Each group carries id and thread_count. HEY's group index answers IDs alone, so this reads each group once for its count: one request per group. Use an ID with hey set-aside group view, add and delete.",
 		},
 		Example: `  hey set-aside group list
   hey set-aside group list --json`,
@@ -170,7 +170,7 @@ func (c *setAsideGroupListCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithSummary(fmt.Sprintf("%d %s in Set Aside", len(groups), groupNoun(len(groups)))),
 		output.WithBreadcrumbs(
 			output.Breadcrumb{Action: "view", Command: "hey set-aside group view <group-id>", Description: "List the threads in a group"},
-			output.Breadcrumb{Action: "delete", Command: "hey set-aside group delete <group-id>", Description: "Break a group up"},
+			output.Breadcrumb{Action: "delete", Command: "hey set-aside group delete <group-id>", Description: "Delete a group; its threads go to Previously Seen"},
 		),
 	)
 }
@@ -230,7 +230,7 @@ var setAsideGroupListing = postingsListing{
 	breadcrumbs: []output.Breadcrumb{
 		{Action: "read", Command: "hey thread read <thread-id>", Description: "Read an email thread"},
 		{Action: "remove", Command: "hey set-aside group remove <box-item-id>", Description: "Take a thread out of its group"},
-		{Action: "delete", Command: "hey set-aside group delete <group-id>", Description: "Break the group up"},
+		{Action: "delete", Command: "hey set-aside group delete <group-id>", Description: "Delete the group; its threads go to Previously Seen"},
 	},
 }
 
@@ -240,7 +240,7 @@ func newSetAsideGroupViewCommand() *setAsideGroupViewCommand {
 		Use:   "view <group-id>",
 		Short: "List email threads in a Set Aside group",
 		Annotations: map[string]string{
-			"agent_notes": "The ID comes from hey set-aside group list. Returns the group's threads; use id with hey set-aside group remove and hey move, topic_id with hey thread read. --page continues from the next_page cursor of an earlier listing of the same group.",
+			"agent_notes": "The ID comes from hey set-aside group list. Returns the group's threads; use id with hey set-aside group remove and hey move, topic_id with hey thread read. --json carries next_page and total_count. --page continues from the next_page cursor of an earlier listing of the same group. --all fetches every page. HEY removes a group itself once its last thread leaves, so a view of it then answers not_found.",
 		},
 		Example: `  hey set-aside group view 42
   hey set-aside group view 42 --all
@@ -446,7 +446,7 @@ func newSetAsideGroupDeleteCommand() *cobra.Command {
 		Short: "Break up a Set Aside group",
 		Long:  "Delete a Set Aside group. HEY moves its threads out of Set Aside into Previously Seen; to keep them in Set Aside, use hey set-aside group remove instead.",
 		Annotations: map[string]string{
-			"agent_notes": "Deleting a group moves its threads to Previously Seen in the Imbox, not back into Set Aside. Use hey set-aside group remove to ungroup threads that should stay set aside.",
+			"agent_notes": "Deleting a group moves its threads to Previously Seen in the Imbox, not back into Set Aside. Use hey set-aside group remove to ungroup threads that should stay set aside, and to tidy an overflowing Set Aside without moving threads out of it, gather them with hey set-aside group create or add rather than deleting a group. HEY removes a group itself once its last thread leaves, so deleting it then answers not_found.",
 		},
 		Example: `  hey set-aside group delete 42`,
 		Args:    usageExactOneArg(),

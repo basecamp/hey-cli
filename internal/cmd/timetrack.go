@@ -104,7 +104,8 @@ func newTimetrackStopCommand() *timetrackStopCommand {
 
 --category files the track under a category as it stops it, in the one request, and HEY
 creates the category if it has none by that title. There is no clearing a category this
-way: a blank title leaves the track filed where it was.`,
+way: a blank title is refused with a usage error, since a filed track can only be moved to
+another category.`,
 		Example: `  hey timetrack stop
   hey timetrack stop --category "Client work"
   hey timetrack stop --json`,
@@ -410,10 +411,11 @@ func newTimetrackEditCommand() *timetrackEditCommand {
 		Short: "Edit a completed time track",
 		Long: `Edit a time track. Only the fields whose flags are given change.
 
-Timestamps are YYYY-MM-DDTHH:MM in your own time zone, or a full RFC 3339 instant when
-the zone matters. --category files the track under a category title, which HEY creates if
-it has none by that title; a blank title does not clear one. Editing a track completes it,
-so this is for tracks that have already finished.`,
+Timestamps are YYYY-MM-DDTHH:MM in your own time zone, or a full RFC 3339 instant when the
+zone matters. --category files the track under a category title, which HEY creates if it
+has none by that title. A blank title is refused with a usage error, since a filed track
+can only be moved to another category. Editing a track completes it, so this is for tracks
+that have already finished.`,
 		Example: `  hey timetrack edit 1042 --end 2026-08-22T17:30
   hey timetrack edit 1042 --category "Client work" --notes "Invoice review"
   hey timetrack edit 1042 --start 2026-08-22T09:00 --end 2026-08-22T11:15`,
@@ -588,8 +590,9 @@ func newTimetrackExportCommand() *timetrackExportCommand {
 
 Without --output the CSV goes straight to stdout, so redirecting it to a file is the whole
 recipe. The output formatting flags have nothing to reshape there and are refused rather
-than ignored: --json, --quiet, --markdown, --ids-only, --count and --html all need
---output, which returns file metadata they can format.`,
+than ignored. With --output, --json, --quiet and --markdown format the file's metadata;
+--ids-only and --count still fail, since that is not a list, and --html is never accepted.
+The refusal without --output is a usage error.`,
 		Example: `  hey timetrack export > time-tracking.csv
   hey timetrack export --output time-tracking.csv
   hey timetrack export --output time-tracking.csv --force`,

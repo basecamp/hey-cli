@@ -597,6 +597,85 @@ func TestTrackedTimeEditFormSendsOnlyWhatChanged(t *testing.T) {
 	}
 }
 
+// A track that ran through the hour the clocks repeat keeps its instants when only its category
+// changes. Its end at the second 01:30 of the night New York falls back shows as 01:30, which
+// reads back as the first; an end the reader never touched is the one it arrived with, and a
+// category-only save sends no times at all.
+func TestTrackedTimeFormKeepsAnUntouchedRepeatedTime(t *testing.T) {
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := trackedTime{
+		ID: 7301, Category: "Client work", Notes: "On call",
+		StartsAt: time.Date(2026, 11, 1, 5, 0, 0, 0, time.UTC).In(newYork),  // 01:00 EDT
+		EndsAt:   time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC).In(newYork), // the second 01:30, EST
+	}
+	form := newTimeTrackForm(track, nil)
+	form.starts.local, form.ends.local = newYork, newYork
+	form.category.SetValue("Planning")
+
+	if got := form.validate(); got != "" {
+		t.Errorf("validate = %q, want the track taken", got)
+	}
+	if got := form.length(); got != 90*time.Minute {
+		t.Errorf("length = %s, want the hour and a half it ran", got)
+	}
+	payload, changed := form.payload()
+	if !changed || payload.CategoryTitle != "Planning" {
+		t.Errorf("payload = %+v, want the category", payload)
+	}
+	if payload.StartsAt != nil || payload.EndsAt != nil {
+		t.Errorf("payload moves the track: starts %v ends %v", payload.StartsAt, payload.EndsAt)
+	}
+}
+
+// An end the reader went back and forth on, but left showing what it opened with, is the end it
+// arrived with: choosing Local again on a picker already on Local, or typing a digit and taking
+// it back, sends no time on a category-only save.
+func TestTrackedTimeFormKeepsARepeatedTimeTheReaderLeftAsItWas(t *testing.T) {
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	track := trackedTime{
+		ID: 7301, Category: "Client work", Notes: "On call",
+		StartsAt: time.Date(2026, 11, 1, 5, 0, 0, 0, time.UTC).In(newYork),  // 01:00 EDT
+		EndsAt:   time.Date(2026, 11, 1, 6, 30, 0, 0, time.UTC).In(newYork), // the second 01:30, EST
+	}
+	for _, tt := range []struct {
+		name   string
+		fiddle func(*timeTrackForm)
+	}{
+		{"Local chosen again", func(f *timeTrackForm) {
+			f.ends.focusField(dateTimeFieldZone)
+			typeInto(t, f.ends, "local")
+			f.ends.handleKey(keyPress("enter"))
+		}},
+		{"a digit typed and taken back", func(f *timeTrackForm) {
+			f.ends.focusField(dateTimeFieldTime)
+			f.ends.handleKey(tea.KeyPressMsg{Code: tea.KeyBackspace})
+			typeInto(t, f.ends, "0")
+		}},
+	} {
+		form := newTimeTrackForm(track, nil)
+		form.starts.local, form.ends.local = newYork, newYork
+		tt.fiddle(form)
+		form.category.SetValue("Planning")
+
+		if form.ends.clock() != "01:30" || form.ends.zoneName() != "" {
+			t.Fatalf("%s: the end shows %s %q, want it as it opened", tt.name, form.ends.clock(), form.ends.zoneName())
+		}
+		payload, _ := form.payload()
+		if payload.StartsAt != nil || payload.EndsAt != nil {
+			t.Errorf("%s: payload moves the track: starts %v ends %v", tt.name, payload.StartsAt, payload.EndsAt)
+		}
+		if got := form.length(); got != 90*time.Minute {
+			t.Errorf("%s: length = %s, want the hour and a half it ran", tt.name, got)
+		}
+	}
+}
+
 // The category field cannot un-file a track, so a blank one leaves it alone — and the form says
 // as much rather than offering something HEY will ignore.
 func TestTrackedTimeFormWillNotUnfileATrack(t *testing.T) {

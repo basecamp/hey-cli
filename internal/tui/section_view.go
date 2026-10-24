@@ -111,6 +111,13 @@ type pendingDetailCanceler interface {
 	CancelPendingDetail() bool
 }
 
+// selectionClearer is implemented by section views that hold a multi-row selection.
+// Escape clears it only after an open modal, an open detail and a pending detail read
+// have each had their turn at the key.
+type selectionClearer interface {
+	ClearSelection() bool
+}
+
 // detailExiter lets a section preserve the distinct back and exit behavior of
 // Escape and q while a nested view or request is active.
 type detailExiter interface {

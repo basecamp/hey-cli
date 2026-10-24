@@ -63,6 +63,25 @@ func TestLinkifyURLsTrimsTrailingPunctuation(t *testing.T) {
 	}
 }
 
+// A URL ends at a space in any script and before punctuation outside ASCII: glamour
+// pads inline code with no-break spaces, and a curly quote closes a quotation.
+func TestLinkifyURLsStopsAtUnicodeSpacesAndPunctuation(t *testing.T) {
+	for text, url := range map[string]string{
+		" https://staging.example.com/api ":                  "https://staging.example.com/api",
+		"She said “https://maps.example.com/harbour” twice.": "https://maps.example.com/harbour",
+		"Lien : https://exemple.fr/menu»":                    "https://exemple.fr/menu",
+		"Menu: https://cafe.example.com/café today":          "https://cafe.example.com/café",
+		"Rates: https://fx.example.com/convert?to=€ today":   "https://fx.example.com/convert?to=€",
+		"https://docs.example.com/資料（最終版）":                   "https://docs.example.com/資料（最終版）",
+		"（https://docs.example.com/資料）":                      "https://docs.example.com/資料",
+		"Tag: https://notes.example.com/tags/☕ today":        "https://notes.example.com/tags/☕",
+	} {
+		if got := LinkifyURLs(text); !strings.Contains(got, Hyperlink(url, url)) {
+			t.Errorf("LinkifyURLs(%q) = %q, want %q linked", text, got, url)
+		}
+	}
+}
+
 func TestLinkifyURLsBalancesParentheses(t *testing.T) {
 	got := LinkifyURLs("See https://example.com/wiki/HEY_(email) now.")
 	if !strings.Contains(got, "HEY_(email)") {

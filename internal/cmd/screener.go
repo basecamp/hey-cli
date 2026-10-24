@@ -24,7 +24,7 @@ func newScreenerCommand() *screenerCommand {
 		Short: "Decide who gets to email you",
 		Long:  "List the senders waiting in The Screener, screen them in or out, and review the ones already decided.",
 		Annotations: map[string]string{
-			"agent_notes": "Clearance IDs come from `hey screener list`, and are not contact IDs. Approving delivers everything the sender has waiting; denying hides it. Both are reversible with the opposite command. `hey screener history` shows what was already decided.",
+			"agent_notes": "The Screener is where first-time senders wait until they are approved or denied. Clearance IDs come from `hey screener list`, and are not contact IDs. Approving delivers everything the sender has waiting; denying hides it. Both are reversible with the opposite command. `hey screener history` shows what was already decided.",
 		},
 	}
 

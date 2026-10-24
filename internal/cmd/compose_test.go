@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -46,6 +47,11 @@ func TestParseAddresses(t *testing.T) {
 			name:  "empty entries between commas",
 			input: "alice@example.com,,bob@example.com",
 			want:  []string{"alice@example.com", "bob@example.com"},
+		},
+		{
+			name:  "a comma in a quoted name",
+			input: `"Bryan, Annie" <annie@example.com>, bob@example.com`,
+			want:  []string{`"Bryan, Annie" <annie@example.com>`, "bob@example.com"},
 		},
 	}
 
@@ -270,5 +276,37 @@ func TestComposeUsesTheSelectedAccountsSendersNameTag(t *testing.T) {
 	}
 	if got := writes[0].Body["acting_sender_id"]; got != float64(43) {
 		t.Errorf("acting_sender_id = %v, want the work account's sender 43", got)
+	}
+}
+
+func TestCommandsRefuseAnAddressHEYWouldDropBeforeAnyRequest(t *testing.T) {
+	for name, args := range map[string][]string{
+		"compose":    {"compose", "--to", "a", "--subject", "Quarterly planning notes", "-m", "Here are the notes."},
+		"compose cc": {"compose", "--to", "annie@example.com", "--cc", "frank", "--subject", "Quarterly planning notes", "-m", "Here are the notes."},
+		"reply":      {"reply", "7", "--to", "a", "-m", "Thanks, Annie."},
+		"forward":    {"forward", "7", "--to", "a"},
+		"draft edit": {"draft", "edit", "12", "--to", "a"},
+		// An account is resolved over the network before a command runs, so the
+		// address has to be refused before that.
+		"compose with account": {"--account", "8", "compose", "--to", "a", "--subject", "Quarterly planning notes", "-m", "Here are the notes."},
+		"reply with account":   {"--account", "8", "reply", "7", "--cc", "frank", "-m", "Thanks, Annie."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var requests []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests = append(requests, r.Method+" "+r.URL.Path)
+				http.NotFound(w, r)
+			}))
+			t.Cleanup(server.Close)
+
+			err := runCLI(t, server, args...)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != "usage" || !strings.Contains(err.Error(), "not a valid email address: ") {
+				t.Fatalf("expected a usage error naming the address, got %v", err)
+			}
+			if len(requests) != 0 {
+				t.Errorf("made requests before refusing the address: %v", requests)
+			}
+		})
 	}
 }

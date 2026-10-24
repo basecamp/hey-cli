@@ -48,6 +48,9 @@ func newAttachmentsCommand() *attachmentsCommand {
 		Use:   "list <thread-id>",
 		Short: "List a thread's attachments",
 		Long:  "List every named downloadable file in a thread, including named inline images. Each returned ID identifies the same file when passed to attachment save.",
+		Annotations: map[string]string{
+			"agent_notes": "A direct attachment's ID is <message id>:<position>, so 67890:1 is the first direct attachment of message 67890. Named files inside a message's embedded HTML, named inline images included, get opaque IDs scoped to their message. Pass an ID to hey attachment save.",
+		},
 		Example: `  hey attachment list 12345
   hey attachment list 12345 --json
   hey attachment list 12345 --allow-partial`,

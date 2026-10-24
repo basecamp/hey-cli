@@ -7,6 +7,20 @@ on:
   # must still get the full gate before they reach main.
   pull_request:
   workflow_dispatch:
+  # A daily full run on main. govulncheck reads a database that changes
+  # without any commit here: an advisory published against a module or Go
+  # release we already ship turns main red the next morning instead of at the
+  # next push or the next release dry run.
+  schedule:
+    - cron: '23 6 * * *'
+
+# A new push to a PR supersedes the run on its old head, so that run is
+# cancelled. Every other event gets a group of its own (the run id): a merge to
+# main, the schedule and a manual dispatch always run in full and are never
+# queued behind, or replaced by, another run.
+concurrency:
+  group: test-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
 
@@ -77,7 +91,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.13.1
+          version: v2.14.0
 
   lint-actions:
     name: GitHub Actions audit
@@ -93,7 +107,7 @@ jobs:
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
         with:
           advanced-security: false
 
@@ -136,8 +150,22 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # setup-go keeps one build cache for every job, saved by whichever job
+      # finishes first, and that cache never holds race-instrumented objects:
+      # this job used to spend ~40s of its ~100s recompiling every dependency
+      # with -race. It now has a build cache of its own, keyed like setup-go's
+      # (go.mod carries the toolchain line, go.sum the dependency set), so a
+      # run recompiles only what changed since that cache was saved.
+      - name: Cache race build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/go-build-race
+          key: go-build-race-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum') }}
+
       - name: Run tests with race detector
-        run: go test -race -count=1 ./...
+        env:
+          GOCACHE: ${{ runner.temp }}/go-build-race
+        run: go test -race -shuffle=on -count=1 ./...
 
   e2e:
     name: Bats e2e
@@ -358,8 +386,12 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
+      # The filter narrows a PR or a push to what it changed. The schedule and
+      # a manual dispatch have no change set to narrow by, so the step is
+      # skipped and the flake is built in full.
       - name: Check for flake-relevant changes
         id: filter
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
@@ -377,11 +409,11 @@ jobs:
               - '.github/workflows/test.yml'
 
       - name: Install Nix
-        if: steps.filter.outputs.nix == 'true'
+        if: steps.filter.outputs.nix == 'true' || steps.filter.conclusion == 'skipped'
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
 
       - name: Build the flake
-        if: steps.filter.outputs.nix == 'true'
+        if: steps.filter.outputs.nix == 'true' || steps.filter.conclusion == 'skipped'
         run: scripts/nix-build-check.sh
 
   cli-surface:

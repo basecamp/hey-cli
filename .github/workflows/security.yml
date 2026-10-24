@@ -52,7 +52,7 @@ jobs:
           scan-type: fs
           format: sarif
           output: trivy-results.sarif
-      - uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: trivy-results.sarif
           category: trivy
@@ -70,10 +70,12 @@ jobs:
           persist-credentials: false
       - uses: securego/gosec@deb54465fea23d19a77f037e11e6589021f8501d # v2.29.0
         env:
-          GOTOOLCHAIN: auto
+          # v2.29.0 cannot read Go 1.27.2's export data; see GOSEC_GOTOOLCHAIN in
+          # the Makefile, and drop both with the next gosec release.
+          GOTOOLCHAIN: go1.27.1
         with:
           args: -fmt sarif -out gosec-results.sarif ./...
-      - uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+      - uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         if: ${{ always() && hashFiles('gosec-results.sarif') != '' }}
         with:
           sarif_file: gosec-results.sarif

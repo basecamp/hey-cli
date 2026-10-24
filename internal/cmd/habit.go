@@ -1,10 +1,10 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -26,7 +26,7 @@ func newHabitCommand() *habitCommand {
 		Use:   "habit",
 		Short: "Create and manage habits",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, create, edit, delete, complete, uncomplete. Use list --ids-only to pipe IDs to the rest. Days accept weekday names or 0 (Sunday) through 6 (Saturday).",
+			"agent_notes": "Subcommands: list, create, edit, delete, complete, uncomplete. Use list --ids-only to pipe IDs to the rest. Days accept weekday names or 0 (Sunday) through 6 (Saturday). A name may be written in full or as a common abbreviation (mon, tue, wed, thu, fri, sat, sun). Without --date, list, complete and uncomplete use today in the HEY account's time zone; complete and uncomplete refuse when the account has none, so pass --date.",
 		},
 	}
 
@@ -56,9 +56,12 @@ func newHabitListCommand() *habitListCommand {
 		Short: "List habits",
 		Long: `List habits.
 
-A habit is read from the week it belongs to rather than from a calendar's recordings,
-which carry only its completions. A week is what lists every habit exactly once, whatever
-weekday each is scheduled for.`,
+A habit is read from the week a date falls in. A week lists each habit once, whatever
+weekday it runs on; a week that has not started yet lists none.
+
+Without --date the week is the one today falls in, today in your HEY account's time zone,
+whatever this machine's is. An account with no time zone set reads this machine's today,
+and says so on stderr.`,
 		Example: `  hey habit list
   hey habit list --date 2026-09-02
   hey habit list --ids-only`,
@@ -78,15 +81,20 @@ func (c *habitListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	ctx := cmd.Context()
 	date := c.date
 	if date == "" {
-		date = time.Now().Format(dateLayout)
+		var account accountZone
+		today, err := account.todayToRead(ctx, cmd.ErrOrStderr(), "name a day in the week, for example --date 2026-10-14")
+		if err != nil {
+			return err
+		}
+		date = today.Format(dateLayout)
 	}
 	if _, err := parseDateArg("date", date); err != nil {
 		return err
 	}
 
-	ctx := cmd.Context()
 	week, err := sdk.CalendarPeriods().Week(ctx, date)
 	if err != nil {
 		return apierr.FromSDK(err)
@@ -157,6 +165,9 @@ func newHabitCreateCommand() *habitCreateCommand {
 	habitCreateCommand.cmd = &cobra.Command{
 		Use:   "create [name]",
 		Short: "Create a habit",
+		Annotations: map[string]string{
+			"agent_notes": "Without --icon, --color or --days a habit gets the weights icon, the color blue, and every day of the week.",
+		},
 		Example: `  hey habit create "Morning strength training"
   hey habit create --name "Practice piano" --icon music --color green --days monday,wednesday,friday
   echo "Read for thirty minutes" | hey habit create`,
@@ -235,6 +246,9 @@ func newHabitEditCommand() *habitEditCommand {
 		Use:     "edit <id> [name]",
 		Aliases: []string{"update"},
 		Short:   "Edit a habit",
+		Annotations: map[string]string{
+			"agent_notes": "Only the name and the flags given change; omitted fields remain unchanged.",
+		},
 		Example: `  hey habit edit 789 --name "Evening walk"
   hey habit edit 789 --days monday,tuesday,wednesday,thursday,friday
   hey habit update 789 --icon walk --color gold`,
@@ -361,6 +375,10 @@ func newHabitCompleteCommand() *habitCompleteCommand {
 	habitCompleteCommand.cmd = &cobra.Command{
 		Use:   "complete <id>",
 		Short: "Mark a habit as complete for a date",
+		Long: `Mark a habit as complete for a date.
+
+Without --date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set is refused rather than guessed at: pass --date.`,
 		Example: `  hey habit complete 789
   hey habit complete 789 --date 2026-01-15`,
 		RunE: habitCompleteCommand.run,
@@ -382,7 +400,7 @@ func (c *habitCompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date, err := habitCompletionDate(c.date)
+	date, err := habitCompletionDate(cmd.Context(), c.date)
 	if err != nil {
 		return err
 	}
@@ -411,6 +429,10 @@ func newHabitUncompleteCommand() *habitUncompleteCommand {
 	habitUncompleteCommand.cmd = &cobra.Command{
 		Use:   "uncomplete <id>",
 		Short: "Remove a habit completion for a date",
+		Long: `Remove a habit completion for a date.
+
+Without --date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set is refused rather than guessed at: pass --date.`,
 		Example: `  hey habit uncomplete 789
   hey habit uncomplete 789 --date 2026-01-15`,
 		RunE: habitUncompleteCommand.run,
@@ -432,7 +454,7 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date, err := habitCompletionDate(c.date)
+	date, err := habitCompletionDate(cmd.Context(), c.date)
 	if err != nil {
 		return err
 	}
@@ -449,11 +471,18 @@ func (c *habitUncompleteCommand) run(cmd *cobra.Command, args []string) error {
 		result)
 }
 
-// habitCompletionDate reads the --date flag, defaulting to today. A date the server
-// cannot read would otherwise be sent as a URL segment and answered with a 404.
-func habitCompletionDate(flag string) (string, error) {
+// habitCompletionDate reads the --date flag, defaulting to today in the account's zone —
+// refused rather than guessed at when the account has none, since marking the wrong day
+// done is a write. A date the server cannot read would otherwise be sent as a URL segment
+// and answered with a 404.
+func habitCompletionDate(ctx context.Context, flag string) (string, error) {
 	if flag == "" {
-		return time.Now().Format(dateLayout), nil
+		var account accountZone
+		today, err := account.todayToWrite(ctx, "pass the day with --date, for example --date 2026-10-14")
+		if err != nil {
+			return "", err
+		}
+		return today.Format(dateLayout), nil
 	}
 	if _, err := parseDateArg("date", flag); err != nil {
 		return "", err

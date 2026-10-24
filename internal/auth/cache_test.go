@@ -342,7 +342,7 @@ func TestRefreshRereadsStoredAuthentication(t *testing.T) {
 			old:         &Credentials{SessionCookie: "old-cookie", OAuthType: "cookie"},
 			replacement: &Credentials{SessionCookie: "replacement-cookie", OAuthType: "cookie"},
 			wantHeader:  "Cookie",
-			wantValue:   "session_token=replacement-cookie",
+			wantValue:   "__Host-session_token=replacement-cookie; session_token=replacement-cookie",
 		},
 	}
 

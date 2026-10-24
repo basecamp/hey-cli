@@ -1,0 +1,66 @@
+journal/1	help:hey journal list	Calendar ID to read (defaults to the personal calendar)
+journal/1	help:hey journal list	Without dates the window is 4 years before today to 1 year after it.
+journal/2	help:hey journal read	Read a journal entry (default: today)
+journal/3	help:hey journal read	Write content_markdown back with hey journal write only when content_markdown_lossless is true.
+journal/4	help:hey journal write	Write or edit a journal entry (default: today)
+journal/5	help:hey journal write	Write or edit a journal entry (default: today)
+journal/6	help:hey journal write	Omitting content reads stdin when it is not a terminal, and otherwise opens $EDITOR
+journal/7	help:hey journal write	Content that trims to nothing — whitespace-only, or an emptied $EDITOR buffer — removes the day's entry, and the command says "removed" rather than "saved".
+journal/8	help:hey journal write	A literal "" argument counts as omitted content and does the same.
+journal/8	help:hey journal read	A day with no entry is not an error: JSON answers ok with the summary "No journal entry for <date>" and no data
+journal/9	help:hey journal	Write replaces the whole entry
+journal/10	help:hey journal read	JSON answers content, the entry's HTML as HEY serves it; content_markdown, the entry as Markdown; and content_markdown_lossless
+journal/11	help:hey journal read	Write content_markdown back with hey journal write only when content_markdown_lossless is true.
+journal/12	skill	The same, with `content_markdown_lossless`; the read also fails for a day with no entry:
+journal/13	skill	entry=$(hey journal read 2026-03-15 --jq 'if .data.content_markdown_lossless then .data.content_markdown else error("content_markdown would drop part of this entry, or there is none: change content with --content-html") end') &&
+journal/14	skill	printf '%s\n\nBooked the venue for the second day.\n' "$entry" | hey journal write 2026-03-15
+journal/15	help:hey journal read	When it is false, the entry holds an attachment, an image or other markup Markdown cannot carry, and writing the Markdown would drop it
+journal/15	help:hey journal write	An entry holding an attachment, an image or other content Markdown cannot carry is not opened in $EDITOR
+journal/16	help:hey journal write	Journal content as raw HTML instead of Markdown; the trix-content wrapper HEY serves an entry in is taken off
+journal/17	skill	entry=$(hey journal read 2026-03-15 --jq '.data.content // error("no journal entry for this day")') &&
+journal/18	skill	hey journal write 2026-03-15 --content-html "$entry<p>Booked the venue for the second day.</p>"
+journal/19	skill	Keep the `&&`: a failed read must not go on to write.
+journal/20	help:hey journal read	no data, so --jq '.data.content' prints null. Guard a read that feeds a write with --jq '.data.content // error("no journal entry for this day")'.
+authentication/1	skill	Data commands use the credentials HEY already stores and refresh expiring OAuth tokens automatically.
+authentication/2	skill	Run the requested data command without a login preflight.
+authentication/3	help:hey auth status	Show authentication status
+authentication/3	help:hey auth status	Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing
+authentication/4	skill	If a data command returns exit code 3 with `"code": "auth"`, or fails with `could not read stored credentials`, authentication is unavailable to that process.
+authentication/5	skill	On macOS under Codex, the sandbox can hide credentials that the HEY CLI stores in Keychain.
+authentication/6	skill	Before reporting the task as blocked, use the harness's normal approval flow to retry `hey auth status --json` once with elevated sandbox permission.
+authentication/7	skill	Limit the escalation to this one read-only command.
+authentication/8	skill	If the response's `data.authenticated` is `true`, rerun only the exact `hey` command the user requested through a separate one-command approval.
+authentication/9	skill	If `data.authenticated` is `false` or the status command fails, report the task as blocked and tell the user to run `hey auth login`; do not run it for them unattended.
+authentication/10	skill	Never run the macOS `security` command to read Keychain contents, print or copy credentials, or move credentials into a file; never disable the sandbox globally; never set `HEY_NO_KEYRING=1` as an authentication workaround.
+authentication/11	skill	Piped, machine-output and non-TTY commands do not prompt for sign-in.
+authentication/12	skill	When an agent harness runs commands under a PTY, set `HEY_NONINTERACTIVE=1` so a missing login returns the same actionable auth error instead of opening an interactive prompt.
+authentication/13	help:hey auth status	Show authentication status
+authentication/14	skill	set `HEY_NONINTERACTIVE=1` so a missing login returns the same actionable auth error instead of opening an interactive prompt.
+authentication/15	help:hey auth login	Opens a browser for OAuth authentication against HEY's own OAuth server, using PKCE.
+authentication/16	help:hey auth logout	Clear stored credentials
+authentication/17	help:hey login	Authenticate with the HEY server
+authentication/17	help:hey logout	Clear stored credentials
+authentication/18	help:hey setup omarchy	Install hey into the Omarchy desktop: the 37signals.hey bar plugin
+authentication/18	help:hey setup omarchy	Only meaningful on Omarchy Linux.
+authentication/19	help:hey setup omarchy	The bar-plugin offer at sign-in never fires for an agent (machine output, HEY_NONINTERACTIVE, a non-TTY, or a --token/--cookie login), so this command is how an agent installs the plugin
+authentication/20	help:hey setup omarchy	this command is the explicit path — it installs in every output format
+authentication/21	help:hey setup	Runs the first-run wizard: OAuth sign-in, a look at the linked accounts, coding-agent setup
+authentication/22	help:hey setup	HEY_NONINTERACTIVE=1 suppresses interactive sign-in
+authentication/23	help:hey setup	unskipped agent setup still writes skill files
+authentication/23	help:hey setup	HEY_NONINTERACTIVE=1 suppresses interactive sign-in, but setup still installs shell completions (unless a package manager already ships them)
+authentication/24	help:hey setup	the wizard persists the onboarded flag
+authentication/24	help:hey setup	unskipped agent setup still writes skill files and installs the Claude Code plugin when Claude Code is detected
+authentication/25	help:hey setup	use `hey doctor` to inspect without changing anything
+authentication/26	help:hey setup	a terminal on stdin (an allocated PTY included) still starts browser OAuth and waits for it
+authentication/27	help:hey setup	a terminal on stdin (an allocated PTY included) still starts browser OAuth and waits for it
+authentication/28	skill	Never run `hey auth login` unattended; use it only for interactive recovery with the user present.
+sender-selection/1	help:hey account senders	Lists sender IDs, account IDs, email addresses, and account-default flags. --account limits the list
+sender-selection/2	help:hey compose	--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages.
+sender-selection/2	help:hey compose	A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out.
+sender-selection/2	help:hey compose	--draft saves instead of sending
+sender-selection/3	help:hey draft edit	--from chooses a configured sender email or ID within this draft account. It preserves the body verbatim, including existing signatures
+sender-selection/4	help:hey draft edit	use a body flag to replace those
+sender-selection/5	help:hey draft show	The answer includes from, the sender the draft goes out as
+sender-selection/6	help:hey account senders	Does not change the default.
+sender-selection/6	help:hey compose	--from does not save a default sender.
+sender-selection/6	help:hey draft edit	--from saves no default sender.

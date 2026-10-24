@@ -19,7 +19,7 @@ func newTodoCommand() *todoCommand {
 		Use:   "todo",
 		Short: "Create and manage to-dos",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, add, complete, uncomplete, delete. Use list --ids-only to pipe IDs to complete/delete.",
+			"agent_notes": "Subcommands: list, add, complete, uncomplete, delete. Use list --ids-only to pipe IDs to complete/delete. add files on today in the HEY account's time zone without --date, and refuses when the account has none, so pass --date. Todo IDs must be positive; 0 or a negative ID is a usage error rather than a request.",
 		},
 	}
 
@@ -46,6 +46,9 @@ func newTodoListCommand() *todoListCommand {
 	todoListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List todos",
+		Annotations: map[string]string{
+			"agent_notes": "Reads the personal calendar unless --calendar names another. " + personalWindowNotes,
+		},
 		Example: `  hey todo list
   hey todo list --limit 10
   hey todo list --starts-on 2026-01-01 --ends-on 2026-01-31 --json`,
@@ -133,6 +136,11 @@ func newTodoAddCommand() *todoAddCommand {
 	todoAddCommand.cmd = &cobra.Command{
 		Use:   "add [title]",
 		Short: "Create a new todo",
+		Long: `Create a new todo, filed on --date or on today.
+
+Without --date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set is refused rather than guessed at: pass --date. A
+--date that is not YYYY-MM-DD is a usage error, refused before the request.`,
 		Example: `  hey todo add "Buy groceries"
   hey todo add -t "Meeting prep" --date 2026-01-20
   hey todo add --title "Review PR" --json
@@ -142,7 +150,7 @@ func newTodoAddCommand() *todoAddCommand {
 	}
 
 	todoAddCommand.cmd.Flags().StringVarP(&todoAddCommand.title, "title", "t", "", "Todo title")
-	todoAddCommand.cmd.Flags().StringVar(&todoAddCommand.date, "date", "", "Due date (YYYY-MM-DD)")
+	todoAddCommand.cmd.Flags().StringVar(&todoAddCommand.date, "date", "", "Due date (YYYY-MM-DD, defaults to today)")
 
 	return todoAddCommand
 }
@@ -177,8 +185,20 @@ func (c *todoAddCommand) run(cmd *cobra.Command, args []string) error {
 			"hey todo add \"Buy milk\"  or  hey todo add --title \"Buy milk\"")
 	}
 
+	// The SDK files a to-do given no date on the machine's today, which is UTC on a server,
+	// so today is named here, in the account's zone, and refused without one.
 	ctx := cmd.Context()
-	result, err := sdk.CalendarTodos().Create(ctx, title, c.date)
+	date := c.date
+	if date == "" {
+		var account accountZone
+		today, err := account.todayToWrite(ctx, "pass the day with --date, for example --date 2026-10-14")
+		if err != nil {
+			return err
+		}
+		date = today.Format(dateLayout)
+	}
+
+	result, err := sdk.CalendarTodos().Create(ctx, title, date)
 	if err != nil {
 		return apierr.FromSDK(err)
 	}

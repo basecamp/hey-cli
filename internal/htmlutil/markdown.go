@@ -36,8 +36,11 @@ type markdownizer struct {
 	pendingPrefix string
 	lists         []*listLevel
 	breaking      bool
-	depth         int
-	quoteDepth    int
+	// brokenLines is how many lines there were when the last one ending in a hard break
+	// was written, so a second break straight after it can tell it follows a break.
+	brokenLines int
+	depth       int
+	quoteDepth  int
 	// derivedLinks are the links linkedImage wrote with a label it derived rather
 	// than one the author gave, keyed by the rendered line: only these may collapse
 	// into a neighbouring link. Two lines with the same bytes and the same
@@ -489,7 +492,13 @@ func (m *markdownizer) code(n *html.Node) {
 func (m *markdownizer) link(n *html.Node) {
 	href := getAttr(n, "href")
 	dest, linkable := destination(href)
-	if linkable && strings.TrimSpace(elementText(n)) == "" {
+	// A link inside a link is one CommonMark cannot hold — the outer brackets would be
+	// left on screen with their URL as text — and HTML allows it inside a table cell,
+	// where LinkedIn wraps a whole cell in one anchor around another. The inner links
+	// carry the destinations, an inner linked image included, so the outer anchor
+	// writes only what it holds.
+	nested := containsAnchor(n)
+	if linkable && !nested && strings.TrimSpace(elementText(n)) == "" {
 		if image, sole := soleLinkedImage(n); sole {
 			// The anchor may own the whitespace between it and its neighbours, so
 			// it is kept the way inline keeps it — around a decorative anchor too,
@@ -507,9 +516,17 @@ func (m *markdownizer) link(n *html.Node) {
 	}
 	m.inline(n, func(text string) string {
 		switch {
-		case !linkable:
+		case !linkable || nested:
 			return text
 		case text == "" || strings.TrimSpace(elementText(n)) == strings.TrimSpace(href):
+			// An autolink shows its destination as written, so one destination
+			// changed on the way — an entity, which some renderers decode in an
+			// autolink and others (goldmark, and so glamour) read verbatim, or
+			// non-ASCII, which is percent-encoded — is linked under its own URL as
+			// the label instead, and a reader sees the address the email showed.
+			if strings.Contains(dest, "&amp;") || !isASCII(href) {
+				return "[" + escapeText(strings.TrimSpace(href), m.line.String()) + "](" + dest + ")"
+			}
 			if absolute(dest) {
 				return "<" + dest + ">"
 			}
@@ -518,6 +535,16 @@ func (m *markdownizer) link(n *html.Node) {
 			return "[" + text + "](" + dest + ")"
 		}
 	})
+}
+
+// containsAnchor reports whether an anchor holds another anchor.
+func containsAnchor(n *html.Node) bool {
+	for child := n.FirstChild; child != nil; child = child.NextSibling {
+		if child.Type == html.ElementNode && child.Data == "a" || containsAnchor(child) {
+			return true
+		}
+	}
+	return false
 }
 
 // soleLinkedImage returns the one image that is an anchor's whole content. The second
@@ -670,7 +697,7 @@ func (m *markdownizer) image(n *html.Node) {
 	src, linkable := destination(getAttr(n, "src"))
 	switch {
 	case linkable:
-		m.write("![" + escapeText(alt, "alt") + "](" + src + ")")
+		m.write(imageMarkdown(alt, escapeText(alt, "alt"), src))
 	case alt != "":
 		m.write(escapeText(alt, m.line.String()))
 	}
@@ -721,18 +748,55 @@ func (m *markdownizer) actionTextAttachment(n *html.Node) {
 }
 
 func (m *markdownizer) attachment(filename, url, contentType string) {
-	filename = escapeText(strings.Join(strings.Fields(filename), " "), "📎 ")
+	icon := attachmentIcon(contentType)
+	name := strings.Join(strings.Fields(filename), " ")
+	filename = escapeText(name, icon)
 	if filename == "" {
 		filename = "attachment"
 	}
 	dest, linkable := destination(url)
 	m.block(func() {
 		if isImageContentType(contentType) && linkable {
-			m.write("![" + filename + "](" + dest + ")")
+			m.write(imageMarkdown(name, filename, dest))
 		} else {
-			m.write("📎 " + filename)
+			m.write(icon + filename)
 		}
 	})
+}
+
+// imageMarkdown writes an image. A terminal shows an image by its label alone, so a
+// label a reader could take for a URL gets the destination it links to written out
+// beside it, as a link's label does: "https://bank.example/login" pointed at
+// https://evil.example shows both. A label that is just the file the destination
+// names is not mistaken for anywhere else, and a relative destination is never a link.
+func imageMarkdown(label, escaped, dest string) string {
+	md := "![" + escaped + "](" + dest + ")"
+	if absolute(dest) && !strings.ContainsFunc(label, unicode.IsSpace) &&
+		strings.ContainsAny(label, ".:/@") && label != destinationFilename(dest) {
+		md += " <" + dest + ">"
+	}
+	return md
+}
+
+// attachmentIcon says what kind of file an attachment is. Each of these emoji is
+// drawn as an emoji without a variation selector, so every terminal gives it the
+// same two cells; 🖼️ and 🎞️ need U+FE0F for that, and terminals disagree on how
+// wide it makes them.
+func attachmentIcon(contentType string) string {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	switch {
+	case isImageContentType(contentType):
+		return "📷 "
+	case strings.HasPrefix(contentType, "video/"):
+		return "🎬 "
+	case strings.HasPrefix(contentType, "audio/"):
+		return "🎵 "
+	case contentType == "application/pdf", strings.HasPrefix(contentType, "text/"),
+		strings.Contains(contentType, "msword"), strings.Contains(contentType, "document"):
+		return "📄 "
+	default:
+		return "📎 "
+	}
 }
 
 func (m *markdownizer) children(n *html.Node) {
@@ -746,7 +810,23 @@ func (m *markdownizer) block(render func()) {
 	m.blank()
 	render()
 	m.flushLine()
+	m.dropTrailingBreak()
 	m.blank()
+}
+
+// dropTrailingBreak takes the hard break off a block's last line: a break that ends a
+// block ends nothing Markdown can show, and writing it would make a note read back
+// differently the second time. Inside a list it stays, because blank writes no blank
+// line there: the break is all that keeps the item's next line from joining this one.
+func (m *markdownizer) dropTrailingBreak() {
+	if len(m.lists) > 0 {
+		return
+	}
+	if m.brokenLines > 0 && m.brokenLines == len(m.lines) {
+		last := len(m.lines) - 1
+		m.lines[last] = strings.TrimSuffix(m.lines[last], "  ")
+		m.brokenLines = 0
+	}
 }
 
 func (m *markdownizer) write(s string) {
@@ -802,7 +882,18 @@ func endsWithSpace(s string) bool {
 	return unicode.IsSpace(last)
 }
 
+// hardBreak ends the line with a Markdown hard break. A second break straight after one
+// is a blank line instead — two breaks are how HEY's editor writes a paragraph break,
+// and one hard break would run the paragraphs together — except inside a list item,
+// where a blank line would loosen the whole list.
 func (m *markdownizer) hardBreak() {
+	if m.line.Len() == 0 && m.pendingPrefix == "" && len(m.lists) == 0 &&
+		m.brokenLines > 0 && m.brokenLines == len(m.lines) {
+		last := len(m.lines) - 1
+		m.lines[last] = strings.TrimSuffix(m.lines[last], "  ")
+		m.blank()
+		return
+	}
 	m.breaking = m.line.Len() > 0
 	m.flushLine()
 }
@@ -828,6 +919,7 @@ func (m *markdownizer) flushLine() {
 	}
 	if breaking {
 		m.lines = append(m.lines, prefix+content)
+		m.brokenLines = len(m.lines)
 	} else {
 		m.lines = append(m.lines, strings.TrimRight(prefix+content, " "))
 	}

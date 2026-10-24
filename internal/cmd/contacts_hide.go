@@ -20,7 +20,7 @@ func newContactsHideCommand() *contactsHideCommand {
 		Short: "Hide a contact",
 		Long:  "Hide a contact from contact lists, autocomplete, and search results. The contact remains available by ID and can be shown again.",
 		Annotations: map[string]string{
-			"agent_notes": "This is reversible. Use `hey contact show-again <id>` to show the contact again.",
+			"agent_notes": "HEY has no contact delete; hiding is what stands in for it. This is reversible. Use `hey contact show-again <id>` to show the contact again.",
 		},
 		Example: `  hey contact hide 12345`,
 		RunE:    hideCommand.run,

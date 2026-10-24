@@ -358,7 +358,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(watchThemeCmd(omarchyWatchDir(userHomeDir())), tea.RequestBackgroundColor)
 
 	case screenerClosedMsg:
-		return m.closeScreener()
+		return m.closeScreener(msg.toImbox)
 
 	case mailWatchStartedMsg:
 		if msg.attempt != m.mailWatchAttempt {
@@ -416,8 +416,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mailWatchAttempt++
 		return m, startMailWatchCmd(m.watchCtx, m.watchMail, m.mailWatchAttempt)
 
+	// The recipient list can arrive after the composer that asked for it has sent and
+	// the reader has gone to another section; the list is still Mail's to keep.
 	case mailRefreshDueMsg, postingsRefreshedMsg:
 		cmd, _ := m.mailView.Update(msg)
+		return m, m.stampViewCmd(cmd)
+
+	case recipientsLoadedMsg:
+		// Arriving mid-word opens the list under the field, and the help bar has
+		// to say what the list's keys do.
+		cmd, _ := m.mailView.Update(msg)
+		if m.activeView == m.mailView {
+			m.updateHelpBindings()
+		}
 		return m, m.stampViewCmd(cmd)
 
 	case screenerWatchStartedMsg:
@@ -688,7 +699,7 @@ func (m model) View() tea.View {
 		}
 		footerH := 1 + helpH
 		if linkFooterVisible {
-			footerH++
+			footerH += 1 + strings.Count(linkFooter, "\n")
 		}
 		padLines := m.height - contentLines - footerH - 1
 		for range max(padLines, 0) {
@@ -754,7 +765,8 @@ func (m *model) updateHelpBindings() {
 			bindings = []helpBinding{
 				{"←→", "section"},
 				{"tab", "next row"},
-				{"shift+M/O/C/J", "jump"},
+				{"shift+M/C/J", "jump"},
+				{"o", "contacts"},
 				quitHint,
 			}
 		case rowSubnav:
@@ -780,7 +792,8 @@ func (m *model) updateHelpBindings() {
 	if m.canToggleHelp() && !m.help.hidden {
 		bindings = append(bindings, helpBinding{"?", "toggle help"})
 	}
-	if m.canOpenMailAccountPicker() && !m.mailAccountPicker {
+	// Keep the hint during writes; the key handler still waits for them to finish.
+	if m.canSwitchMailAccounts() && !m.loading && !m.activeView.InThread() && !m.mailAccountPicker {
 		if ic, ok := m.activeView.(inputCapturer); !ok || !ic.CapturingInput() {
 			description := "mail account"
 			if m.mailAccountDiscoveryErr != "" {
@@ -797,7 +810,18 @@ func (m *model) updateHelpBindings() {
 	}
 }
 
+// linkFooter is the link status as it goes on screen. A destination that wraps onto
+// more rows than the terminal can spare is replaced by a hint, and cannot be opened
+// until the terminal is enlarged.
 func (m model) linkFooter() (string, bool) {
+	text, visible := m.activeLinkFooter()
+	if visible && strings.Contains(text, "\n") && !m.linkFooterFits() {
+		return truncateToWidth("Enlarge the terminal to inspect this link", max(m.width, 0)), true
+	}
+	return text, visible
+}
+
+func (m model) activeLinkFooter() (string, bool) {
 	if provider, ok := m.activeView.(linkFooterProvider); ok {
 		return provider.LinkFooter()
 	}
@@ -805,7 +829,7 @@ func (m model) linkFooter() (string, bool) {
 }
 
 func (m model) linkFooterFits() bool {
-	_, visible := m.linkFooter()
+	text, visible := m.activeLinkFooter()
 	if !visible {
 		return false
 	}
@@ -813,18 +837,19 @@ func (m model) linkFooterFits() bool {
 	if m.mailWatchNotice() != "" {
 		statusHeight = 1
 	}
-	return m.height >= headerHeight+m.help.height()+3+statusHeight+1
+	return m.height >= headerHeight+m.help.height()+3+statusHeight+1+strings.Count(text, "\n")
 }
 
 // contentHeight gives the active view every row that is not navigation or a
 // visible footer. Ordinary help has two clear rows above its divider; a link
-// footer uses one of them for its stable status row.
+// footer uses one of them for its status row, and takes any further rows a
+// wrapped destination needs from the content.
 func (m model) contentHeight() int {
 	footerHeight := 0
 	helpHeight := m.help.height()
-	_, linkFooterVisible := m.linkFooter()
+	linkFooter, linkFooterVisible := m.linkFooter()
 	if helpHeight > 0 || linkFooterVisible {
-		footerHeight = helpHeight + 3
+		footerHeight = helpHeight + 3 + strings.Count(linkFooter, "\n")
 	}
 	statusHeight := 0
 	if m.mailWatchNotice() != "" {
@@ -921,6 +946,11 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.updateHelpBindings()
 			return m, m.syncLoading(nil)
 		}
+		if msg.Key().Code == tea.KeyEscape {
+			if clearer, ok := m.activeView.(selectionClearer); ok && clearer.ClearSelection() {
+				m.updateHelpBindings()
+			}
+		}
 		return m, nil
 	}
 
@@ -937,7 +967,7 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.Key().Code == tea.KeyTab {
-		if msg.Key().Mod == tea.ModShift {
+		if msg.Key().Mod.Contains(tea.ModShift) {
 			m.focus = (m.focus + 2) % 3
 		} else {
 			m.focus = (m.focus + 1) % 3
@@ -981,7 +1011,8 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) canToggleHelp() bool {
-	if m.mailAccountPicker {
+	// An error box takes every key until it is dismissed, ? included.
+	if m.mailAccountPicker || m.err != nil {
 		return false
 	}
 	if m.activeView == m.screenerView {
@@ -1081,13 +1112,17 @@ func (m model) openScreener() (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) closeScreener() (tea.Model, tea.Cmd) {
+func (m model) closeScreener(toImbox bool) (tea.Model, tea.Cmd) {
 	if m.activeView != m.screenerView {
 		return m, nil
 	}
 	m.activeView = m.mailView
 	m.activeView.Resize(m.vc.width, m.vc.height)
-	cmd := m.syncLoading(m.mailView.refreshScreenerCount())
+	cmd := m.mailView.refreshScreenerCount()
+	if toImbox {
+		cmd = tea.Batch(cmd, m.mailView.switchBox(m.mailView.imboxIndex()))
+	}
+	cmd = m.syncLoading(cmd)
 	m.updateHelpBindings()
 	return m, cmd
 }

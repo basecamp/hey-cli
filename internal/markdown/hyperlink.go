@@ -7,14 +7,14 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// reBareURL matches bare http/https URLs not already inside an OSC 8 sequence.
-// Trailing punctuation is trimmed by trimURL to preserve balanced parentheses.
-var reBareURL = regexp.MustCompile(`https?://[^\s\x1b\x07<>"\x00-\x1f]+`)
+// reScheme is where a bare http or https URL starts, in any case.
+var reScheme = regexp.MustCompile(`(?i:https?)://`)
 
 // Hyperlink wraps text in an OSC 8 terminal hyperlink sequence, returning it
-// unchanged when there is no URL to link to.
+// unchanged when there is no URL to link to. The destination's non-ASCII is
+// percent-encoded, for the reason percentEncodeNonASCII gives.
 func Hyperlink(text, url string) string {
-	url = sanitizeURL(url)
+	url = percentEncodeNonASCII(sanitizeURL(url))
 	if url == "" {
 		return text
 	}
@@ -22,22 +22,36 @@ func Hyperlink(text, url string) string {
 }
 
 // LinkifyURLs wraps bare URLs in OSC 8 hyperlink sequences, leaving URLs that
-// already sit inside one alone.
+// already sit inside one alone. A URL ends where a bare link in prose would — at the
+// end of its run of text (linkTokenEnd: a space, a control, punctuation outside ASCII, a
+// wide bracket it did not open), then at what a link's end sheds — and the search for
+// the next one carries on from there, so https://…/one。https://…/two is two links. The
+// run's end is found once and kept for the URLs after the first in it.
 func LinkifyURLs(text string) string {
 	var b strings.Builder
-	last := 0
-	for _, loc := range reBareURL.FindAllStringIndex(text, -1) {
-		start := loc[0]
-		if insideHyperlink(text[:start]) {
+	last, run := 0, 0
+	links := newLinkState(text)
+	for at := 0; ; {
+		loc := reScheme.FindStringIndex(text[at:])
+		if loc == nil {
+			break
+		}
+		start := at + loc[0]
+		at += loc[1]
+		if links.inside(start) {
 			continue
 		}
-		url := trimURL(text[start:loc[1]])
-		if url == "" {
+		if start >= run {
+			run = start + linkTokenEnd(text[start:])
+		}
+		url := trimLinkEnd(cutAtUnopenedBracket(text[start:run]))
+		if len(url) <= loc[1]-loc[0] {
 			continue
 		}
 		b.WriteString(text[last:start])
 		b.WriteString(Hyperlink(url, url))
 		last = start + len(url)
+		at = last
 	}
 	if last == 0 {
 		return text
@@ -60,46 +74,39 @@ func sanitizeURL(url string) string {
 	}, url)
 }
 
-// trimURL trims trailing punctuation from a URL match while preserving
-// balanced parentheses (e.g., Wikipedia URLs).
-func trimURL(url string) string {
-	for len(url) > 0 {
-		switch url[len(url)-1] {
-		case '.', ',', ';', ':', '!', '?', '\'', ']', '`':
-			url = url[:len(url)-1]
-		case ')':
-			if strings.Count(url, "(") >= strings.Count(url, ")") {
-				return url
-			}
-			url = url[:len(url)-1]
-		default:
-			return url
-		}
-	}
-	return url
+// linkState follows the OSC 8 hyperlinks in a text as a scan moves forward through it,
+// so whether a position sits inside one is answered without reading the text before it
+// again: each sequence is read once.
+type linkState struct {
+	text string
+	next int  // where the next sequence not yet read starts, or len(text)
+	open bool // whether the sequences read so far leave a hyperlink open
 }
 
-// insideHyperlink reports whether the text following prefix is part of an
-// existing OSC 8 hyperlink — either as the URI parameter or as the visible
-// text between set and reset.
-func insideHyperlink(prefix string) bool {
-	if strings.HasSuffix(prefix, "\x1b]8;;") {
-		return true
-	}
+func newLinkState(text string) *linkState {
+	return &linkState{text: text, next: nextHyperlink(text, 0)}
+}
 
-	set := strings.LastIndex(prefix, "\x1b]8;")
-	if set == -1 {
-		return false
+// inside reports whether pos sits inside a hyperlink — in its text, or in a sequence's
+// parameters — given that no later call asks about an earlier position.
+func (l *linkState) inside(pos int) bool {
+	for l.next < pos {
+		// hyperlinkEnd stops at the sequence's own terminator, BEL or ST, so each
+		// sequence is read once; one with none is taken to run on.
+		end, terminator := hyperlinkEnd(l.text[l.next:])
+		if end < 0 || pos < l.next+end+terminator {
+			return true
+		}
+		_, uri, _ := strings.Cut(l.text[l.next+len("\x1b]8;"):l.next+end], ";")
+		l.open = uri != ""
+		l.next = nextHyperlink(l.text, l.next+end+terminator)
 	}
+	return l.open
+}
 
-	bell := strings.IndexByte(prefix[set:], '\x07')
-	if bell == -1 {
-		return true
+func nextHyperlink(text string, from int) int {
+	if next := strings.Index(text[from:], "\x1b]8;"); next >= 0 {
+		return from + next
 	}
-
-	reset := "\x1b]8;;\x07"
-	if prefix[set:set+bell+1] == reset {
-		return false
-	}
-	return !strings.Contains(prefix[set+bell+1:], reset)
+	return len(text)
 }

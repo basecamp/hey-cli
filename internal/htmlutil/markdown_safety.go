@@ -270,15 +270,27 @@ func longestRun(s string, c byte) int {
 // The characters that would end a Markdown destination early are percent-encoded, which
 // a URL consumer decodes back. An `&` that happens to spell an entity reference, which
 // CommonMark decodes inside a destination too, is written as `&amp;`, which decodes to
-// the `&` that was there. Nothing else is touched: a query string's `&` stays a
-// separator, so the URL an agent reads out of `--json` is the URL that was sent.
+// the `&` that was there. Nothing else is touched but non-ASCII: a query string's `&`
+// stays a separator, so the URL an agent reads out of `--json` is the URL that was sent.
+//
+// Non-ASCII is percent-encoded as the UTF-8 it is, which is the same address in the
+// ASCII form a URI takes. The ANSI parser glamour and lipgloss share misreads raw UTF-8
+// in a hyperlink's destination (see markdown.percentEncodeNonASCII), and turned a link
+// to a page named in Japanese into a body with all its styling stripped. The hex is
+// lowercase, which markdown.Render looks for to show the characters again where it
+// prints a destination as text; an escape the URL already had in lowercase is written
+// in uppercase, the same address, so that only what is encoded here is decoded there.
 func destination(raw string) (string, bool) {
+	// The sanitizer goes first: it removes an escape sequence whole, where stripping
+	// controls first would leave the sequence's payload behind, and what it removes —
+	// a zero width space — is gone rather than kept as a %e2%80%8b nothing strips.
 	raw = strings.TrimSpace(strings.Map(func(r rune) rune {
 		if isControl(r) {
 			return -1
 		}
 		return r
-	}, raw))
+	}, terminal.Sanitize(raw)))
+	raw = lowercaseNonASCIIEscape.ReplaceAllStringFunc(raw, strings.ToUpper)
 	if raw == "" || !allowedScheme(raw) {
 		return "", false
 	}
@@ -292,11 +304,27 @@ func destination(raw string) (string, bool) {
 			b.WriteString(percentEncoded(c))
 		case c == '&' && entityReference.MatchString(raw[i:]):
 			b.WriteString("&amp;")
+		case c >= utf8.RuneSelf:
+			const digits = "0123456789abcdef"
+			b.Write([]byte{'%', digits[c>>4], digits[c&0x0f]})
 		default:
 			b.WriteByte(c)
 		}
 	}
 	return b.String(), true
+}
+
+// lowercaseNonASCIIEscape is a percent-escape of a byte at or above 0x80, or of a |, in
+// lowercase hex — the forms markdown.Render shows decoded, which only it writes.
+var lowercaseNonASCIIEscape = regexp.MustCompile(`%[89a-f][0-9a-f]|%7c`)
+
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 func percentEncoded(c byte) string {

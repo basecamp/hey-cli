@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -44,13 +43,13 @@ func newBubbleUpCommand() *bubbleUpCommand {
 	bubbleUpCommand.cmd = &cobra.Command{
 		Use:   "up <box-item-id>... (--now | --on <date> | --tomorrow | --weekend | --next-week)",
 		Short: "Bubble email threads up",
-		Long:  "Bubble one or more email threads up to the top of the Imbox: right away with --now, at HEY's morning hour of a date with --on, or at its morning hour of tomorrow, Saturday, or next Monday with the named flags. Today's date under --on schedules HEY's Later today slot instead — its evening hour (18:00) — since this morning has already passed.",
+		Long:  "Bubble one or more email threads up to the top of the Imbox: right away with --now, at 08:00 UTC on a date with --on, or at 08:00 UTC tomorrow, the next Saturday, or next Monday with the named flags. Today's date in UTC under --on schedules HEY's Later today slot instead — 18:00 UTC — since this morning has already passed. HEY schedules in UTC, whatever the local zone or the account's.",
 		Example: `  hey bubble up 12345 --now
   hey bubble up 12345 67890 --now
   hey bubble up 12345 --on 2026-09-04
   hey bubble up 12345 --weekend`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box view output. Exactly one of --now, --on, --tomorrow, --weekend and --next-week is required. --on takes a YYYY-MM-DD date; HEY bubbles the threads up at its morning hour of that day, or at its evening hour (18:00) when the date is today. --tomorrow, --weekend and --next-week land at the morning hour of tomorrow, the coming Saturday, and next Monday.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output. Exactly one of --now, --on, --tomorrow, --weekend and --next-week is required. --on takes a YYYY-MM-DD date; HEY bubbles the threads up at 08:00 UTC that day, or at 18:00 UTC when the date is today in UTC, HEY's clock for bubbling up, not the local one. --tomorrow, --weekend and --next-week land at 08:00 UTC tomorrow, the next Saturday, and next Monday.",
 		},
 		RunE: bubbleUpCommand.run,
 		Args: usageMinOneArg(),
@@ -99,7 +98,9 @@ func (c *bubbleUpCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	if on.Format(dateLayout) == time.Now().Format(dateLayout) {
+	// HEY lays every slot out in UTC, "later today" included, so the day that has already had
+	// its morning is UTC's today — not the machine's, and not the account's.
+	if on.Format(dateLayout) == clockNow().UTC().Format(dateLayout) {
 		return c.scheduleFor(cmd, hey.BubbleUpLaterToday, "this evening", ids)
 	}
 
@@ -142,11 +143,11 @@ func newBubblePopCommand() *bubblePopCommand {
 	bubblePopCommand.cmd = &cobra.Command{
 		Use:   "pop <box-item-id>...",
 		Short: "Cancel bubble-ups",
-		Long:  "Cancel the bubble-up on one or more email threads.",
+		Long:  "Cancel the bubble-up on one or more email threads. Each moves to the Imbox, marked seen, rather than back to the box it came from.",
 		Example: `  hey bubble pop 12345
   hey bubble pop 12345 67890`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts one or more box item IDs from hey box view output. Cancels each thread's bubble-up.",
+			"agent_notes": "Accepts one or more box item IDs from hey box view output. Cancels each thread's bubble-up; the thread moves to the Imbox and is marked seen.",
 		},
 		RunE: bubblePopCommand.run,
 		Args: usageMinOneArg(),

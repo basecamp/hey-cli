@@ -14,6 +14,8 @@ import (
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
+
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 func typeText(v *mailView, s string) {
@@ -133,6 +135,23 @@ func TestComposeTabCyclesFields(t *testing.T) {
 	}
 }
 
+// A terminal speaking the kitty keyboard protocol reports Num Lock and Caps Lock
+// as modifiers, so Shift+Tab with Num Lock on arrives as Shift and Num Lock. It is
+// still Shift+Tab, and it must not fall through to plain Tab and move forward.
+func TestComposeShiftTabGoesBackWithALockKeyOn(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("c"))
+	f := composeModal(v)
+	for _, lock := range []tea.KeyMod{tea.ModNumLock, tea.ModCapsLock, tea.ModNumLock | tea.ModCapsLock} {
+		f.focus = int(fieldSubject)
+		_ = f.focusCurrent()
+		v.HandleContentKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift | lock}))
+		if f.focus != int(fieldBcc) {
+			t.Errorf("shift+tab with lock %v should move back to Bcc, got %d", lock, f.focus)
+		}
+	}
+}
+
 func TestComposeValidatesBeforeSending(t *testing.T) {
 	v := mailWithPostings()
 	v.HandleContentKey(keyPress("c"))
@@ -143,7 +162,7 @@ func TestComposeValidatesBeforeSending(t *testing.T) {
 	if !composeModal(v).isError || !strings.Contains(composeModal(v).status, "recipient") {
 		t.Errorf("expected a recipient error, got %q", composeModal(v).status)
 	}
-	typeText(v, "a@b.com")
+	typeText(v, "annie@example.com")
 	v.HandleContentKey(keyPress("tab")) // cc
 	v.HandleContentKey(keyPress("tab")) // bcc
 	v.HandleContentKey(keyPress("tab")) // subject
@@ -152,6 +171,59 @@ func TestComposeValidatesBeforeSending(t *testing.T) {
 	}
 	if !strings.Contains(composeModal(v).status, "Subject") {
 		t.Errorf("expected a subject error, got %q", composeModal(v).status)
+	}
+}
+
+func TestComposeRefusesAnAddressHEYWouldDrop(t *testing.T) {
+	for _, recipients := range []string{"a", "a, annie@example.com"} {
+		v, rec := composeTestServer(t)
+		v.Resize(80, 30)
+		v.HandleContentKey(keyPress("c"))
+		typeText(v, recipients)
+		v.HandleContentKey(keyPress("tab")) // cc
+		v.HandleContentKey(keyPress("tab")) // bcc
+		v.HandleContentKey(keyPress("tab")) // subject
+		typeText(v, "Quarterly planning notes")
+		v.HandleContentKey(keyPress("tab")) // body
+		typeText(v, "Here are the notes from Tuesday.")
+
+		if cmd := v.HandleContentKey(ctrlS()); cmd != nil {
+			runCmd(cmd)
+			t.Fatalf("To %q: ctrl+s sent a message HEY would not deliver to everyone on it", recipients)
+		}
+		form := composeModal(v)
+		if form == nil || form.sending {
+			t.Fatalf("To %q: the form closed or is sending", recipients)
+		}
+		if !form.isError || form.status != "Not a valid email address: a" {
+			t.Errorf("To %q: status = %q, want the bad address named", recipients, form.status)
+		}
+		if rec.method != "" {
+			t.Errorf("To %q: sent %s %s", recipients, rec.method, rec.path)
+		}
+	}
+}
+
+func TestComposeSendsAQuotedNameWithACommaAsOneRecipient(t *testing.T) {
+	v, rec := composeTestServer(t)
+	v.Resize(80, 30)
+	v.HandleContentKey(keyPress("c"))
+	typeText(v, `"Bryan, Annie" <annie@example.com>`)
+	v.HandleContentKey(keyPress("tab")) // cc
+	v.HandleContentKey(keyPress("tab")) // bcc
+	v.HandleContentKey(keyPress("tab")) // subject
+	typeText(v, "Kitchen remodel timeline")
+	v.HandleContentKey(keyPress("tab")) // body
+	typeText(v, "Cabinets land the week of the 14th.")
+
+	cmd := v.HandleContentKey(ctrlS())
+	if cmd == nil {
+		t.Fatalf("a quoted name with a comma was refused: %q", composeModal(v).status)
+	}
+	runCmd(cmd)
+	directly := rec.body["entry"].(map[string]any)["addressed"].(map[string]any)["directly"].([]any)
+	if len(directly) != 1 || directly[0] != `"Bryan, Annie" <annie@example.com>` {
+		t.Errorf("directly = %v, want the one recipient as typed", directly)
 	}
 }
 
@@ -214,6 +286,53 @@ func TestComposeSendFailureKeepsForm(t *testing.T) {
 	}
 	if composeModal(v).sending || !composeModal(v).isError || !strings.Contains(composeModal(v).status, "Send failed") {
 		t.Errorf("expected an inline error, got sending=%v status=%q", composeModal(v).sending, composeModal(v).status)
+	}
+}
+
+// HEY kept the message as a draft instead of sending it: the composer closes, as a send
+// would close it — sending again would only make another draft — and the TUI says it was
+// not sent and which draft holds it.
+func TestComposeRefusedByHEYClosesAndSaysWhichDraft(t *testing.T) {
+	v := mailWithPostings()
+	v.vc.width = 160
+	v.HandleContentKey(keyPress("c"))
+	composeModal(v).sending = true
+	answer, _ := v.Update(composeSentMsg{label: "Message sent", err: &mail.NotDeliveredError{DraftID: 2201}})
+	if composeModal(v) != nil {
+		t.Error("the composer should close: HEY already has the message as a draft")
+	}
+	// The toast is half the screen wide, so it says that and the draft; the notice row,
+	// which runs the width of the list, adds the likely reason.
+	if toast := deliverToView(v, answer); toast != "Not sent — saved as draft 2201" {
+		t.Errorf("toast = %q, want it to say it was not sent and which draft holds it", toast)
+	}
+	if !strings.HasPrefix(v.notice, "Not sent") || !strings.Contains(v.notice, "draft 2201") || !strings.Contains(v.notice, "sending limit") {
+		t.Errorf("notice = %q, want it to name the draft and the likely reason", v.notice)
+	}
+	// On a narrower screen the reason is cut before the draft is.
+	v.vc.width = 80
+	v.noteFailure("Not sent", &mail.NotDeliveredError{DraftID: 2201})
+	if !strings.Contains(v.notice, "draft 2201") {
+		t.Errorf("notice at 80 columns = %q, want the draft still named", v.notice)
+	}
+}
+
+func TestReplyPrefilledWithAnAddressHEYAcceptsStillSends(t *testing.T) {
+	v, rec := composeTestServer(t)
+	v.Resize(80, 30)
+	// HEY keeps quoted local parts net/mail cannot parse, and prefills them in a reply.
+	v.Update(replyContextLoadedMsg{
+		boxID: 1, topicID: 7, topicName: "Kitchen", entryID: 99, subject: "Re: Kitchen",
+		actingSenderID: 7,
+		to:             []string{`annie."bryan"@example.com`},
+	})
+	typeText(v, "Cabinets land the week of the 14th.")
+	cmd := v.HandleContentKey(ctrlS())
+	if cmd == nil {
+		t.Fatalf("a reply HEY prefilled was refused: %q", composeModal(v).status)
+	}
+	if sent, ok := runCmd(cmd).(composeSentMsg); !ok || sent.err != nil || rec.method != "POST" {
+		t.Fatalf("expected the reply to be sent, got %#v via %s %s", sent, rec.method, rec.path)
 	}
 }
 
@@ -496,13 +615,16 @@ func TestForwardFormLoadsLatestEntryAndSends(t *testing.T) {
 
 // Sending from inside a thread used to leave its confirmation in the posting list's
 // header, which a thread covers — so it was said to nobody. A toast belongs to the
-// model and is drawn over whatever the section is showing.
-func TestForwardCompletionIsSaidFromInsideAThread(t *testing.T) {
+// model and is drawn over whatever the section is showing. The send also finishes with
+// the thread, so the reader is back on the list they opened it from.
+func TestForwardFromAThreadReturnsToTheList(t *testing.T) {
 	v := mailWithPostings()
 	v.Resize(80, 30)
 	v.inThread = true
+	v.topicID = 123
 	v.topicViewport.SetContent("Original thread")
 	v.modal = newForwardForm(forwardContextLoadedMsg{
+		topicID:   123,
 		topicName: "Quarterly planning",
 		subject:   "Fwd: Quarterly planning",
 		content:   "<div>Quoted message</div>",
@@ -516,8 +638,49 @@ func TestForwardCompletionIsSaidFromInsideAThread(t *testing.T) {
 	if toast := deliverToView(v, answer); toast != "Message forwarded" {
 		t.Errorf("toast = %q", toast)
 	}
-	if view := v.View(); !strings.Contains(view, "Original thread") {
-		t.Errorf("the thread should still be on screen, got %q", view)
+	if v.inThread {
+		t.Error("the thread should close once the forward is sent")
+	}
+	if view := v.View(); strings.Contains(view, "Original thread") {
+		t.Errorf("the list should be back on screen, got %q", view)
+	}
+}
+
+func TestReplyFromAThreadReturnsToTheList(t *testing.T) {
+	v := mailWithPostings()
+	v.Resize(80, 30)
+	v.inThread = true
+	v.topicID = 7
+	v.modal = newReplyForm(replyContextLoadedMsg{
+		boxID: 1, topicID: 7, topicName: "Kitchen renovation", entryID: 99, subject: "Re: Kitchen renovation",
+		to: []string{"jane.cooper@example.com"},
+	}, v.vc.styles)
+
+	v.Update(composeSentMsg{label: "Reply sent"})
+
+	if v.inThread {
+		t.Error("the thread should close once the reply is sent")
+	}
+	if composeModal(v) != nil {
+		t.Error("reply form should close after sending")
+	}
+}
+
+// A failed send keeps the reader in the thread with the form open, so nothing is lost.
+func TestFailedReplyStaysInTheThread(t *testing.T) {
+	v := mailWithPostings()
+	v.Resize(80, 30)
+	v.inThread = true
+	v.topicID = 7
+	v.modal = newReplyForm(replyContextLoadedMsg{
+		boxID: 1, topicID: 7, topicName: "Kitchen renovation", entryID: 99, subject: "Re: Kitchen renovation",
+		to: []string{"jane.cooper@example.com"},
+	}, v.vc.styles)
+
+	v.Update(composeSentMsg{label: "Reply sent", err: io.ErrUnexpectedEOF})
+
+	if !v.inThread || composeModal(v) == nil {
+		t.Errorf("a failed send should keep the thread and the form: inThread=%v form=%v", v.inThread, composeModal(v))
 	}
 }
 
@@ -568,10 +731,16 @@ func TestModelRoutesAllKeysToOpenForm(t *testing.T) {
 	if composeModal(m.mailView).focus != int(fieldCc) {
 		t.Errorf("tab should move to Cc, got %d", composeModal(m.mailView).focus)
 	}
+	// The form holds a "q" now, so esc asks before it lets go of it.
 	updated, _ = m.Update(keyPress("esc"))
 	m = updated.(model)
+	if form := composeModal(m.mailView); form == nil || !form.confirmLeave {
+		t.Fatal("esc on an edited form should ask through the model")
+	}
+	updated, _ = m.Update(keyPress("d"))
+	m = updated.(model)
 	if m.mailView.CapturingInput() {
-		t.Error("esc should close the form through the model")
+		t.Error("d should discard the form through the model")
 	}
 }
 

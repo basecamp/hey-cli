@@ -146,7 +146,7 @@ func (f *habitForm) handleKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	switch {
-	case msg.Key().Code == tea.KeyTab && msg.Key().Mod == tea.ModShift:
+	case msg.String() == "shift+tab":
 		f.focus = (f.focus + habitFieldCount - 1) % habitFieldCount
 		return f.focusCurrent(), false
 	case msg.Key().Code == tea.KeyTab || msg.Key().Code == tea.KeyEnter:

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -103,6 +104,10 @@ func keyPress(key string) tea.KeyPressMsg {
 		k = tea.Key{Code: tea.KeyUp}
 	case "down":
 		k = tea.Key{Code: tea.KeyDown}
+	case "pgup":
+		k = tea.Key{Code: tea.KeyPgUp}
+	case "pgdown":
+		k = tea.Key{Code: tea.KeyPgDown}
 	case " ", "space":
 		k = tea.Key{Code: tea.KeySpace, Text: " "}
 	}
@@ -244,6 +249,19 @@ func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
 	if !slices.Equal(saved, []bool{true}) {
 		t.Errorf("saved preferences = %v, want [true]", saved)
 	}
+	if top := lines[0]; !strings.Contains(top, " ? help ") {
+		t.Errorf("hidden help left no way back on the top rule: %q", top)
+	}
+	m.err = errors.New("HEY is not answering")
+	if top := strings.SplitN(stripANSI(m.View().Content), "\n", 2)[0]; strings.Contains(top, "? help") {
+		t.Errorf("the top rule offers ? while an error box would swallow it: %q", top)
+	}
+	updated, _ = m.Update(keyPress("?"))
+	m = updated.(model)
+	if !m.help.hidden {
+		t.Error("? acted through an error box")
+	}
+	m.err = nil
 
 	updated, _ = m.Update(keyPress("?"))
 	m = updated.(model)
@@ -632,14 +650,29 @@ func TestLoadingViewKeepsItsSectionUntilResponse(t *testing.T) {
 }
 
 func TestContactsSectionShortcut(t *testing.T) {
-	m := modelWithBoxes()
-	updated, cmd := m.Update(keyPress("O"))
-	result := updated.(model)
-	if result.section != sectionContacts || result.activeView != result.contactsView {
-		t.Errorf("O shortcut selected section %d and view %T", result.section, result.activeView)
+	for _, key := range []string{"o", "O"} {
+		m := modelWithBoxes()
+		updated, cmd := m.Update(keyPress(key))
+		result := updated.(model)
+		if result.section != sectionContacts || result.activeView != result.contactsView {
+			t.Errorf("%s shortcut selected section %d and view %T", key, result.section, result.activeView)
+		}
+		if cmd == nil || !result.loading {
+			t.Errorf("opening Contacts with %s should start its initial list request", key)
+		}
 	}
-	if cmd == nil || !result.loading {
-		t.Error("opening Contacts should start its initial list request")
+}
+
+func TestContactsTabUnderlinesTheKeyThatOpensIt(t *testing.T) {
+	for _, item := range sectionItems {
+		index := strings.Index(item.label, item.shortcut)
+		if index < 0 {
+			t.Errorf("%s tab underlines %q, which is not a letter of its label as written", item.label, item.shortcut)
+			continue
+		}
+		if got := sectionForShortcut(item.shortcut); got < 0 || sectionItems[got].label != item.label {
+			t.Errorf("pressing the %q underlined in %s does not open it", item.shortcut, item.label)
+		}
 	}
 }
 
@@ -1137,9 +1170,223 @@ func TestContentListMovesSeenBubbledUpPostingToItsSection(t *testing.T) {
 	if cl.postings[1].BubbledUp {
 		t.Error("marking a bubbled up posting seen should clear its bubbled up state")
 	}
-	if got := cl.selectedPosting(); got == nil || got.ID != 1 {
-		t.Errorf("cursor should follow the moved posting: %+v", got)
+	if got := cl.selectedPosting(); got == nil || got.ID != 2 {
+		t.Errorf("cursor should stay put on the next posting: %+v", got)
 	}
+}
+
+// Marking the thread under the cursor seen sends it down to Previously Seen on its own:
+// the highlight stays where it was, on the thread that came next, and the window does not
+// scroll after the one put away.
+func TestMarkingSeenLeavesTheCursorOnTheNextThread(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings([]mail.Posting{
+		{ID: 1, Name: "Lunch on Thursday?", CreatedAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)},
+		{ID: 2, Name: "Weekly release notes", CreatedAt: time.Date(2026, 8, 20, 11, 0, 0, 0, time.UTC)},
+		{ID: 3, Name: "Invoice for July hosting", CreatedAt: time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)},
+		{ID: 4, Name: "Quarterly planning agenda", CreatedAt: time.Date(2026, 8, 19, 10, 0, 0, 0, time.UTC), Seen: true},
+	})
+	cl.setSize(80, 20)
+	cl.moveDown()
+
+	cl.markSeen(1)
+
+	if got := cl.selectedPosting(); got == nil || got.ID != 3 {
+		t.Errorf("cursor should land on the thread that followed: %+v", got)
+	}
+	if cl.cursor != 1 {
+		t.Errorf("cursor moved to row %d, want it to stay on row 1", cl.cursor)
+	}
+	if cl.scrollOff != 0 {
+		t.Errorf("the window scrolled to %d", cl.scrollOff)
+	}
+	if cl.postings[2].ID != 2 || !cl.postings[2].Seen {
+		t.Errorf("the seen thread should head Previously Seen: %+v", cl.postings)
+	}
+
+	// The last of New for You moves the cursor on to what followed it, not back onto itself.
+	cl.markSeen(1)
+	if got := cl.selectedPosting(); got == nil || got.ID != 2 {
+		t.Errorf("cursor should move past the last new thread: %+v", got)
+	}
+
+	// e on a thread already in Previously Seen moves nothing, the cursor included — at
+	// the end of the list it used to step back to the thread above.
+	cl.cursor = len(cl.postings) - 1
+	cl.markSeen(cl.cursor)
+	if cl.cursor != len(cl.postings)-1 {
+		t.Errorf("marking a seen thread seen moved the cursor to %d", cl.cursor)
+	}
+}
+
+// A list long enough to scroll: marking the thread under the cursor seen sends it far
+// below, and the window used to follow it there and then snap back with the next thread
+// on the top row — every row on screen moved. The window stays where it was.
+func TestMarkingSeenKeepsTheWindowWhereItWas(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings(longImbox(20, 10))
+	cl.setSize(80, 32)
+	for range 3 {
+		cl.moveDown()
+	}
+	before := stripANSI(cl.view())
+
+	cl.markSeen(3)
+
+	if cl.scrollOff != 0 || cl.cursor != 3 {
+		t.Errorf("cursor=%d scrollOff=%d, want row 3 in an unscrolled window", cl.cursor, cl.scrollOff)
+	}
+	after := strings.Split(stripANSI(cl.view()), "\n")
+	if first := strings.Split(before, "\n")[0]; after[0] != first {
+		t.Errorf("the top of the list moved: %q, was %q", after[0], first)
+	}
+}
+
+// A live re-read that takes away the thread under the cursor — read or filed somewhere
+// else — leaves the cursor on its row, on the thread that came up into it, rather than
+// sending it back to the top of the list.
+func TestARefreshThatDropsTheCursorsThreadKeepsItsRow(t *testing.T) {
+	cl := &contentList{}
+	postings := longImbox(20, 0)
+	cl.setPostings(postings)
+	cl.setSize(80, 32)
+	for range 3 {
+		cl.moveDown()
+	}
+
+	head := append(append([]mail.Posting(nil), postings[:3]...), postings[4:15]...)
+	cl.refreshHead(head, postingIDs(postings[:15]))
+
+	if got := cl.selectedPosting(); cl.cursor != 3 || got == nil || got.ID != postings[4].ID {
+		t.Errorf("cursor=%d on %+v, want row 3 on %q", cl.cursor, got, postings[4].Name)
+	}
+}
+
+// PgDn scrolls the list on by the window it shows, so what was just below the bottom
+// comes up to the top, and the cursor keeps its row on screen; PgUp takes it back.
+func TestContentListPagesByTheWindow(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings(longImbox(40, 0))
+	cl.setSize(80, 20)
+	cl.moveDown()
+	window := cl.visibleItemsFrom(0)
+	bottom := stripANSI(cl.view())
+	lastShown := cl.postings[window-1].Name
+	if !strings.Contains(bottom, lastShown) {
+		t.Fatalf("the window should end on %q", lastShown)
+	}
+
+	cl.pageDown()
+
+	if cl.scrollOff != window {
+		t.Errorf("scrollOff = %d, want the next window at %d", cl.scrollOff, window)
+	}
+	if cl.cursor != window+1 {
+		t.Errorf("cursor = %d, want it on the same row of the next window (%d)", cl.cursor, window+1)
+	}
+	if strings.Contains(stripANSI(cl.view()), lastShown+"\n") {
+		t.Errorf("the old window is still on screen")
+	}
+
+	cl.pageUp()
+
+	if cl.scrollOff != 0 || cl.cursor != 1 {
+		t.Errorf("PgUp landed on cursor=%d scrollOff=%d, want back at 1 and 0", cl.cursor, cl.scrollOff)
+	}
+}
+
+// At either end there is no window to scroll to, so the keys take the cursor to the
+// first or last thread, and a page down never scrolls the last thread off the bottom.
+func TestContentListPagingStopsAtTheEnds(t *testing.T) {
+	cl := &contentList{}
+	cl.setPostings(longImbox(40, 0))
+	cl.setSize(80, 20)
+
+	for range 10 {
+		cl.pageDown()
+	}
+	if cl.cursor != 39 {
+		t.Errorf("cursor = %d, want the last thread", cl.cursor)
+	}
+	if cl.scrollOff != cl.lastWindowStart() {
+		t.Errorf("scrollOff = %d, want the last full window at %d", cl.scrollOff, cl.lastWindowStart())
+	}
+	if !strings.Contains(stripANSI(cl.view()), cl.postings[39].Name) {
+		t.Error("the last thread is not on screen")
+	}
+
+	for range 10 {
+		cl.pageUp()
+	}
+	if cl.cursor != 0 || cl.scrollOff != 0 {
+		t.Errorf("cursor=%d scrollOff=%d, want the top of the list", cl.cursor, cl.scrollOff)
+	}
+
+	short := &contentList{}
+	short.setPostings(longImbox(3, 0))
+	short.setSize(80, 20)
+	short.pageDown()
+	if short.cursor != 2 || short.scrollOff != 0 {
+		t.Errorf("a list that fits: cursor=%d scrollOff=%d, want the last thread without scrolling", short.cursor, short.scrollOff)
+	}
+}
+
+func TestPageByMovesFixedHeightLists(t *testing.T) {
+	for _, testCase := range []struct {
+		name                      string
+		cursor, scroll, direction int
+		wantCursor, wantScroll    int
+	}{
+		{name: "down a page", cursor: 2, scroll: 0, direction: 1, wantCursor: 12, wantScroll: 10},
+		{name: "down into the last window", cursor: 32, scroll: 30, direction: 1, wantCursor: 37, wantScroll: 35},
+		{name: "down on the last window", cursor: 37, scroll: 35, direction: 1, wantCursor: 44, wantScroll: 35},
+		{name: "up a page", cursor: 22, scroll: 20, direction: -1, wantCursor: 12, wantScroll: 10},
+		{name: "up into the first window", cursor: 7, scroll: 5, direction: -1, wantCursor: 2, wantScroll: 0},
+		{name: "up on the first window", cursor: 4, scroll: 0, direction: -1, wantCursor: 0, wantScroll: 0},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			cursor, scroll := pageBy(testCase.cursor, testCase.scroll, 10, 45, testCase.direction)
+			if cursor != testCase.wantCursor || scroll != testCase.wantScroll {
+				t.Errorf("pageBy = cursor %d scroll %d, want %d and %d", cursor, scroll, testCase.wantCursor, testCase.wantScroll)
+			}
+		})
+	}
+	if cursor, scroll := pageBy(0, 0, 10, 0, 1); cursor != 0 || scroll != 0 {
+		t.Errorf("an empty list moved to %d/%d", cursor, scroll)
+	}
+}
+
+// The keys reach every list through the mail view, not just the list type.
+func TestMailListTakesPageKeys(t *testing.T) {
+	v := newMailView(testVC())
+	v.vc.width = 80
+	v.vc.height = 24
+	v.boxes = testBoxes()
+	v.postingList.setPostings(longImbox(40, 0))
+	v.postingList.setSize(80, 20)
+
+	v.HandleContentKey(keyPress("pgdown"))
+	if v.postingList.scrollOff == 0 || v.postingList.cursor == 0 {
+		t.Errorf("PgDn left the list at cursor=%d scrollOff=%d", v.postingList.cursor, v.postingList.scrollOff)
+	}
+	v.HandleContentKey(keyPress("pgup"))
+	if v.postingList.scrollOff != 0 || v.postingList.cursor != 0 {
+		t.Errorf("PgUp left the list at cursor=%d scrollOff=%d", v.postingList.cursor, v.postingList.scrollOff)
+	}
+}
+
+func longImbox(unseen, seen int) []mail.Posting {
+	subjects := []string{"Quarterly planning agenda", "Lunch on Friday?", "Invoice for September hosting", "Weekly release notes", "Offsite travel details"}
+	postings := make([]mail.Posting, 0, unseen+seen)
+	for i := range unseen + seen {
+		postings = append(postings, mail.Posting{
+			ID:        int64(i + 1),
+			Name:      fmt.Sprintf("%s #%d", subjects[i%len(subjects)], i+1),
+			CreatedAt: time.Date(2026, 9, 29, 9, 0, 0, 0, time.UTC).Add(-time.Duration(i) * time.Hour),
+			Seen:      i >= unseen,
+		})
+	}
+	return postings
 }
 
 func TestContentListAlignsDateColumn(t *testing.T) {
@@ -1218,8 +1465,30 @@ func TestChromeUsesBlueBoldConvention(t *testing.T) {
 	}
 }
 
+func TestTopRuleShowsAHintBesideHeyWhenThereIsRoom(t *testing.T) {
+	line := stripANSI(renderTopRule(80, "? help", "frank.castillo@example.com"))
+	if got := lipgloss.Width(line); got != 80 {
+		t.Errorf("top rule width = %d, want 80", got)
+	}
+	if !strings.HasPrefix(line, "── ? help ─") {
+		t.Errorf("the hint should open the rule: %q", line)
+	}
+	heyColumn := func(rule string) int { return lipgloss.Width(rule[:strings.Index(rule, "HEY")]) }
+	if want := stripANSI(renderTopRule(80, "", "frank.castillo@example.com")); heyColumn(line) != heyColumn(want) {
+		t.Errorf("the hint moved HEY: %q, want HEY where it is in %q", line, want)
+	}
+	if !strings.HasSuffix(line, "frank.castillo@example.com ──") {
+		t.Errorf("the account should stay right-aligned: %q", line)
+	}
+
+	narrow := stripANSI(renderTopRule(40, "? help", "frank.castillo@example.com"))
+	if strings.Contains(narrow, "help") || lipgloss.Width(narrow) != 40 {
+		t.Errorf("a rule with no room for the hint = %q, want it left out", narrow)
+	}
+}
+
 func TestTopRuleCentersHeyAndRightAlignsAccount(t *testing.T) {
-	line := renderTopRule(80, "frank.castillo@example.com")
+	line := renderTopRule(80, "", "frank.castillo@example.com")
 	if got := lipgloss.Width(line); got != 80 {
 		t.Errorf("top rule width = %d, want 80", got)
 	}
@@ -1355,6 +1624,49 @@ func openLinkThreadThroughModel(t *testing.T) model {
 	return m
 }
 
+// A box's number works from inside a thread, including the box the thread was opened
+// from: 1 in a thread read from the Imbox lands on the Imbox's list rather than falling
+// through to the thread, which swallowed it.
+func TestBoxNumbersLeaveAThread(t *testing.T) {
+	for _, testCase := range []struct {
+		key     string
+		wantBox int
+	}{
+		{key: "1", wantBox: 0},
+		{key: "2", wantBox: 1},
+	} {
+		t.Run(testCase.key, func(t *testing.T) {
+			m := openLinkThreadThroughModel(t)
+
+			updated, _ := m.Update(keyPress(testCase.key))
+			m = updated.(model)
+
+			if m.mailView.InThread() {
+				t.Errorf("%s left the thread open", testCase.key)
+			}
+			if m.mailView.boxIndex != testCase.wantBox {
+				t.Errorf("%s landed on box %d, want %d", testCase.key, m.mailView.boxIndex, testCase.wantBox)
+			}
+			if testCase.key == "1" && !strings.Contains(stripANSI(m.View().Content), "Meeting notes") {
+				t.Errorf("the Imbox's list is not on screen:\n%s", stripANSI(m.View().Content))
+			}
+		})
+	}
+}
+
+func TestBoxNumberForTheCurrentBoxClosesASearch(t *testing.T) {
+	v := mailWithPostings()
+	v.searchActive = true
+	v.searchQuery = "invoice"
+
+	if cmd := v.handleBoxShortcut("1"); cmd == nil {
+		t.Fatal("1 over a search in the Imbox should be handled")
+	}
+	if v.searchActive || v.boxIndex != 0 {
+		t.Errorf("searchActive=%v box=%d, want the Imbox's list", v.searchActive, v.boxIndex)
+	}
+}
+
 func TestRootModelKeepsGlobalTabForALinklessThread(t *testing.T) {
 	m := modelWithBoxes()
 	m.mailView.inThread = true
@@ -1399,6 +1711,87 @@ func TestEnterWithoutASelectedLinkDoesNotOpen(t *testing.T) {
 	m = updated.(model)
 	if cmd != nil || opened || m.mailView.selectedLink != -1 {
 		t.Errorf("Enter without selection returned command=%v opened=%v selected=%d", cmd != nil, opened, m.mailView.selectedLink)
+	}
+}
+
+func openAttachmentLinkThreadThroughModel(t *testing.T) (model, *[]string) {
+	t.Helper()
+	m := openLinkThreadThroughModel(t)
+	var events []string
+	m.mailView.attachments = []messageAttachment{{ID: "501:1", MessageID: 501, Filename: "quarterly-report.pdf", URL: "/rails/blobs/quarterly-report.pdf"}}
+	m.mailView.attachmentCursor = 0
+	m.mailView.vc.newAttachmentTempDir = func() (string, error) { return t.TempDir(), nil }
+	m.mailView.vc.saveAttachment = func(context.Context, string, string, bool) (int64, error) {
+		events = append(events, "save")
+		return 2048, nil
+	}
+	m.mailView.vc.openAttachment = func(string) error {
+		events = append(events, "open attachment")
+		return nil
+	}
+	m.mailView.vc.openURL = func(destination string) error {
+		events = append(events, "visit "+destination)
+		return nil
+	}
+	m.updateHelpBindings()
+	return m, &events
+}
+
+func TestEnterOpensTheAttachmentUntilALinkIsSelected(t *testing.T) {
+	m, events := openAttachmentLinkThreadThroughModel(t)
+	if !hasHelpBinding(m.mailView.HelpBindings(), "enter") {
+		t.Errorf("a thread with an attachment should offer Enter to open it: %v", m.mailView.HelpBindings())
+	}
+	updated, cmd := m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("Enter without a selected link should open the selected attachment")
+	}
+	runCmd(cmd)
+	if fmt.Sprint(*events) != "[save open attachment]" {
+		t.Errorf("Enter without a selected link = %v, want the attachment downloaded and opened", *events)
+	}
+
+	*events = nil
+	updated, _ = m.Update(keyPress("tab"))
+	m = updated.(model)
+	if hasHelpBinding(m.mailView.HelpBindings(), "enter") {
+		t.Errorf("with a link selected Enter belongs to the link, whose footer says so: %v", m.mailView.HelpBindings())
+	}
+	updated, cmd = m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("Enter on a selected link returned no command")
+	}
+	runCmd(cmd)
+	if len(*events) != 1 || !strings.HasPrefix((*events)[0], "visit ") {
+		t.Errorf("Enter on a selected link = %v, want only the link visited", *events)
+	}
+
+	*events = nil
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if m.mailView.selectedLink != -1 || !m.mailView.inThread {
+		t.Fatalf("Escape should clear the link and stay in the thread: selected=%d inThread=%v", m.mailView.selectedLink, m.mailView.inThread)
+	}
+	_, cmd = m.Update(keyPress("enter"))
+	runCmd(cmd)
+	if fmt.Sprint(*events) != "[save open attachment]" {
+		t.Errorf("Enter after clearing the link = %v, want the attachment again", *events)
+	}
+}
+
+func TestOOpensContactsFromAThreadWithAttachments(t *testing.T) {
+	m, events := openAttachmentLinkThreadThroughModel(t)
+	// Opening the thread marked it seen; a section waits for that write, so let it land.
+	m.mailView.pendingMutations = 0
+	updated, _ := m.Update(keyPress("o"))
+	m = updated.(model)
+	if m.section != sectionContacts || m.activeView != m.contactsView {
+		t.Errorf("o in a thread selected section %d and view %T, want Contacts", m.section, m.activeView)
+	}
+	if len(*events) != 0 {
+		t.Errorf("o should no longer open an attachment: %v", *events)
 	}
 }
 
@@ -1493,6 +1886,65 @@ func TestQLeavesAThreadWithASelectedLink(t *testing.T) {
 	m = updated.(model)
 	if m.mailView.InThread() {
 		t.Error("q cleared link selection instead of leaving the thread")
+	}
+}
+
+func TestRootModelWrapsALongDestinationOntoTheRowsItNeeds(t *testing.T) {
+	m := openLinkThreadThroughModel(t)
+	var opened []string
+	m.mailView.vc.openURL = func(destination string) error {
+		opened = append(opened, destination)
+		return nil
+	}
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 30})
+	m = updated.(model)
+	unselectedViewportHeight := m.mailView.topicViewport.Height()
+	for range 2 {
+		updated, _ = m.Update(keyPress("tab"))
+		m = updated.(model)
+	}
+	if m.mailView.selectedLink != 1 {
+		t.Fatalf("selected link = %d, want second occurrence", m.mailView.selectedLink)
+	}
+
+	screen := stripANSI(m.View().Content)
+	for _, line := range []string{"Open: https://example.org/second?full=de", "stination (press Enter to visit)"} {
+		if !strings.Contains(screen, line) {
+			t.Errorf("wrapped footer row %q is not on screen: %q", line, screen)
+		}
+	}
+	if got := strings.Count(m.View().Content, "\n") + 1; got > m.height {
+		t.Errorf("screen draws %d rows, want at most %d", got, m.height)
+	}
+	if got := m.mailView.topicViewport.Height(); got != unselectedViewportHeight-1 {
+		t.Errorf("viewport height = %d, want %d to make room for the second footer row", got, unselectedViewportHeight-1)
+	}
+	selected := m.mailView.links[m.mailView.selectedLink]
+	visibleStart := m.mailView.topicViewport.YOffset()
+	visibleEnd := visibleStart + m.mailView.topicViewport.Height() - 1
+	if selected.startLine < visibleStart || selected.endLine > visibleEnd {
+		t.Errorf("selected range %d-%d is outside viewport %d-%d", selected.startLine, selected.endLine, visibleStart, visibleEnd)
+	}
+
+	updated, cmd := m.Update(keyPress("enter"))
+	m = updated.(model)
+	if cmd == nil {
+		t.Fatal("enter did not open a destination shown in full over two rows")
+	}
+	runCmd(cmd)
+	if len(opened) != 1 || opened[0] != "https://example.org/second?full=destination" {
+		t.Fatalf("opened destinations = %q, want the exact second destination", opened)
+	}
+
+	// One row short of what the wrapped destination needs: a hint instead, and no opening.
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 40, Height: headerHeight + m.help.height() + 4})
+	m = updated.(model)
+	screen = stripANSI(m.View().Content)
+	if !strings.Contains(screen, "Enlarge the terminal") || strings.Contains(screen, "Open: https://example.org/second") {
+		t.Errorf("short terminal footer = %q, want the enlarge hint instead of a partial destination", screen)
+	}
+	if _, cmd = m.Update(keyPress("enter")); cmd != nil || len(opened) != 1 {
+		t.Errorf("enter opened a destination the footer could not show: command=%v opened=%q", cmd != nil, opened)
 	}
 }
 

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -36,7 +37,8 @@ type threadReplyTarget struct {
 	client             *hey.Client
 }
 
-// resolveThreadReply returns the thread's latest entry, linked account, and the
+// resolveThreadReply returns the entry a reply to the thread answers — its latest
+// emailed message, never a note or share notice after it — its linked account, and the
 // recipients a reply to that entry goes to. If HEY's reply prefill is unavailable,
 // it reads the message for the most complete fallback metadata.
 func resolveThreadReply(ctx context.Context, threadID int64) (*threadReplyTarget, error) {
@@ -63,7 +65,10 @@ func resolveThreadReplyTarget(ctx context.Context, threadID int64, readMessageFa
 	if err != nil {
 		return nil, err
 	}
-	entry := topic.Entries[len(topic.Entries)-1]
+	entry, err := threadReplyEntry(ctx, threadSDK, topic)
+	if err != nil {
+		return nil, err
+	}
 	entryID := entry.Id
 
 	target := &threadReplyTarget{
@@ -113,6 +118,25 @@ func resolveThreadReplyTarget(ctx context.Context, threadID int64, readMessageFa
 	target.Addressed = recipientsForReplyTo(*message)
 	target.RecipientsResolved = true
 	return target, nil
+}
+
+// threadReplyEntry answers the entry a reply to, or a forward of, the thread answers:
+// HEY's last replyable entry (see mail.ReplyTarget). A thread holding nothing but notes
+// and share notices is refused rather than answered from one of them, since neither was
+// ever emailed and a reply built on one goes to the teammate who wrote it.
+func threadReplyEntry(ctx context.Context, client *hey.Client, topic *generated.Topic) (generated.Entry, error) {
+	entry, err := mail.ReplyTarget(ctx, client, topic)
+	if errors.Is(err, mail.ErrNoReplyableEntry) {
+		return generated.Entry{}, &apierr.Error{
+			Code:    apierr.CodeNotFound,
+			Message: fmt.Sprintf("thread %d has %v", topic.Id, err),
+			Hint:    "Notes and share notices are internal and never emailed; start a new message with hey compose",
+		}
+	}
+	if err != nil {
+		return generated.Entry{}, apierr.FromSDK(err)
+	}
+	return entry, nil
 }
 
 func replyHasRecipients(addressed replyRecipients) bool {

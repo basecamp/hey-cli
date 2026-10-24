@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,10 @@ import (
 )
 
 type sentForward struct {
+	// SendAnswer, when set before the command runs, is what the delivered forward
+	// answers. Empty is {}, the answer of a HEY that predates the delivered entry's ids.
+	SendAnswer string
+
 	Requests       []string
 	ActingSenderID int64
 	Subject        string
@@ -70,7 +75,7 @@ func forwardServer(t *testing.T, entriesJSON string) (*httptest.Server, *sentFor
 			sent.CC = body.Entry.Addressed.Copied
 			sent.BCC = body.Entry.Addressed.Blindcopied
 			w.WriteHeader(http.StatusCreated)
-			fmt.Fprint(w, `{}`)
+			fmt.Fprint(w, cmp.Or(sent.SendAnswer, `{}`))
 		default:
 			http.NotFound(w, r)
 		}

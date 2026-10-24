@@ -38,6 +38,27 @@ hey only ever writes skill directories it owns: each one it creates carries a
 `hey` skill directory (or symlink) without it — a hand-authored skill at one of those paths
 is never overwritten or claimed. `hey doctor` flags an unmanaged baseline and how to adopt it.
 
+### Keychain access from agents
+
+hey keeps your login in the system keyring, which on a Mac is the Keychain. Two things can
+keep an agent's commands from reading it, and signing in again fixes neither:
+
+- **Codex's sandbox** hides the keyring from the commands it sandboxes, so a saved login
+  reads as missing there; hey's hint says so when `CODEX_SANDBOX` is set. Let Codex run hey
+  outside its sandbox: approve its escalation prompt, or allow read-only hey commands with
+  `prefix_rule`s in a file under `~/.codex/rules/`.
+- **A process outside your Mac's desktop session**, such as one started over SSH, is refused
+  by the Keychain: hey fails with `exit status 36` (`errSecInteractionNotAllowed`) and a hint
+  that a new login won't help. Codex runs its commands and MCP servers from a background
+  server that keeps running after you quit Codex. If that server was started from such a
+  session, every hey command and `hey mcp` fails this way, sandboxed or not, and a rules
+  file can't help. Quit Codex, run `codex app-server daemon restart` in Terminal on the Mac,
+  and start Codex again; `codex --no-daemon` runs without the background server.
+
+`hey mcp` reads the login before it answers the MCP handshake, so a client that can't use
+it reports only that the connection closed. The reason is on the server's stderr, which
+Codex keeps in its log.
+
 ## MCP server
 
 `hey mcp` runs an MCP (Model Context Protocol) server on stdin/stdout, serving HEY
@@ -63,3 +84,24 @@ Mutations are never retried automatically: a 429/503 on a write surfaces to
 the caller rather than risking a duplicate delivery, so retry a failed write
 yourself once you know it did not land. Logs go to stderr — stdout carries
 the MCP wire protocol.
+
+### Drafts, never sends
+
+`hey mcp` never delivers mail. `create_message`, `create_reply` and `update_message`,
+the three actions that can send on HEY's API, always save a draft: the entry's status is
+forced to `drafted`, and the entry takes only its recipients (`entry.addressed`). A
+call that asks to send (any other `entry.status`), schedule (`entry.scheduled_delivery`
+and its date and hour) or triage the thread in the same request (`mark_done`, `pop`,
+`scheduled_bubble_up`) is refused before anything reaches HEY. Updating a draft that was
+scheduled clears its schedule rather than letting it go out later. A save comes back as
+`{"drafted": true, "draft_id": ..., "location": ..., "note": ...}`. HEY acknowledges a
+draft with 204 and a Location. Any other answer is reported as an error that says the
+mail may have been sent, so check HEY before trying again. A save that fails with no
+answer from HEY (a dropped connection, a timeout, a 5xx) may still have been saved, and
+its error says to check Drafts before retrying.
+
+There is no send action yet. A person reviews the draft and sends it from HEY, or with
+`hey draft send <draft_id>`. Earlier releases delivered mail when a call omitted
+`entry.status`. An MCP client that relied on that now gets a draft. `describe` for these
+actions serves the draft-only schema, and the `hey_threads` tool description says the same.
+`--read-only` still drops every write action, drafts included.

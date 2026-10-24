@@ -67,13 +67,16 @@ var terminalStyle = ansi.StyleConfig{
 	LinkText: ansi.StylePrimitive{
 		Color: stringPointer("12"),
 	},
+	// An image is its name behind a camera, not its URL: the name carries the link, and
+	// the TUI's status row shows the whole destination when the name is selected.
+	// Glamour writes the URL as a separate element, so its Format drops it.
 	Image: ansi.StylePrimitive{
-		Color:     stringPointer("14"),
-		Underline: boolPointer(true),
+		Format: "{{/* shown in the status row */}}",
 	},
 	ImageText: ansi.StylePrimitive{
-		Faint:  boolPointer(true),
-		Format: "Image: {{.text}} →",
+		BlockPrefix: "📷 ",
+		Color:       stringPointer("14"),
+		Underline:   boolPointer(true),
 	},
 	Code: ansi.StyleBlock{
 		StylePrimitive: ansi.StylePrimitive{

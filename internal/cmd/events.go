@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,8 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
+	"github.com/basecamp/hey-cli/internal/timezone"
 )
 
 // recordingTypeEvent is how HEY names an event among the recordings a calendar holds.
@@ -29,7 +33,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY; without a date they, and list's window, start from today in the HEY account's time zone. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series. add and edit read clock times, and today when --starts-on is left out, in the HEY account's time zone unless --time-zone names one, and refuse when they need it and the account has none; an edit keeps a zoned event's zone and leaves a zoneless event zoneless. list, day and week answer a flat array of events in data. Each event has id, title, starts_at, ends_at and calendar; all_day and recurring appear only when true, starts_at_time_zone and ends_at_time_zone only on a zoned timed event, and description (the notes, as plain text), location, url, attached_entry and reminders only when set.",
 		},
 	}
 
@@ -60,8 +64,16 @@ func newEventsListCommand() *eventsListCommand {
 		Long: `List the events calendars hold over a date window.
 
 A repeating event is stored once, so it lists once, as its series, on the day the series
-began. For the events of a day or a week as HEY draws them — occurrences of a repeating
-series expanded into the days they fall on — read 'hey event day' or 'hey event week'.`,
+began, plus a row for each day HEY has written out on its own (its own id, the series in
+parent_id). For the events of a day or a week as HEY draws them — occurrences of a repeating
+series expanded into the days they fall on — read 'hey event day' or 'hey event week'.
+
+Without --starts-on the window is the 30 days from today, today in your HEY account's time
+zone, whatever this machine's is. An account with no time zone set reads this machine's
+today, and says so on stderr.`,
+		Annotations: map[string]string{
+			"agent_notes": "list carries no countdowns; day and week do. " + recordingWindowNotes,
+		},
 		Example: `  hey event list
   hey event list --starts-on 2026-01-01 --ends-on 2026-01-31
   hey event list --calendar 123 --limit 5 --json`,
@@ -77,6 +89,13 @@ series expanded into the days they fall on — read 'hey event day' or 'hey even
 func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 	if err := requireAuth(); err != nil {
 		return err
+	}
+
+	// The window starts at today, so today is the account's: in New York after 20:00 the
+	// machine's clock on a server, like HEY's own, is already on tomorrow.
+	var account accountZone
+	c.filter.today = func(ctx context.Context) (time.Time, error) {
+		return account.todayToRead(ctx, cmd.ErrOrStderr(), "name the start, for example --starts-on 2026-10-14")
 	}
 
 	ctx := cmd.Context()
@@ -126,7 +145,16 @@ func newEventsAddCommand() *eventsAddCommand {
 		Long: `Create an event.
 
 An event with no --start-time is an all-day event. A --start-time with no --end-time runs
-for an hour. Clock times are read in --time-zone, which defaults to this machine's zone.`,
+for an hour, unless --ends-on names a later day, when it ends on that day at the start's
+clock time plus an hour; a default end in the hour the clocks repeat is refused, so pass
+--end-time there. Clock times are read in your HEY account's time zone, the one HEY's web
+app uses, and so is today when --starts-on is left out, for an all-day event too;
+--time-zone names another. If one of those needs the account's zone and the account has
+none, the command refuses and asks for --time-zone; an all-day event on a named date needs
+no zone.
+
+Without --calendar the event goes where HEY puts one by default: the first ordinary
+calendar you own that is not a subscription — never Maybe or the personal calendar.`,
 		Example: `  hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
   hey event add "Sarah's birthday" --starts-on 2026-09-02
   hey event add "Standup" --start-time 09:15 --repeat every_weekday --calendar 123
@@ -165,7 +193,8 @@ func (c *eventsAddCommand) run(cmd *cobra.Command, args []string) error {
 	if err = c.fields.validateExplicitScheduleFlags(cmd); err != nil {
 		return err
 	}
-	schedule, err := c.fields.newSchedule()
+	ctx := cmd.Context()
+	schedule, err := c.fields.newSchedule(ctx)
 	if err != nil {
 		return err
 	}
@@ -174,7 +203,6 @@ func (c *eventsAddCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	ctx := cmd.Context()
 	calendarID, err := c.fields.resolveCalendar(ctx)
 	if err != nil {
 		return err
@@ -234,16 +262,36 @@ func newEventsEditCommand() *eventsEditCommand {
 	eventsEditCommand.cmd = &cobra.Command{
 		Use:   "edit <id> [date]",
 		Short: "Change an event",
-		Long: `Change an event. Only the flags you name change; the rest of the event is read and
-sent back, because HEY clears whatever a write leaves out.
+		Long: `Change an event. Only the flags you name change; the rest of the event is read and sent
+back, because HEY clears whatever a write leaves out.
 
 Two things cannot survive that round trip, and both are HEY's doing rather than this
 command's. Notes are served back as plain text, so saving flattens their formatting. A
-countdown is not served at all, so an edit removes one unless --countdown names it again.
+countdown is a recording of its own that this edit does not read back, so an edit removes
+one unless --countdown names it again.
 
-The event is found by reading the calendars it might be on, which is one request each and
+Clock times you type are read in the event's own time zone. An event saved without one
+stays without one: typed times are read in your HEY account's zone and sent as the moment
+they name, and the times you do not type keep theirs. --time-zone gives the event that
+zone, keeping the moment of every time you do not type. An all-day event given a time takes
+the account's zone, starts at 09:00 unless --start-time says otherwise, and runs the
+default hour. If a zone is needed and the account has none, the edit refuses and asks for
+--time-zone. HEY is sent a clock time and a zone, and a clock time in the hour the clocks
+repeat as they go back names two moments, of which HEY takes the daylight-saving one, or
+the later where neither is; a time you keep at the other, or with seconds, cannot be sent,
+so the edit refuses until you retype it. All of this holds for an --occurrence edit too.
+
+The event is found by reading every calendar it might be on, which is one request each and
 covers the pages HEY answers with. Give the day it starts as [date] to look on that day
-alone, or --calendar to look on one calendar.
+alone. Without [date] it is looked for within a year either side of today, and an event not
+found there is refused as not_found rather than written blind.
+
+--calendar moves the event to that calendar, which has to be one you own or share: not your
+personal calendar and not a subscription, for which HEY answers not_found. An event you
+cannot edit, such as an invitation, moves only onto a calendar nobody else is on, and an
+event on a subscription does not move at all; HEY keeps it where it is otherwise, and the
+edit fails with forbidden rather than reporting it updated. HEY still saves the circle,
+countdown and reminders of an event it does not move.
 
 An id alone changes the whole event, a repeating series included. One day of a series is
 changed with --occurrence, which takes the occurrence_id 'hey event day' and 'hey event
@@ -251,41 +299,57 @@ week' serve (<series id>_<YYYY-MM-DD>, and the series must be the id given), and
 --apply-to, which is required with it: 'current' changes that day alone and 'future'
 changes it and every day after it, the two choices HEY's own form offers. The day is read
 on its own date, so [date] can be left out or must name it. A change to --repeat,
---repeat-until or --repeat-times cannot apply to one day, so 'current' refuses those
-flags. 'future' starts a new series and requires --repeat to state its complete schedule:
-combine a preset with --repeat-times or --repeat-until for a finite series, use a preset
-alone for one that continues forever, or use --repeat custom to copy an existing opaque
-schedule. A custom count-based rule can restart its full count on the replacement. HEY
-accepts the replacement's submitted start even when it overlaps an earlier occurrence, so
-choose its date and time deliberately. A virtual day of an opaque custom schedule takes its exact time from HEY's Day view and is
-refused if that view no longer serves it. A realized day of a custom schedule cannot be split
-safely, because HEY does not serve the rule's occurrence boundary; use a virtual occurrence,
-edit that day alone, or edit the whole series. A realized preset occurrence moved
-away from its series time must be moved back with a current-only edit before it can be split
-safely. The days from this one on
-get a new series id.
+--repeat-until or --repeat-times cannot apply to one day, so 'current' refuses those flags.
+Those flags with 'current', --apply-to without --occurrence, an --apply-to other than
+current or future, and an occurrence_id that is malformed or names another series are usage
+errors, refused before anything is read. 'future' starts a new series and requires --repeat
+to state its complete schedule: combine a preset with --repeat-times or --repeat-until for
+a finite series, both naming what remains from the edited day; use a preset alone for one
+that continues forever; or use --repeat custom, which takes neither limit, to copy an
+existing opaque schedule. A custom count-based rule can restart its full count on the
+replacement. HEY accepts the replacement's submitted start even when it overlaps an earlier
+occurrence, so choose its date and time deliberately; its last day cannot precede its first
+day, and a --repeat-until before it is a usage error. A virtual day of an opaque custom
+schedule takes its exact time from HEY's Day view and is refused if that view no longer
+serves it. A realized day of a custom schedule cannot be split safely, because HEY does not
+serve the rule's occurrence boundary; use a virtual occurrence, edit that day alone, or
+edit the whole series. A realized preset occurrence moved away from its series time must be
+moved back with a current-only edit before it can be split safely. HEY cancels the
+written-out days from the moved day's actual start but truncates the series at its
+occurrence date, so a split from a moved day can take an earlier edited day with it or
+leave a later one behind. The days from this one on get a new series id, but the answer is
+still the day edited, so read 'hey event day' or 'hey event week' again before editing the
+new series further.
 
-An occurrence edit keeps more than a whole-event edit does, and refuses what it cannot
-keep. A countdown owned by the day is read back and sent again; an inherited series
-countdown is left inherited on a current-only edit and copied to the replacement series on
-a future edit. It survives unless --countdown 0 removes it — and one day of a series with
-a countdown cannot lose it alone, since HEY shows a day the series' countdown whenever it
-has none of its own, so that is refused. Notes are still only served as plain text, so an
-occurrence edit that would send
-formatted notes back as text refuses unless --allow-plain-notes accepts that or --notes
-replaces them. A 'future' edit records the new series from the series' own guest list,
-so a day that had come to have guests of its own is refused until --invite names the new
-series' list. The day is read over every calendar, so here --calendar is only where the
-day is moved to; a day already moved elsewhere stays there. A virtual occurrence lists
-its series in id and parent_id; a day HEY has written out on its own keeps its own event id
-in id and recording_id, with the series in parent_id. That own id edits and deletes the
-day alone. One thing no edit can keep: an attached email you cannot read is not served, so
-it is detached by any edit, whole event
-or one day.`,
+An occurrence edit keeps everything it is not told to change — that day's own schedule,
+zones, notes, location, link, attached email, reminders, circle and countdown, taken from
+the day itself where HEY has already written it out — and refuses what it cannot keep. A
+countdown owned by the day is read back and sent again; an inherited series countdown is
+left inherited on a current-only edit and copied to the replacement series on a future
+edit. It survives unless --countdown 0 removes it — and one day of a series with a
+countdown cannot lose it alone, since HEY shows a day the series' countdown whenever it has
+none of its own, so that is refused. Notes are still only served as plain text, so an
+occurrence edit that would send formatted notes back as text refuses unless
+--allow-plain-notes accepts that or --notes replaces them. A 'future' edit builds the new
+series from the series' own guest list and sends invitations, so a day that had come to
+have guests of its own is refused until --invite names the new series' list. The day is
+read over every calendar, so here --calendar is only where the day is moved to; a day
+already moved elsewhere stays there. A virtual occurrence lists its series in id and
+parent_id; a day HEY has written out on its own keeps its own event id in id and
+recording_id, with the series in parent_id. That own id edits the day alone; it is deleted
+with 'hey event delete <series id> --occurrence <occurrence_id> --apply-to current'. One
+thing no edit can keep: an attached email you cannot read is not served, so it is detached
+by any edit, whole event or one day.
+
+HEY answers not_found alike for a date that is not a day of the series and for a series you
+cannot edit. An occurrence edit answers with the summary "Occurrence updated" ('current')
+or "Occurrence and the following updated" ('future'), and data holding the recording HEY
+answered.`,
 		Example: `  hey event edit 4821 --title "Design review (moved)"
   hey event edit 4821 --starts-on 2026-09-04 --start-time 15:00
   hey event edit 4821 2026-09-02 --location "Studio, 3rd floor"
   hey event edit 4821 --circle=false
+  hey event edit 4821 --calendar 9102
   hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to current --start-time 15:00 --json
   hey event edit 4821 --occurrence 4821_2026-09-15 --apply-to future --repeat every_week --repeat-times 8 --location "Studio, 3rd floor" --allow-plain-notes`,
 		RunE: eventsEditCommand.run,
@@ -294,6 +358,9 @@ or one day.`,
 
 	eventsEditCommand.fields.registerFlags(eventsEditCommand.cmd)
 	flags := eventsEditCommand.cmd.Flags()
+	// An edit only falls back to the account's zone for an event that has none of its own.
+	flags.Lookup("time-zone").Usage = "IANA zone the times are written in, such as America/New_York (defaults to the event's own zone, else your HEY account's)"
+	flags.Lookup("calendar").Usage = "Calendar ID to move the event to"
 	flags.StringVar(&eventsEditCommand.occurrence, "occurrence", "", "One day of a repeating event, by the occurrence_id 'hey event day' serves (<series id>_<YYYY-MM-DD>)")
 	flags.StringVar(&eventsEditCommand.applyTo, "apply-to", "", "How much of the series an --occurrence edit reaches: current (that day alone) or future (that day and every one after it)")
 	flags.BoolVar(&eventsEditCommand.allowPlainNotes, "allow-plain-notes", false, "Let an --occurrence edit send notes it is not changing back as plain text, losing their formatting")
@@ -352,7 +419,7 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	schedule, err := c.fields.scheduleFrom(cmd, event)
+	schedule, err := c.fields.scheduleFrom(ctx, cmd, event)
 	if err != nil {
 		return err
 	}
@@ -399,7 +466,12 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 
 	result, err := sdk.CalendarEvents().Update(ctx, id, changes)
 	if err != nil {
-		return apierr.FromSDK(err)
+		return eventWriteError(err, id, changes.CalendarID)
+	}
+	if changes.CalendarID != nil {
+		if err = checkMoved(ctx, event, schedule.startsAt, *changes.CalendarID, result); err != nil {
+			return err
+		}
 	}
 
 	return writeMutationLine(cmd,
@@ -408,28 +480,128 @@ func (c *eventsEditCommand) run(cmd *cobra.Command, args []string) error {
 		result)
 }
 
+// eventWriteError says what HEY's refusal of a move can mean. HEY files only on a calendar you
+// own or share, and answers 404 for any other — the personal calendar and a subscription among
+// them — as it does when an event is added there. The same 404 answers an event deleted since
+// it was read, and nothing in it says which, so the refusal names both.
+func eventWriteError(err error, id int64, calendarID *int64) error {
+	if calendarID != nil && hey.AsError(err).HTTPStatus == http.StatusNotFound {
+		return &apierr.Error{
+			Code:       apierr.CodeNotFound,
+			Message:    fmt.Sprintf("HEY answered not found moving event %d to calendar %d", id, *calendarID),
+			Hint:       "HEY files an event only on a calendar you own or share, not your personal calendar or a subscription, and answers not found for any other or for an event deleted since it was read; hey calendar list  lists them",
+			HTTPStatus: http.StatusNotFound,
+			Cause:      err,
+		}
+	}
+	return apierr.FromSDK(err)
+}
+
+// checkMoved says so when HEY answers a move by leaving the event where it was. HEY does not
+// refuse a calendar it will not move an event to: an event you may not edit, such as an
+// invitation, moves only onto a calendar nobody else is on and never off a subscription, and
+// otherwise HEY drops the calendar from the update and answers with the event unmoved.
+// Reporting that as updated would be the one wrong answer, so the event HEY answers with is
+// read for its calendar. The rest of the update is not dropped with it — the circle, the
+// countdown and the reminders are an invitee's to set — so the refusal says so.
+//
+// HEY's JSON answer always names the calendar. An older server redirects instead, and the
+// SDK then hands back only the id, so the event is read again, around the day it started on
+// and the day it was asked to start on: HEY may have kept either.
+func checkMoved(ctx context.Context, was generated.Recording, startsOn string, calendarID int64, result *generated.Recording) error {
+	onCalendar := int64(0)
+	if result != nil {
+		onCalendar = result.Calendar.Id
+	}
+	if onCalendar == 0 {
+		event, err := readMovedEvent(ctx, was, startsOn)
+		if err != nil {
+			return movedReadBackError(was.Id, calendarID, err)
+		}
+		onCalendar = event.Calendar.Id
+	}
+	if onCalendar == calendarID {
+		return nil
+	}
+	return &apierr.Error{
+		Code:    apierr.CodeForbidden,
+		Message: fmt.Sprintf("HEY did not move event %d to calendar %d; it is still on calendar %d", was.Id, calendarID, onCalendar),
+		Hint:    "an event you cannot edit, such as an invitation, moves only onto a calendar nobody else is on and never off a subscription; HEY may still have saved the circle, countdown and reminders this edit sent",
+	}
+}
+
+// readMovedEvent reads an event back after a write HEY answered with its id alone. The days
+// are UTC days, and an event keeps its own zone's date, so each end is read a day wide either
+// way: a morning in Tokyo or an evening in Los Angeles sits on the neighbouring UTC day.
+func readMovedEvent(ctx context.Context, was generated.Recording, startsOn string) (generated.Recording, error) {
+	from := calendarDay(was.StartsAt.UTC())
+	to := from
+	if day, err := time.Parse(dateLayout, startsOn); err == nil {
+		if day.Before(from) {
+			from = day
+		}
+		if day.After(to) {
+			to = day
+		}
+	}
+	filter := recordingFilter{
+		startsOn:         from.AddDate(0, 0, -1).Format(dateLayout),
+		endsOn:           to.AddDate(0, 0, 2).Format(dateLayout),
+		defaultWindow:    eventSearchYear,
+		defaultCalendars: allCalendarIDs,
+	}
+	window, err := filter.resolve(ctx)
+	if err != nil {
+		return generated.Recording{}, err
+	}
+	return findEventIn(ctx, window, was.Id)
+}
+
+// movedReadBackError is a read-back that failed after the write went through. It keeps the
+// failure's own code, so an expired sign-in or a rate limit still exits as one, and says the
+// write was made so nobody runs it again to find out.
+func movedReadBackError(id, calendarID int64, err error) error {
+	var readErr *apierr.Error
+	if !errors.As(err, &readErr) {
+		readErr = &apierr.Error{Code: apierr.CodeAPI, Message: err.Error()}
+	}
+	wrapped := *readErr
+	wrapped.Message = fmt.Sprintf("HEY saved event %d without saying which calendar it is on, and reading it back failed: %s", id, readErr.Message)
+	wrapped.Hint = fmt.Sprintf("hey event list --calendar %d  shows whether it moved", calendarID)
+	wrapped.Cause = err
+	return &wrapped
+}
+
 // findEvent reads the event so the update can send back what it is not changing. HEY serves
-// no event on its own, so it is looked for among the recordings of the calendars it could be
-// on — every one of them, or the one --calendar names, over the day given or a window wide
-// enough to cover an event somebody is editing.
+// no event on its own, so it is looked for among the recordings of every calendar it could be
+// on, over the day given or a window wide enough to cover an event somebody is editing.
+// --calendar is not one of them: it is where the event is moving to, which is the one
+// calendar it is not on yet.
 //
 // The day is read as the window [day, day+1): HEY's recordings window is a pair of
 // instants, and the degenerate same-day window — midnight to the same midnight — can
 // never contain a timed event, which is how editing an event by its own day used to
 // answer not-found. Reading a day too many is harmless here: the event is matched by id.
 func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) (generated.Recording, error) {
-	window, err := c.searchWindow(ctx, on)
+	window, err := eventSearchWindow(ctx, on)
 	if err != nil {
 		return generated.Recording{}, err
 	}
+	return findEventIn(ctx, window, id)
+}
 
-	events, err := window.read(ctx, recordingTypeEvent)
-	if err != nil {
-		return generated.Recording{}, err
-	}
-	for _, event := range events {
-		if event.Id == id {
-			return event, nil
+// findEventIn looks for the event calendar by calendar and stops at the one it is on, so a
+// calendar listed after it that cannot be read does not stand in the way of an edit.
+func findEventIn(ctx context.Context, window recordingWindow, id int64) (generated.Recording, error) {
+	for _, calendarID := range window.calendars {
+		events, err := window.readCalendar(ctx, calendarID, []string{recordingTypeEvent})
+		if err != nil {
+			return generated.Recording{}, err
+		}
+		for _, event := range events {
+			if event.Id == id {
+				return event, nil
+			}
 		}
 	}
 
@@ -437,28 +609,36 @@ func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) 
 		fmt.Sprintf("hey event edit %d <YYYY-MM-DD>  reads the day it starts on", id))
 }
 
-// searchWindow is where an edit looks for its event: the day given, read as [day, day+1),
-// or a window wide enough to cover an event somebody is editing, over the calendar
-// --calendar names or every one of them.
-func (c *eventsEditCommand) searchWindow(ctx context.Context, on string) (recordingWindow, error) {
+// eventSearchWindow is where an event given by id is looked for: the day given, read as
+// [day, day+1), or a year either side of today, over every calendar.
+func eventSearchWindow(ctx context.Context, on string) (recordingWindow, error) {
 	endsOn := on
 	if day, err := time.Parse(dateLayout, on); err == nil {
 		endsOn = day.AddDate(0, 0, 1).Format(dateLayout)
 	}
 	filter := recordingFilter{
-		calendar:         c.fields.calendar,
 		startsOn:         on,
 		endsOn:           endsOn,
-		defaultWindow:    func(now time.Time) (time.Time, time.Time) { return now.AddDate(-1, 0, 0), now.AddDate(1, 0, 0) },
+		defaultWindow:    eventSearchYear,
 		defaultCalendars: allCalendarIDs,
 	}
 	return filter.resolve(ctx)
+}
+
+// eventSearchYear is a year either side of today, wide enough to cover an event somebody is
+// editing without being told the day it is on.
+func eventSearchYear(today time.Time) (time.Time, time.Time) {
+	return today.AddDate(-1, 0, 0), today.AddDate(1, 0, 0)
 }
 
 // delete
 
 type eventsDeleteCommand struct {
 	cmd *cobra.Command
+	// occurrence and applyTo name one day of a repeating event and how much of the series
+	// goes with it, as they do for an edit.
+	occurrence string
+	applyTo    string
 }
 
 func newEventsDeleteCommand() *eventsDeleteCommand {
@@ -466,13 +646,40 @@ func newEventsDeleteCommand() *eventsDeleteCommand {
 	eventsDeleteCommand.cmd = &cobra.Command{
 		Use:   "delete <id>",
 		Short: "Delete an event",
+		Long: `Delete an event. An id alone deletes the whole event, a repeating series included, and an
+event on a shared calendar is deleted for everybody on it.
+
+One day of a series is deleted with --occurrence, which takes the occurrence_id 'hey event
+day' and 'hey event week' serve (<series id>_<YYYY-MM-DD>, and the series must be the id
+given), and --apply-to, which is required with it: 'current' deletes that day alone and HEY
+keeps the rest of the series by writing the day into its exceptions; 'future' deletes it
+and every day after it, stopping the series the day before — from the series' first day,
+that is the whole series. A day HEY has written out on its own and a day it has not are
+deleted the same way.
+
+A day HEY has written out on its own — after an edit of that day alone, or a reminder — has
+an id of its own, but that id is refused here: deleting it would remove only HEY's copy of
+the day, and HEY would draw the day again from the series. The refusal is a usage error
+naming the command that deletes the day. To tell, the event is read first, over every
+calendar and a year either side of today; an id that read does not find is deleted as
+given.
+
+A 'future' delete from a written-out day is refused where its boundary cannot be trusted,
+as a 'future' edit is: a day moved off its series time, or any written-out day of an opaque
+custom schedule. Delete that day alone first, then from the next day.`,
 		Annotations: map[string]string{
-			"agent_notes": "Deletes the whole event, recurring series included. An event on a shared calendar is deleted for everybody on it.",
+			"agent_notes": "delete <id> deletes the whole event, recurring series included, for everybody on a shared calendar. One day of a series is delete <series id> --occurrence <occurrence_id from day/week> --apply-to current|future: current deletes that day alone; future deletes it and every day after, and from the series' first day that is the whole series. A day HEY wrote out on its own (own id in id/recording_id, series in parent_id) is refused by its own id, because deleting that id lets HEY draw the day again from the series; use the occurrence form. future is refused from a written-out day moved off its series time or on an opaque custom schedule.",
 		},
-		Example: `  hey event delete 4821`,
-		RunE:    eventsDeleteCommand.run,
-		Args:    usageExactOneArg(),
+		Example: `  hey event delete 4821
+  hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to current
+  hey event delete 4821 --occurrence 4821_2026-09-15 --apply-to future`,
+		RunE: eventsDeleteCommand.run,
+		Args: usageExactOneArg(),
 	}
+
+	flags := eventsDeleteCommand.cmd.Flags()
+	flags.StringVar(&eventsDeleteCommand.occurrence, "occurrence", "", "One day of a repeating event, by the occurrence_id 'hey event day' serves (<series id>_<YYYY-MM-DD>)")
+	flags.StringVar(&eventsDeleteCommand.applyTo, "apply-to", "", "How much of the series an --occurrence delete reaches: current (that day alone) or future (that day and every one after it)")
 
 	return eventsDeleteCommand
 }
@@ -487,12 +694,94 @@ func (c *eventsDeleteCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	occurrence, err := parseOccurrenceFlags(cmd, id, c.occurrence, c.applyTo)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
-	if err := sdk.CalendarEvents().Delete(ctx, id); err != nil {
+	if occurrence != nil {
+		return c.deleteOccurrence(ctx, cmd, *occurrence)
+	}
+
+	if err = refuseADayOfASeries(ctx, cmd, id); err != nil {
+		return err
+	}
+	if err = sdk.CalendarEvents().Delete(ctx, id); err != nil {
 		return apierr.FromSDK(err)
 	}
 
 	return writeMutation(cmd, "Event deleted", nil)
+}
+
+// deleteOccurrence deletes one day of a repeating event, or that day and every one after it,
+// through the occurrence route: that is the one that writes a day into the series'
+// exceptions, so the day stays gone. A future delete reads the day first, for the boundary
+// check a future edit makes; a current one has nothing to check that HEY does not.
+func (c *eventsDeleteCommand) deleteOccurrence(ctx context.Context, cmd *cobra.Command, write occurrenceWrite) error {
+	if write.scope == hey.OccurrenceScopeThisAndFollowing {
+		window, err := occurrenceDayWindow(ctx, write.occurrence.Date)
+		if err != nil {
+			return err
+		}
+		rows, err := window.read(ctx, recordingTypeEvent)
+		if err != nil {
+			return err
+		}
+		day, err := locateOccurrence(cmd, rows, write.occurrence, write.scope)
+		if err != nil {
+			return err
+		}
+		if err = day.refuseAnUnsafeFutureBoundary("deleted",
+			"delete that day alone with --apply-to current, then delete from a later virtual occurrence with --apply-to future",
+			"delete that day alone with --apply-to current, then delete from the next day with --apply-to future"); err != nil {
+			return err
+		}
+	}
+
+	if err := sdk.CalendarEvents().DeleteOccurrence(ctx, write.occurrence, write.scope); err != nil {
+		return occurrenceWriteError(err, write.occurrence)
+	}
+
+	summary := "Occurrence deleted"
+	if write.scope == hey.OccurrenceScopeThisAndFollowing {
+		summary = "Occurrence and the following deleted"
+	}
+	return writeMutationLine(cmd,
+		fmt.Sprintf("%s: %s.", summary, write.occurrence),
+		summary,
+		map[string]string{"occurrence_id": write.occurrence.String(), "apply_to": applyToFlag(write.scope)})
+}
+
+// refuseADayOfASeries stops a delete by id from reaching a day HEY has written out on its
+// own. HEY deletes that recording and nothing else — the day is not written into the
+// series' exceptions — so the series draws the day again, in the series' own version, and
+// the delete would be reported done having undone an edit instead. There is no read of one
+// event, so it is looked for where an edit looks, and an id that is not found there is
+// deleted as it always was: whatever it is, it is not a day of a series within a year.
+func refuseADayOfASeries(ctx context.Context, cmd *cobra.Command, id int64) error {
+	window, err := eventSearchWindow(ctx, "")
+	if err != nil {
+		return err
+	}
+	events, err := window.read(ctx, recordingTypeEvent)
+	if err != nil {
+		return err
+	}
+	for _, event := range events {
+		if event.Id != id || event.OccurrenceId == "" {
+			continue
+		}
+		occurrence, err := hey.ParseOccurrenceID(event.OccurrenceId)
+		if err != nil {
+			return apierr.ErrUsageHint(
+				fmt.Sprintf("event %d is one day of a series, and deleting it by its own id would bring the series' version of that day back", id),
+				fmt.Sprintf("hey event day  lists the day's occurrence_id for %s --occurrence", cmd.CommandPath()))
+		}
+		return apierr.ErrUsageHint(
+			fmt.Sprintf("event %d is one day of series %d, and deleting it by its own id would bring the series' version of that day back", id, occurrence.EventID),
+			fmt.Sprintf("%s %d --occurrence %s --apply-to current", cmd.CommandPath(), occurrence.EventID, occurrence))
+	}
+	return nil
 }
 
 // --- Shared write flags ---
@@ -520,6 +809,8 @@ type eventFields struct {
 	countdown    int
 	countdownFor string
 	reminders    []string
+
+	account accountZone
 }
 
 func (f *eventFields) registerFlags(cmd *cobra.Command) {
@@ -531,7 +822,7 @@ func (f *eventFields) registerFlags(cmd *cobra.Command) {
 	flags.BoolVar(&f.allDay, "all-day", false, "Make it an all-day event")
 	flags.StringVar(&f.startTime, "start-time", "", "Start time (HH:MM)")
 	flags.StringVar(&f.endTime, "end-time", "", "End time (HH:MM, defaults to an hour after the start)")
-	flags.StringVar(&f.timeZone, "time-zone", "", "IANA zone the times are written in (defaults to this machine's)")
+	flags.StringVar(&f.timeZone, "time-zone", "", "IANA zone the times are written in, such as America/New_York (defaults to your HEY account's)")
 	flags.StringVar(&f.notes, "notes", "", "Event notes")
 	flags.StringVar(&f.location, "location", "", "Event location")
 	flags.StringVar(&f.link, "link", "", "Meeting or reference URL")
@@ -545,8 +836,13 @@ func (f *eventFields) registerFlags(cmd *cobra.Command) {
 	flags.StringArrayVar(&f.reminders, "remind", nil, "Notice before the event, e.g. 10m, 1h, 1d (repeatable)")
 }
 
-// resolveCalendar is which calendar a new event is filed on. Without --calendar it is the
-// first one HEY lists that the identity can file on, the way the TUI's form opens on one.
+// calendarKindNormal is the kind of an ordinary calendar. The other kind HEY has is "maybe",
+// the tentative calendar every account is given right after the personal one.
+const calendarKindNormal = "normal"
+
+// resolveCalendar is which calendar a new event is filed on. Without --calendar it is the one
+// HEY itself files on when no calendar is named — `owned_calendars.internal.normal.first!` —
+// which the TUI's form opens on as well.
 func (f *eventFields) resolveCalendar(ctx context.Context) (int64, error) {
 	if f.calendar != 0 {
 		return f.calendar, nil
@@ -557,14 +853,21 @@ func (f *eventFields) resolveCalendar(ctx context.Context) (int64, error) {
 		return 0, apierr.FromSDK(err)
 	}
 	for _, calendar := range unwrapCalendars(payload) {
-		// The personal calendar is in the list and answers 404 when filed on, and a
-		// calendar somebody else owns or a subscription cannot take an event either.
-		if calendar.Owned && !calendar.Personal && !calendar.External {
+		if isDefaultEventCalendar(calendar) {
 			return calendar.Id, nil
 		}
 	}
 	return 0, apierr.ErrUsageHint("no calendar to file the event on",
 		"hey calendar list  lists them; pass one with --calendar")
+}
+
+// isDefaultEventCalendar is whether HEY would file a new event here when none is named. HEY
+// lists calendars by when they were made, and every account has Maybe before the calendar
+// it files on, so the first owned calendar is the wrong one: it has to be a normal one too.
+// The personal calendar is in the list and answers 404 when filed on, and a subscription —
+// external, the other side of HEY's `internal` — cannot take an event either.
+func isDefaultEventCalendar(calendar generated.Calendar) bool {
+	return calendar.Owned && !calendar.Personal && !calendar.External && calendar.Kind == calendarKindNormal
 }
 
 // eventSchedule is when an event happens, in the shape HEY writes it: dates, clock times and
@@ -581,10 +884,43 @@ type eventSchedule struct {
 
 // newSchedule is when a new event happens. Saying nothing about the time of day makes it an
 // all-day event, which is what a bare `hey event add "Sarah's birthday"` means.
-func (f *eventFields) newSchedule() (eventSchedule, error) {
+//
+// A timed event's clock times are read in writeZone's zone, and so is today when no date is
+// named, all-day or not: at 02:00 UTC it is still the evening before in New York. An
+// all-day event on a named date has no zone and asks for none.
+func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
+	allDay := f.allDay || f.startTime == ""
+	var startTime, endTime, zone string
+	if !allDay {
+		var err error
+		if startTime, endTime, err = f.clockTimes(f.startTime, f.endTime); err != nil {
+			return eventSchedule{}, err
+		}
+	}
+	// A new event's ends share one zone, so dates in the wrong order are refused before the
+	// zone is read.
+	if f.startsOn != "" && f.endsOn != "" {
+		if err := checkEventDates(f.startsOn, f.endsOn); err != nil {
+			return eventSchedule{}, err
+		}
+	}
+	var today time.Time
+	var loc *time.Location
+	if !allDay || f.startsOn == "" {
+		var name string
+		var err error
+		if name, loc, err = f.writeZone(ctx); err != nil {
+			return eventSchedule{}, err
+		}
+		today = clockNow().In(loc)
+		if !allDay {
+			zone = name
+		}
+	}
+
 	startsOn := f.startsOn
 	if startsOn == "" {
-		startsOn = time.Now().Format(dateLayout)
+		startsOn = today.Format(dateLayout)
 	}
 	if _, err := parseDateArg("starts-on date", startsOn); err != nil {
 		return eventSchedule{}, err
@@ -594,24 +930,28 @@ func (f *eventFields) newSchedule() (eventSchedule, error) {
 	if endsOn == "" {
 		endsOn = startsOn
 	}
+	if !allDay && endTime == "" {
+		var err error
+		if endsOn, endTime, err = defaultEnd(startsOn, startTime, f.endsOn, loc); err != nil {
+			return eventSchedule{}, err
+		}
+	}
 	if err := checkEventDates(startsOn, endsOn); err != nil {
 		return eventSchedule{}, err
 	}
 
-	if f.allDay || f.startTime == "" {
+	if allDay {
 		return eventSchedule{startsAt: startsOn, endsAt: endsOn, allDay: true}, nil
 	}
-
-	startTime, endTime, err := f.clockTimes(f.startTime, f.endTime)
-	if err != nil {
-		return eventSchedule{}, err
-	}
-	zone := f.zoneOrLocal()
-	return eventSchedule{
+	schedule := eventSchedule{
 		startsAt: startsOn, endsAt: endsOn,
 		startTime: startTime, endTime: endTime,
 		zone: zone, endZone: zone,
-	}, nil
+	}
+	if err := endsAfterItStarts(schedule, clockZone{zone, loc}, clockZone{zone, loc}); err != nil {
+		return eventSchedule{}, err
+	}
+	return schedule, nil
 }
 
 // validateExplicitScheduleFlags checks every schedule value that needs no stored event.
@@ -628,88 +968,269 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 			return err
 		}
 	}
-	if flags.Changed("starts-on") && flags.Changed("ends-on") {
-		if err := checkEventDates(f.startsOn, f.endsOn); err != nil {
-			return err
-		}
-	}
 	if flags.Changed("start-time") {
-		if _, err := parseEventClock("start-time", f.startTime, "14:30"); err != nil {
+		if err := parseEventClock("start-time", f.startTime, "14:30"); err != nil {
 			return err
 		}
 	}
 	if flags.Changed("end-time") {
-		if _, err := parseEventClock("end-time", f.endTime, "15:30"); err != nil {
+		if err := parseEventClock("end-time", f.endTime, "15:30"); err != nil {
 			return err
 		}
 	}
 	if flags.Changed("time-zone") {
-		const hint = "an IANA time zone name, for example America/New_York"
 		if f.timeZone == "" {
-			return apierr.ErrUsageHint("--time-zone needs a time zone", hint)
+			return apierr.ErrUsageHint("--time-zone needs a time zone", "an IANA time zone name, for example America/New_York")
 		}
-		if f.timeZone == "Local" {
-			return apierr.ErrUsageHint("invalid time-zone: Local", hint)
-		}
-		if _, err := time.LoadLocation(f.timeZone); err != nil {
-			return apierr.ErrUsageHint(fmt.Sprintf("invalid time-zone: %s", f.timeZone), hint)
+		if _, err := timezone.Load(f.timeZone); err != nil {
+			return errInvalidTimeZone(f.timeZone)
 		}
 	}
 	return nil
 }
 
 // scheduleFrom is when an edited event happens: whatever the flags name, and the event's own
-// answer for everything they do not.
-func (f *eventFields) scheduleFrom(cmd *cobra.Command, event generated.Recording) (eventSchedule, error) {
-	startsOn, startTime := eventClock(event.StartsAt, event.StartsAtTimeZone)
-	endsOn, endTime := eventClock(event.EndsAt, event.EndsAtTimeZone)
+// answer for everything they do not, each end read and written in the zone editZones gives it.
+func (f *eventFields) scheduleFrom(ctx context.Context, cmd *cobra.Command, event generated.Recording) (eventSchedule, error) {
+	flags := cmd.Flags()
+	allDay := event.AllDay
+	if flags.Changed("all-day") {
+		allDay = f.allDay
+	}
+	// A time given to an all-day event is what turns it into a timed one — asking for 14:00
+	// and being answered with a day would read as the flag being ignored.
+	if flags.Changed("start-time") || flags.Changed("end-time") {
+		allDay = false
+	}
+
+	startZone, endZone, err := f.editZones(ctx, cmd, event, allDay)
+	if err != nil {
+		return eventSchedule{}, err
+	}
+	startsOn, startTime := eventClock(event.StartsAt, startZone.readIn(event))
+	endsOn, endTime := eventClock(event.EndsAt, endZone.readIn(event))
 
 	schedule := eventSchedule{
 		startsAt:  stringOr(cmd, "starts-on", f.startsOn, startsOn),
 		endsAt:    stringOr(cmd, "ends-on", f.endsOn, endsOn),
-		allDay:    event.AllDay,
+		allDay:    allDay,
 		startTime: startTime,
 		endTime:   endTime,
-		zone:      stringOr(cmd, "time-zone", f.timeZone, event.StartsAtTimeZone),
-		endZone:   stringOr(cmd, "time-zone", f.timeZone, event.EndsAtTimeZone),
-	}
-	if cmd.Flags().Changed("all-day") {
-		schedule.allDay = f.allDay
+		zone:      startZone.name,
+		endZone:   endZone.name,
 	}
 
-	if _, err := parseDateArg("starts-on date", schedule.startsAt); err != nil {
+	if _, err = parseDateArg("starts-on date", schedule.startsAt); err != nil {
 		return eventSchedule{}, err
 	}
-	if _, err := parseDateArg("ends-on date", schedule.endsAt); err != nil {
+	if _, err = parseDateArg("ends-on date", schedule.endsAt); err != nil {
 		return eventSchedule{}, err
-	}
-	if err := checkEventDates(schedule.startsAt, schedule.endsAt); err != nil {
-		return eventSchedule{}, err
-	}
-
-	// A time given to an all-day event is what turns it into a timed one — asking for 14:00
-	// and being answered with a day would read as the flag being ignored.
-	if cmd.Flags().Changed("start-time") || cmd.Flags().Changed("end-time") {
-		schedule.allDay = false
 	}
 	if schedule.allDay {
+		if err = checkEventDates(schedule.startsAt, schedule.endsAt); err != nil {
+			return eventSchedule{}, err
+		}
 		return eventSchedule{startsAt: schedule.startsAt, endsAt: schedule.endsAt, allDay: true}, nil
 	}
 
 	start := stringOr(cmd, "start-time", f.startTime, schedule.startTime)
 	end := stringOr(cmd, "end-time", f.endTime, schedule.endTime)
-	if start == "" {
-		start = defaultEventStartTime
+	// An all-day event has no clock times to keep. Made a timed one, it starts at HEY's
+	// default hour unless given a start, and runs the default hour unless given an end —
+	// from its start, not from the last of the days it used to cover, unless --ends-on names
+	// the day it ends.
+	if event.AllDay {
+		if !flags.Changed("start-time") {
+			start = defaultEventStartTime
+		}
+		if !flags.Changed("end-time") {
+			end = ""
+		}
 	}
-	// An all-day event given only a start has no end to keep, so it takes the default hour.
-	if event.AllDay && cmd.Flags().Changed("start-time") && !cmd.Flags().Changed("end-time") {
-		end = ""
-	}
-	var err error
 	if schedule.startTime, schedule.endTime, err = f.clockTimes(start, end); err != nil {
 		return eventSchedule{}, err
 	}
+	if schedule.endTime == "" {
+		given := ""
+		if flags.Changed("ends-on") {
+			given = schedule.endsAt
+		}
+		if schedule.endsAt, schedule.endTime, err = defaultEnd(schedule.startsAt, schedule.startTime, given, endZone.loc); err != nil {
+			return eventSchedule{}, err
+		}
+	}
+
+	startRetyped := flags.Changed("starts-on") || flags.Changed("start-time")
+	endRetyped := flags.Changed("ends-on") || flags.Changed("end-time")
+	if startZone.name == "" {
+		schedule.startsAt, schedule.startTime = zonelessEnd(event.StartsAt, schedule.startsAt, schedule.startTime, startZone.loc, startRetyped)
+	}
+	if endZone.name == "" {
+		schedule.endsAt, schedule.endTime = zonelessEnd(event.EndsAt, schedule.endsAt, schedule.endTime, endZone.loc, endRetyped)
+	}
+	if !event.AllDay && !startRetyped {
+		if err = keepsItsMoment("start", event.StartsAt, schedule.startsAt, schedule.startTime, startZone); err != nil {
+			return eventSchedule{}, err
+		}
+	}
+	if !event.AllDay && !endRetyped {
+		if err = keepsItsMoment("end", event.EndsAt, schedule.endsAt, schedule.endTime, endZone); err != nil {
+			return eventSchedule{}, err
+		}
+	}
+	if err = endsAfterItStarts(schedule, startZone, endZone); err != nil {
+		return eventSchedule{}, err
+	}
 	return schedule, nil
+}
+
+// endsAfterItStarts is HEY's own check on a timed event, that it does not end before it
+// starts, made on the instants rather than the dates: each end can have a zone of its own,
+// so a flight leaving Tokyo at 09:00 on the 15th lands in Los Angeles at 18:00 on the 14th.
+// An end as long as its start is allowed, as HEY allows it.
+func endsAfterItStarts(schedule eventSchedule, startZone, endZone clockZone) error {
+	start := startZone.instant(schedule.startsAt, schedule.startTime)
+	end := endZone.instant(schedule.endsAt, schedule.endTime)
+	if !end.Before(start) {
+		return nil
+	}
+	return apierr.ErrUsage(fmt.Sprintf("the event would end at %s %s %s, before it starts at %s %s %s",
+		schedule.endsAt, schedule.endTime, endZone.label(), schedule.startsAt, schedule.startTime, startZone.label()))
+}
+
+// keepsItsMoment refuses to send an end nobody retyped as a time HEY would place somewhere
+// else, which would move it on an edit that never touched it. Two things cannot be sent back
+// as they are. HEY is sent a clock time in whole minutes, so an end with seconds — an event
+// HEY imported — would lose them. And of the two moments a clock time names in the hour the
+// clocks go back, HEY takes one (see timezone.WallClock), so an end at the other — imported again,
+// or a zoneless event given a zone — would move by however far the clocks went back.
+func keepsItsMoment(end string, had time.Time, date, clock string, zone clockZone) error {
+	sent := zone.instant(date, clock)
+	if sent.Equal(had) {
+		return nil
+	}
+	hint := fmt.Sprintf("retype it with --%ss-on and --%s-time to place it yourself", end, end)
+	if !had.Equal(had.Truncate(time.Minute)) {
+		return apierr.ErrUsageHint(
+			fmt.Sprintf("the event's %s is at %s %s, and HEY is only sent whole minutes, so the edit would move it %s",
+				end, had.In(zone.loc).Format(time.DateTime+".999999999"), zone.label(), timezone.MovedBy(had, sent)),
+			hint)
+	}
+	return apierr.ErrUsageHint(
+		fmt.Sprintf("the event's %s, %s %s %s, falls in the hour the clocks repeat as they go back, and HEY would place that clock time at its other moment, so the edit would move it %s",
+			end, date, clock, zone.label(), timezone.MovedBy(had, sent)),
+		hint+", or choose a time outside that hour")
+}
+
+// clockZone is the zone one end of an edited event is read and written in. An end with no
+// name is zoneless: its clock times are read in loc and go back to HEY as UTC, zone and all.
+type clockZone struct {
+	name string
+	loc  *time.Location
+}
+
+// instant is when a date and clock time sent in this zone happen: placed as HEY places them
+// for a named zone, and as UTC for a zoneless end, which is sent that way.
+func (z clockZone) instant(date, clock string) time.Time {
+	loc := z.loc
+	if z.name == "" {
+		loc = nil
+	}
+	at, _ := timezone.Placed(date, clock, loc)
+	return at
+}
+
+// label is the zone as a refusal names it.
+func (z clockZone) label() string {
+	if z.name == "" {
+		return "UTC"
+	}
+	return terminal.SanitizeLine(z.name)
+}
+
+// readIn is where the event's own end is read from. An all-day event's end is the date it
+// names, whatever zone it is about to be written in.
+func (z clockZone) readIn(event generated.Recording) *time.Location {
+	if event.AllDay {
+		return time.UTC
+	}
+	return z.loc
+}
+
+// editZones is the zone each end of an edited event is read and written in.
+//
+// --time-zone names it outright, and the times nobody retyped are read in it, so they keep
+// their instant. Otherwise a zoned event keeps its own zones, and one this build cannot load
+// is refused rather than read as UTC. A zoneless event stays zoneless — HEY expands it, a
+// repeating series across a change of daylight saving included, as it was saved — so only
+// the times and dates somebody typed are read in the account's zone. An all-day event given
+// a time takes the account's zone, as a new event does. The account is read only when a
+// typed time or date needs it.
+func (f *eventFields) editZones(ctx context.Context, cmd *cobra.Command, event generated.Recording, allDay bool) (clockZone, clockZone, error) {
+	if f.timeZone != "" {
+		name, loc, err := f.writeZone(ctx)
+		return clockZone{name, loc}, clockZone{name, loc}, err
+	}
+
+	// An all-day event given both its dates takes nothing from the event's clock, so no zone
+	// is needed to read it.
+	flags := cmd.Flags()
+	if allDay && flags.Changed("starts-on") && flags.Changed("ends-on") {
+		return clockZone{loc: time.UTC}, clockZone{loc: time.UTC}, nil
+	}
+
+	if !event.AllDay && event.StartsAtTimeZone != "" {
+		start, err := storedZone(event.StartsAtTimeZone)
+		if err != nil {
+			return clockZone{}, clockZone{}, err
+		}
+		if event.EndsAtTimeZone == "" {
+			return start, start, nil
+		}
+		end, err := storedZone(event.EndsAtTimeZone)
+		return start, end, err
+	}
+
+	retyped := flags.Changed("starts-on") || flags.Changed("ends-on") || flags.Changed("start-time") || flags.Changed("end-time")
+	if allDay == event.AllDay && (allDay || !retyped) {
+		return clockZone{loc: time.UTC}, clockZone{loc: time.UTC}, nil
+	}
+	name, loc, err := f.writeZone(ctx)
+	if err != nil {
+		return clockZone{}, clockZone{}, err
+	}
+	if !event.AllDay {
+		name = ""
+	}
+	return clockZone{name, loc}, clockZone{name, loc}, nil
+}
+
+// storedZone loads a zone an event was saved in.
+func storedZone(name string) (clockZone, error) {
+	loc, err := timezone.Load(name)
+	if err != nil {
+		return clockZone{}, &apierr.Error{
+			Code:    apierr.CodeUsage,
+			Message: fmt.Sprintf("the event is in time zone %s, which this build of hey does not know, so its times cannot be read", terminal.SanitizeLine(name)),
+			Hint:    "pass --time-zone to write the event in a zone this build knows",
+			Cause:   err,
+		}
+	}
+	return clockZone{name, loc}, nil
+}
+
+// zonelessEnd is one end of a zoneless event as HEY takes it back. An end nobody retyped keeps
+// the instant it had; a retyped one is read in loc and sent as the UTC time it names.
+func zonelessEnd(had time.Time, date, clock string, loc *time.Location, retyped bool) (string, string) {
+	if !retyped {
+		return eventClock(had, time.UTC)
+	}
+	// Both halves were checked before they got here. The wall time is placed the way HEY
+	// places one: a time the clocks skip, like 02:30 on the morning they spring forward,
+	// moves on to the first one that exists rather than back an hour.
+	day, _ := time.Parse(dateLayout, date)
+	at, _ := time.Parse(clockLayout, clock)
+	return eventClock(timezone.WallClock(day, at, loc), time.UTC)
 }
 
 // defaultEventStartTime is when an all-day event starts once it is given a time but not one of
@@ -719,59 +1240,68 @@ const defaultEventStartTime = "09:00"
 // eventDuration is how long a timed event runs when only its start was named.
 const eventDuration = time.Hour
 
-// clockTimes reads the pair of HH:MM times, defaulting the end to an hour after the start.
+// clockTimes reads the pair of HH:MM times. An end left out comes back empty, for
+// defaultEnd to fill in once the start's date and zone are known.
 func (f *eventFields) clockTimes(startTime, endTime string) (string, string, error) {
-	start, err := parseEventClock("start-time", startTime, "14:30")
-	if err != nil {
+	if err := parseEventClock("start-time", startTime, "14:30"); err != nil {
 		return "", "", err
 	}
 	if endTime == "" {
-		return startTime, start.Add(eventDuration).Format(clockLayout), nil
+		return startTime, "", nil
 	}
-	if _, err := parseEventClock("end-time", endTime, "15:30"); err != nil {
+	if err := parseEventClock("end-time", endTime, "15:30"); err != nil {
 		return "", "", err
 	}
 	return startTime, endTime, nil
 }
 
-func parseEventClock(name, value, example string) (time.Time, error) {
-	clock, err := time.Parse(clockLayout, value)
-	if err != nil {
-		return time.Time{}, apierr.ErrUsageHint(fmt.Sprintf("invalid %s: %s", name, value),
+// defaultEnd is when an event given no end finishes: an hour after it starts. Given an
+// --ends-on, it is the start's clock time an hour on, on that date. Otherwise it is an hour
+// of elapsed time after the start as HEY places it, so it crosses midnight into the next day
+// and a change of the clocks the way a real hour does, and it has to come back to that
+// same moment when HEY places it in turn. In the hour the clocks go back, it can land on the
+// moment of a repeated clock time HEY would not take; that is refused.
+func defaultEnd(startsOn, startTime, endsOn string, loc *time.Location) (string, string, error) {
+	if endsOn != "" {
+		return endsOn, hourAfter(startTime), nil
+	}
+	day, _ := time.Parse(dateLayout, startsOn)
+	clock, _ := time.Parse(clockLayout, startTime)
+	end := timezone.WallClock(day, clock, loc).Add(eventDuration).In(loc)
+	endsOn, endTime := end.Format(dateLayout), end.Format(clockLayout)
+	if placed := timezone.WallClock(end, end, loc); !placed.Equal(end) {
+		return "", "", apierr.ErrUsageHint(
+			fmt.Sprintf("an hour after it starts, the event would end at %s %s %s, a clock time the clocks show twice as they go back, and HEY would place it %s",
+				endsOn, endTime, terminal.SanitizeLine(loc.String()), timezone.MovedBy(end, placed)),
+			"pass --end-time to say when it ends")
+	}
+	return endsOn, endTime, nil
+}
+
+// hourAfter is the clock time an hour on from a checked HH:MM time.
+func hourAfter(clock string) string {
+	at, _ := time.Parse(clockLayout, clock)
+	return at.Add(eventDuration).Format(clockLayout)
+}
+
+func parseEventClock(name, value, example string) error {
+	if _, err := time.Parse(clockLayout, value); err != nil {
+		return apierr.ErrUsageHint(fmt.Sprintf("invalid %s: %s", name, value),
 			fmt.Sprintf("times are HH:MM on a 24-hour clock, for example %s", example))
 	}
-	return clock, nil
+	return nil
 }
 
 // clockLayout is the time of day HEY's form takes, and the one a reader types.
 const clockLayout = "15:04"
 
-// zoneOrLocal is the zone the clock times are written in. Naming none would have HEY read
-// them as UTC, so 14:00 typed in Lisbon would be stored as 14:00 in Tokyo's morning.
-func (f *eventFields) zoneOrLocal() string {
-	if f.timeZone != "" {
-		return f.timeZone
-	}
-	// A machine with no TZ set has a location called "Local", which names no zone HEY could
-	// look up; UTC is what it already assumes.
-	if name := time.Now().Location().String(); name != "Local" && name != "UTC" {
-		return name
-	}
-	return ""
-}
-
-// eventClock takes an end of an event apart into the day and the clock time it was written
-// in. HEY stores a wall-clock time and the zone it belongs to, and serves the instant in UTC,
-// so reading one back for a resend means putting it into its own zone first.
-func eventClock(at time.Time, zone string) (string, string) {
+// eventClock takes an end of an event apart into the day and the clock time it reads as in
+// loc. HEY serves every instant in UTC, so an end is put into the zone it is written in first.
+func eventClock(at time.Time, loc *time.Location) (string, string) {
 	if at.IsZero() {
 		return "", ""
 	}
-	if zone != "" {
-		if loc, err := time.LoadLocation(zone); err == nil {
-			at = at.In(loc)
-		}
-	}
+	at = at.In(loc)
 	return at.Format(dateLayout), at.Format(clockLayout)
 }
 
