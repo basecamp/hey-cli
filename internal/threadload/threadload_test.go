@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,9 @@ type fakeSource struct {
 	oversized      map[int64]bool
 	slowFor        map[int64]time.Duration
 	subjects       map[int64]string
+	receivedVia    []generated.MessageReceivedVia
+	entryCreator   generated.Contact
+	messageCreator generated.Contact
 	failureMessage string
 	pageErr        map[int]error
 	slow           time.Duration
@@ -53,7 +57,7 @@ func (f *fakeSource) EntriesPage(ctx context.Context, _ int64, cursor string) (P
 	}
 	entries := make([]generated.Entry, 0, len(f.pages[page]))
 	for _, id := range f.pages[page] {
-		entries = append(entries, generated.Entry{Id: id, Kind: "message", Summary: fmt.Sprintf("summary %d", id)})
+		entries = append(entries, generated.Entry{Id: id, Kind: "message", Summary: fmt.Sprintf("summary %d", id), Creator: f.entryCreator})
 	}
 	next := ""
 	if page+1 < len(f.pages) {
@@ -90,9 +94,39 @@ func (f *fakeSource) Message(ctx context.Context, id int64) (*generated.Message,
 		return nil, fmt.Errorf("message %d: boom", id)
 	}
 	f.mu.Unlock()
-	return &generated.Message{Id: id, Content: f.bodies[id], Subject: f.subjects[id],
-		Addressed: generated.Addressed{Directly: []generated.Contact{{Name: "Rick Sanchez"}}}}, nil
+	return &generated.Message{Id: id, Content: f.bodies[id], Subject: f.subjects[id], Creator: f.messageCreator,
+		Addressed: generated.Addressed{Directly: []generated.Contact{fakeRecipient}}, ReceivedVia: f.receivedVia}, nil
 }
+
+// fakeRecipient is who every message the fake serves is addressed to, as HEY serves a
+// contact: with an avatar and a name tag a thread has no use for.
+var fakeRecipient = generated.Contact{
+	Id: 21, Name: "Morty Smith", EmailAddress: "morty.smith@example.org", ContactableType: "Person",
+	AvatarUrl: "https://example.org/avatars/morty-smith.png", Initials: "MS", NameTag: "<div>Morty from the lab</div>",
+}
+
+// fakeRecipientCost is what keeping fakeRecipient costs the budget: its address, not
+// its avatar or contact kind.
+var fakeRecipientCost = retainedContactOverhead +
+	int64(len(fakeRecipient.Name)+len(fakeRecipient.EmailAddress))
+
+// fakeMessageOverhead is what a message the fake serves costs beyond its body and
+// subject: the kept struct and its one recipient.
+var fakeMessageOverhead = retainedOverhead + fakeRecipientCost
+
+var fakeDeliveryContact = generated.Contact{
+	Id: 31, Name: "David", EmailAddress: "david@example.com", ContactableType: "Person",
+	AvatarUrl: "https://example.com/david.png", NameTag: "<div>David</div>",
+}
+
+var fakeReceivedVia = []generated.MessageReceivedVia{
+	{EmailAddress: "david+receipts@example.com", Contact: &fakeDeliveryContact},
+	{EmailAddress: "catch-all@example.org"},
+}
+
+var fakeReceivedViaCost = 2*retainedDeliveryOverhead + retainedContactOverhead +
+	int64(len("david+receipts@example.com")+len("catch-all@example.org")+
+		len(fakeDeliveryContact.Name)+len(fakeDeliveryContact.EmailAddress))
 
 func ids(entries []Entry) []int64 {
 	out := make([]int64, len(entries))
@@ -264,6 +298,27 @@ func TestLoadChargesTheIndexToTheBudget(t *testing.T) {
 	}
 }
 
+// Creator presentation fields are not part of the index shape a thread needs. They
+// are projected out before admission, so a large avatar cannot sit outside the charge.
+func TestLoadProjectsIndexCreatorsToTheirBudgetedIdentity(t *testing.T) {
+	creator := generated.Contact{
+		Id: 3, Name: "Rick Sanchez", EmailAddress: "rick@example.com",
+		AvatarUrl: strings.Repeat("a", 2<<20), NameTag: strings.Repeat("n", 2<<20),
+	}
+	source := &fakeSource{pages: [][]int64{{11}}, entryCreator: creator}
+	l := limits()
+	l.MaxRetainedBytes = retainedOverhead + int64(len("summary 11")+len("message")+len(creator.Name)+len(creator.EmailAddress))
+
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := generated.Contact{Id: creator.Id, Name: creator.Name, EmailAddress: creator.EmailAddress}
+	if thread.IndexTruncated || len(thread.Entries) != 1 || thread.Entries[0].Entry.Creator != want {
+		t.Errorf("thread = %+v, want one entry with creator %+v", thread, want)
+	}
+}
+
 // A failed read keeps a bounded reason, not the failure.
 func TestLoadBoundsTheReasonAFailedReadKeeps(t *testing.T) {
 	source := &fakeSource{pages: [][]int64{{11}}, bodies: map[int64]string{}, failing: map[int64]int{11: -1}, failureMessage: strings.Repeat("x", 5000)}
@@ -279,13 +334,14 @@ func TestLoadBoundsTheReasonAFailedReadKeeps(t *testing.T) {
 }
 
 // What a thread keeps of a message is charged to the budget whole — body, subject,
-// URL, creator — and what is not kept is not held: the recipient lists go.
+// URL, creator, recipients — and what is not kept is not held: a recipient is kept as
+// an address, without the avatar and name tag HEY serves on a contact.
 func TestLoadChargesWhatItKeeps(t *testing.T) {
 	source := &fakeSource{pages: [][]int64{{12, 11}}, bodies: map[int64]string{12: "x", 11: "y"}, subjects: map[int64]string{12: strings.Repeat("s", 200)}}
 	l := limits()
 	l.MaxRetainedBytes = 3*retainedOverhead + 100
 	l.Concurrency = 1
-	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, RetainRecipients: true, Limits: l})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,15 +349,176 @@ func TestLoadChargesWhatItKeeps(t *testing.T) {
 	if got := states(thread.Entries); got[StateOverLimit] != 2 {
 		t.Errorf("states = %v, want both over the limit once the subject is charged", got)
 	}
-	l.MaxRetainedBytes = 4 * (retainedOverhead + 300)
-	thread, err = Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	l.MaxRetainedBytes = 4 * (fakeMessageOverhead + 300)
+	thread, err = Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, RetainRecipients: true, Limits: l})
 	if err != nil {
 		t.Fatal(err)
 	}
+	wantRecipient := generated.Contact{Id: 21, Name: "Morty Smith", EmailAddress: "morty.smith@example.org"}
 	for _, entry := range thread.Entries {
-		if entry.Message == nil || len(entry.Message.Addressed.Directly) != 0 {
-			t.Errorf("entry %d kept %+v, want the body without the recipient lists", entry.Entry.Id, entry.Message)
+		if entry.Message == nil || len(entry.Message.Addressed.Directly) != 1 || entry.Message.Addressed.Directly[0] != wantRecipient {
+			t.Errorf("entry %d kept %+v, want the body and the recipient as an address", entry.Entry.Id, entry.Message)
 		}
+	}
+}
+
+// Message creators have the same identity-only contract as index creators. Discarded
+// contact presentation fields neither consume the budget nor survive in the thread.
+func TestLoadProjectsMessageCreatorsToTheirBudgetedIdentity(t *testing.T) {
+	creator := generated.Contact{
+		Id: 3, Name: "Rick Sanchez", EmailAddress: "rick@example.com",
+		AvatarUrl: strings.Repeat("a", 2<<20), NameTag: strings.Repeat("n", 2<<20),
+	}
+	source := &fakeSource{pages: [][]int64{{11}}, bodies: map[int64]string{11: "y"}, messageCreator: creator}
+	l := limits()
+	indexEntry := retainedOverhead + int64(len("summary 11")+len("message"))
+	l.MaxRetainedBytes = indexEntry + retainedOverhead + 1 + int64(len(creator.Name)+len(creator.EmailAddress))
+
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := generated.Contact{Id: creator.Id, Name: creator.Name, EmailAddress: creator.EmailAddress}
+	entry := thread.Entries[0]
+	if entry.State != StateHydrated || entry.Message == nil || entry.Message.Creator != want {
+		t.Errorf("entry = %+v, want hydrated with creator %+v", entry, want)
+	}
+}
+
+// Body-only callers do not retain or pay for recipient lists or delivery records, so
+// that metadata cannot make an otherwise valid body partial for the TUI or attachment
+// listing. An HTML caller that requests ordinary recipients still drops JSON-only
+// delivery records.
+func TestLoadDropsMessageMetadataUnlessRequested(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{11}}, bodies: map[int64]string{11: "y"}, receivedVia: fakeReceivedVia}
+	l := limits()
+	indexEntry := retainedOverhead + int64(len("summary 11")+len("message"))
+	l.MaxRetainedBytes = indexEntry + retainedOverhead + 1
+
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := thread.Entries[0]
+	if entry.State != StateHydrated || entry.Message == nil || len(entry.Message.Addressed.Directly) != 0 || len(entry.Message.ReceivedVia) != 0 {
+		t.Errorf("entry = %+v, want its body without message metadata", entry)
+	}
+
+	l.MaxRetainedBytes += fakeRecipientCost
+	thread, err = Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, RetainRecipients: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry = thread.Entries[0]
+	if entry.State != StateHydrated || entry.Message == nil || len(entry.Message.Addressed.Directly) != 1 || len(entry.Message.ReceivedVia) != 0 {
+		t.Errorf("entry = %+v, want recipients without delivery records", entry)
+	}
+}
+
+func TestRetainedKeepsAndChargesTheSendAsIdentity(t *testing.T) {
+	message := &generated.Message{Sender: generated.Contact{
+		Id: 88, Name: "Billing", EmailAddress: "billing@example.org",
+		AvatarUrl: strings.Repeat("a", 1024), NameTag: strings.Repeat("n", 1024),
+	}}
+	kept, size := retained(message, false, false)
+	want := generated.Contact{Id: 88, Name: "Billing", EmailAddress: "billing@example.org"}
+	if kept.Sender != want {
+		t.Errorf("sender = %+v, want only identity fields %+v", kept.Sender, want)
+	}
+	if size != retainedOverhead+int64(len(want.Name)+len(want.EmailAddress)) {
+		t.Errorf("retained size = %d, want the selected sender charged", size)
+	}
+}
+
+func TestRetainedKeepsEveryRecipientKindAndOnlyIdentityFields(t *testing.T) {
+	message := &generated.Message{Addressed: generated.Addressed{
+		Directly:    []generated.Contact{fakeRecipient},
+		Copied:      []generated.Contact{{Id: 22, Name: "Summer Smith", EmailAddress: "summer@example.com", AvatarUrl: "https://example.com/summer.png"}},
+		Blindcopied: []generated.Contact{{Id: 23, Name: "Beth Smith", EmailAddress: "beth@example.org", NameTag: "<div>Beth</div>"}},
+	}}
+
+	kept, _ := retained(message, true, false)
+	want := generated.Addressed{
+		Directly:    []generated.Contact{{Id: 21, Name: "Morty Smith", EmailAddress: "morty.smith@example.org"}},
+		Copied:      []generated.Contact{{Id: 22, Name: "Summer Smith", EmailAddress: "summer@example.com"}},
+		Blindcopied: []generated.Contact{{Id: 23, Name: "Beth Smith", EmailAddress: "beth@example.org"}},
+	}
+	if !reflect.DeepEqual(kept.Addressed, want) {
+		t.Errorf("addressed = %+v, want %+v", kept.Addressed, want)
+	}
+}
+
+func TestRetainedKeepsExactDeliveryAddressesAndOnlyContactIdentityFields(t *testing.T) {
+	message := &generated.Message{ReceivedVia: fakeReceivedVia}
+
+	kept, size := retained(message, false, true)
+	contact := generated.Contact{Id: 31, Name: "David", EmailAddress: "david@example.com"}
+	want := []generated.MessageReceivedVia{
+		{EmailAddress: "david+receipts@example.com", Contact: &contact},
+		{EmailAddress: "catch-all@example.org"},
+	}
+	if !reflect.DeepEqual(kept.ReceivedVia, want) {
+		t.Errorf("received via = %+v, want %+v", kept.ReceivedVia, want)
+	}
+	if kept.ReceivedVia[0].Contact == fakeReceivedVia[0].Contact {
+		t.Error("retained delivery contact aliases the SDK message contact")
+	}
+	if size != retainedOverhead+fakeReceivedViaCost {
+		t.Errorf("retained size = %d, want %d", size, retainedOverhead+fakeReceivedViaCost)
+	}
+}
+
+// A recipient list is charged to the budget like the body it comes with: a message
+// whose body fits but whose recipients do not is over the limit, not kept in part.
+func TestLoadChargesTheRecipientsItKeeps(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{11}}, bodies: map[int64]string{11: "y"}}
+	l := limits()
+	indexEntry := retainedOverhead + int64(len("summary 11")+len("message"))
+	l.MaxRetainedBytes = indexEntry + retainedOverhead + 1 + fakeRecipientCost - 1
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, RetainRecipients: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := states(thread.Entries); got[StateOverLimit] != 1 {
+		t.Errorf("states = %v, want the message over the limit once its recipient is charged", got)
+	}
+	l.MaxRetainedBytes++
+	thread, err = Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, RetainRecipients: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := states(thread.Entries); got[StateHydrated] != 1 {
+		t.Errorf("states = %v, want the message kept once its recipient fits", got)
+	}
+}
+
+// Delivery records are admitted atomically with the message. If even their last byte
+// does not fit, no body, address or partial delivery list survives.
+func TestLoadChargesTheReceivedViaItKeeps(t *testing.T) {
+	source := &fakeSource{pages: [][]int64{{11}}, bodies: map[int64]string{11: "y"}, receivedVia: fakeReceivedVia}
+	l := limits()
+	indexEntry := retainedOverhead + int64(len("summary 11")+len("message"))
+	l.MaxRetainedBytes = indexEntry + retainedOverhead + 1 + fakeReceivedViaCost - 1
+	thread, err := Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, RetainReceivedVia: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := thread.Entries[0]
+	if entry.State != StateOverLimit || entry.Message != nil {
+		t.Errorf("entry = %+v, want the whole message refused", entry)
+	}
+
+	l.MaxRetainedBytes++
+	thread, err = Load(context.Background(), source, Request{TopicID: 7, Hydrate: true, RetainReceivedVia: true, Limits: l})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry = thread.Entries[0]
+	if entry.State != StateHydrated || entry.Message == nil || !reflect.DeepEqual(entry.Message.ReceivedVia, []generated.MessageReceivedVia{
+		{EmailAddress: "david+receipts@example.com", Contact: &generated.Contact{Id: 31, Name: "David", EmailAddress: "david@example.com"}},
+		{EmailAddress: "catch-all@example.org"},
+	}) {
+		t.Errorf("entry = %+v, want the complete delivery list", entry)
 	}
 }
 

@@ -34,7 +34,7 @@ func newScreenerApproveCommand() *screenerApproveCommand {
 		Args: usageMinOneArg(),
 	}
 	approveCommand.cmd.Flags().StringVar(&approveCommand.box, "box", "", "Deliver their email to this box instead of the Imbox")
-	approveCommand.cmd.Flags().BoolVar(&approveCommand.seen, "seen", false, "Mark what they already sent as seen")
+	approveCommand.cmd.Flags().BoolVar(&approveCommand.seen, "seen", false, "Mark what they already sent as seen (reliable only for a sender with one waiting thread)")
 	return approveCommand
 }
 

@@ -19,7 +19,9 @@ const (
 	CodeAmbiguous  = "ambiguous"
 	CodeValidation = "validation"
 	CodeConflict   = "conflict"
-	CodeUnknown    = "unknown"
+	// CodeNotDelivered is a send HEY refused and kept as a draft instead.
+	CodeNotDelivered = "not_delivered"
+	CodeUnknown      = "unknown"
 )
 
 // Error is a typed error carrying a machine-readable code, human message,

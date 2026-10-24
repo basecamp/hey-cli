@@ -1,0 +1,165 @@
+email-the-screener/1	help:hey screener list	List the senders waiting to be screened
+email-the-screener/2	help:hey screener list	Use --count for the number alone, which is a much cheaper request.
+email-the-screener/3	help:hey screener approve	Let a sender through
+email-the-screener/4	help:hey screener approve	Deliver their email to this box instead of the Imbox
+email-the-screener/5	help:hey screener approve	Mark what they already sent as seen (reliable only for a sender with one waiting thread)
+email-the-screener/6	help:hey screener deny	Turn a sender away
+email-the-screener/7	help:hey screener deny	Also mark what they sent as spam (and train the filter, for a single ID)
+email-the-screener/8	help:hey screener history	List the senders already screened
+email-the-screener/9	help:hey screener clear	Trash everything waiting in the Screener
+email-the-screener/10	help:hey screener	The Screener is where first-time senders wait until they are approved or denied.
+email-the-screener/11	skill	**clearance ID** from `hey screener list` (which also gives the `topic_id` of the thread to read before deciding),
+email-the-screener/12	help:hey screener list	Use --count for the number alone, which is a much cheaper request.
+email-the-screener/13	help:hey screener	Approving delivers everything the sender has waiting; denying hides it.
+email-the-screener/14	help:hey screener	Both are reversible with the opposite command.
+email-the-screener/15	help:hey screener approve	--box and --seen apply to one sender at a time; several IDs go through the bulk endpoint, which takes neither.
+email-the-screener/16	help:hey screener approve	Mark what they already sent as seen (reliable only for a sender with one waiting thread)
+email-the-screener/17	help:hey screener deny	--spam also marks what they already sent as spam and, for a single ID, trains HEY's filter on it, which is harder to undo than denying
+email-the-screener/18	help:hey screener clear	Clear The Screener by moving everything waiting there to Trash (a shared thread loses your access instead). Nobody is approved or denied — each sender is screened again the next time they write.
+email-the-screener/19	help:hey screener clear	HEY queues the work, so `hey screener list` may still show the queue for a moment afterwards.
+email-the-screener/20	help:hey screener clear	Confirm with the user first.
+email-bulk-reply/1	help:hey bulk-reply preview	Preview threads and recipients without sending
+email-bulk-reply/2	help:hey bulk-reply send	Send one reply to multiple threads
+email-bulk-reply/3	help:hey bulk-reply undo	Recall a delayed bulk reply
+email-bulk-reply/4	help:hey bulk-reply preview	Box item IDs come from `hey box view` or `hey search` and must be positive and unique; anything else is a usage error.
+email-bulk-reply/4	help:hey bulk-reply send	Box item IDs must be positive and unique.
+email-bulk-reply/5	help:hey bulk-reply	Always run `hey bulk-reply preview <box-item-id>...` before sending.
+email-bulk-reply/5	help:hey bulk-reply preview	The result contains the latest replyable entry and exact To, CC, and BCC recipients for each thread.
+email-bulk-reply/6	help:hey bulk-reply send	The selection is resolved again: threads with no replyable entry and IDs that are not your box items are skipped
+email-bulk-reply/6	help:hey bulk-reply send	The answer carries entries_count (the number of replies sent), id (the delivery ID) and delayed; when HEY delayed it (Undo Send on) it adds undo_send_url and an undo breadcrumb, hey bulk-reply undo <id>.
+email-bulk-reply/7	help:hey bulk-reply undo	HEY's undo window is 15 seconds from the send.
+email-bulk-reply/8	help:hey bulk-reply preview	IDs that are not your box items, and threads with no replyable entry, are skipped and counted in meta.skipped_count.
+email-bulk-reply/8	help:hey bulk-reply send	and with none left it is a usage error and nothing is sent.
+email-seen-unseen/1	help:hey seen	Mark email threads as seen
+email-seen-unseen/2	help:hey seen	Accepts one or more box item IDs from hey box view output.
+email-seen-unseen/3	help:hey unseen	Mark email threads as unseen
+email-seen-unseen/4	help:hey unseen	Accepts one or more box item IDs from hey box view output.
+email-seen-unseen/5	help:hey seen	Accepts one or more box item IDs from hey box view output.
+email-seen-unseen/5	help:hey box view	use id with seen, unseen, and move
+email-moving-threads/1	help:hey move	Move email threads to another box
+email-moving-threads/2	help:hey move	Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail.
+email-moving-threads/3	help:hey move	To remove Reply Later, move the threads to Imbox
+email-moving-threads/4	help:hey move	Accepts box item IDs from hey box view output.
+email-moving-threads/4	help:hey box view	use id with seen, unseen, and move
+email-moving-threads/5	help:hey move	--to accepts a box name, kind, or ID.
+email-moving-threads/6	help:hey move	Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail.
+email-moving-threads/7	help:hey move	A thread that cannot be replied to is skipped silently when moving to Reply Later: no error, and the confirmation still counts it.
+email-moving-threads/8	help:hey move	Moving a Reply Later thread to Imbox removes Reply Later while preserving its seen state.
+email-moving-threads/8	help:hey move	To remove Reply Later, move the threads to Imbox; seen threads then appear in Previously Seen.
+email-moving-threads/9	help:hey move	Moving out of Reply Later does not return a thread to the box it was in before; it goes where --to says.
+email-moving-threads/10	help:hey move	Use hey bubble up for Bubble Up.
+email-moving-threads/11	help:hey move	A hey box view row with kind "bundle" is refused: moving one unbundles that sender's mail in the box they are delivered to. Change grouping with hey contact bundle|unbundle <contact-id>.
+email-bubble-up/1	help:hey bubble up	Bubble the threads up right away
+email-bubble-up/2	help:hey bubble up	Accepts one or more box item IDs from hey box view output.
+email-bubble-up/3	help:hey bubble up	Bubble the threads up on a date (YYYY-MM-DD)
+email-bubble-up/4	help:hey bubble up	--tomorrow, --weekend and --next-week land at 08:00 UTC tomorrow, the next Saturday, and next Monday.
+email-bubble-up/5	help:hey bubble up	--tomorrow, --weekend and --next-week land at 08:00 UTC tomorrow, the next Saturday, and next Monday.
+email-bubble-up/6	help:hey bubble up	--tomorrow, --weekend and --next-week land at 08:00 UTC tomorrow, the next Saturday, and next Monday.
+email-bubble-up/7	help:hey bubble list	List bubbled-up and scheduled email threads
+email-bubble-up/8	help:hey bubble pop	Cancels each thread's bubble-up; the thread moves to the Imbox and is marked seen.
+email-bubble-up/9	skill	- **Box item ID** (`id`): `hey seen`, `unseen`, `move`, `label add|remove|create`, `trash`, `spam`, `ignore`, `stop-ignoring`, `bubble up|pop`,
+email-bubble-up/10	help:hey bubble up	Exactly one of --now, --on, --tomorrow, --weekend and --next-week is required.
+email-bubble-up/11	help:hey bubble up	--on takes a YYYY-MM-DD date; HEY bubbles the threads up at 08:00 UTC that day, or at 18:00 UTC when the date is today in UTC
+email-bubble-up/12	help:hey bubble up	HEY schedules in UTC, whatever the local zone or the account's.
+email-bubble-up/13	help:hey bubble pop	Each moves to the Imbox, marked seen, rather than back to the box it came from.
+email-bubble-up/14	help:hey bubble list	and bubble_up_schedule.surprise_me true when HEY picked the time.
+email-bubble-up/15	help:hey bubble list	Use id with hey bubble pop; use topic_id with hey thread read.
+email-trash-and-spam/1	help:hey trash	Move email threads to Trash
+email-trash-and-spam/2	help:hey trash	Move one or more email threads to Trash.
+email-trash-and-spam/3	help:hey spam	Mark email threads as spam
+email-trash-and-spam/4	help:hey spam	Mark one or more email threads as spam.
+email-trash-and-spam/5	skill	- **Box item ID** (`id`): `hey seen`, `unseen`, `move`, `label add|remove|create`, `trash`, `spam`,
+email-trash-and-spam/6	help:hey trash	For a shared thread, HEY removes your access instead of deleting it for everyone.
+email-trash-and-spam/7	help:hey spam	HEY moves the threads to Spam and trains its filters.
+email-trash-and-spam/8	help:hey trash	A hey box view row with kind "bundle" is not a thread: trashing one answers success and changes nothing; trash the threads from hey bundle view <id> or hey contact threads <contact-id> instead.
+email-trash-and-spam/8	help:hey spam	A hey box view row with kind "bundle" is not a thread: marking one as spam answers success and changes nothing; act on the threads from hey bundle view <id> or hey contact threads <contact-id> instead.
+email-ignoring-threads/1	help:hey ignore	Ignore email threads
+email-ignoring-threads/2	help:hey ignore	Ignore one or more email threads
+email-ignoring-threads/3	help:hey stop-ignoring	Stop ignoring email threads
+email-ignoring-threads/4	help:hey stop-ignoring	Stop ignoring one or more email threads
+email-ignoring-threads/5	skill	- **Box item ID** (`id`): `hey seen`, `unseen`, `move`, `label add|remove|create`, `trash`, `spam`, `ignore`, `stop-ignoring`,
+email-ignoring-threads/6	help:hey ignore	Ignoring marks a thread seen and leaves it in its box
+email-ignoring-threads/6	help:hey ignore	Ignore one or more email threads so new replies do not bring them back to your attention.
+email-ignoring-threads/7	help:hey ignore	while it is ignored hey unseen has no effect
+email-ignoring-threads/8	help:hey ignore	hey stop-ignoring resumes notifications but leaves it seen.
+email-watching-for-changes/1	help:hey watch	Follow email threads and calendars as they change
+email-watching-for-changes/1	help:hey watch	Runs until interrupted.
+email-watching-for-changes/2	help:hey watch	Box whose changes to report, by name or ID (repeatable, defaults to all; every box is followed either way
+email-watching-for-changes/3	help:hey watch	Changes to report: added, updated, deleted, resync and new for mail
+email-watching-for-changes/4	help:hey watch	recording_added, recording_updated, recording_deleted, calendar_added, calendar_updated, calendar_deleted and calendar_resync for the calendars
+email-watching-for-changes/5	help:hey watch	For new mail only, add --events new.
+email-watching-for-changes/5	help:hey watch	Every added and updated line says whether the thread is new mail: unseen, not muted, and active since the watch last saw it — or since the watch began
+email-watching-for-changes/6	help:hey watch	Use --exit-on-first to block until one change lands and then exit
+email-watching-for-changes/7	help:hey watch	Exit after the first change
+email-watching-for-changes/8	help:hey watch	Give up waiting after this long (for example 30m)
+email-watching-for-changes/9	help:hey watch	Report changes since this time first (RFC 3339 or YYYY-MM-DD)
+email-watching-for-changes/10	help:hey watch	Shell command to run per change, one at a time, waiting for each
+email-watching-for-changes/11	help:hey watch	Long-running, and driven by a websocket rather than polling: use it instead of polling hey box view in a loop.
+email-watching-for-changes/12	help:hey watch	A mail line carries `change`, `at`, `box` (`id`, `kind`, `name`), `posting_id`, `thread_id`, `new` and `posting`
+email-watching-for-changes/13	help:hey watch	`thread_id` is the topic ID for hey thread read, absent for a bundle row that names no single thread.
+email-watching-for-changes/14	help:hey watch	Every added and updated line says whether the thread is new mail: unseen, not muted, and active since the watch last saw it — or since the watch began, for a thread it has not seen, so the backlog --since reads is not new. Reading a thread, muting or moving it is not new activity; a reply on a known thread is.
+email-watching-for-changes/15	help:hey watch	What changed before the watch began is not reported, unless --since reads back to it first — save a change from just before it: HEY's clock is read to the whole second, and taken back by however long reading it took, so a change up to a second before the watch asked, plus that request's time, may be reported. Its "at" says when it happened.
+email-watching-for-changes/16	help:hey watch	--events new selects the new ones, alone or alongside added, updated and deleted
+email-watching-for-changes/17	help:hey watch	a deleted line carries no `posting`, `thread_id` or `new`.
+email-watching-for-changes/18	help:hey watch	three lines describe the watch itself: "ready" once every box and calendar is caught up and the subscription is live (again after every reconnect's catch-up), "disconnected" when the connection drops, and "resync" when a box changed more than the feed can list one change at a time and the watch skipped ahead — re-read that box. One resync covers the whole catch-up and comes once the box is followed again
+email-watching-for-changes/19	help:hey watch	A resync is an event of its own: reported by default, scripts run for it and --exit-on-first counts it, and --events can leave it out, as --events new does.
+email-watching-for-changes/20	help:hey watch	ready and disconnected lines carry no `box`, are not written when --run-async or --run-sync is given, and never count for --exit-on-first.
+email-watching-for-changes/21	help:hey watch	The email-specific flags switch the calendars off: --box scopes the watch to mail, and an --events list naming only mail changes (added, updated, deleted, new, resync) does the same.
+email-watching-for-changes/22	help:hey watch	A recording_added, recording_updated or recording_deleted line carries `calendar` (`id`, `name`) instead of `box`, plus `recording_id` and `recording_type`, and `recording` on all but recording_deleted.
+email-watching-for-changes/23	help:hey watch	Passing both --run-async and --run-sync is a usage error.
+email-watching-for-changes/24	help:hey watch	--run-async spawns the command per change and moves on, so a slow one never holds up the watch and two can overlap; --run-sync waits for each and runs them in order.
+email-watching-for-changes/25	help:hey watch	Either command gets the line's JSON on stdin and its fields as `HEY_CHANGE`, `HEY_AT`, `HEY_BOX_ID`, `HEY_BOX_KIND`, `HEY_BOX_NAME`, `HEY_POSTING_ID` and `HEY_THREAD_ID` (`HEY_CALENDAR_ID`, `HEY_CALENDAR_NAME`, `HEY_RECORDING_ID` and `HEY_RECORDING_TYPE` for a calendar change), with `HEY_NEW=1` for new mail and `HEY_NEW=0` otherwise, and it takes over stdout
+drafts/1	help:hey compose	--draft saves instead of sending and answers the draft's id.
+drafts/2	help:hey compose	Leave the sender's HEY name tag off a new message
+drafts/3	help:hey reply	--draft saves the reply as a draft, carries the resolved recipients, and answers the draft ID
+drafts/4	help:hey draft list	List draft emails
+drafts/4	help:hey draft list	Fetch all results (override --limit)
+drafts/4	help:hey draft list	Continue from a next_page cursor
+drafts/5	help:hey draft show	Read a draft back
+drafts/5	help:hey draft show	The body is Markdown.
+drafts/6	help:hey draft edit	Each flag replaces its field and an omitted flag keeps what the draft has
+drafts/7	help:hey draft send	Deliver a draft through HEY's undo window.
+drafts/8	help:hey draft delete	Trash drafts
+drafts/9	skill	To let a person review before anything goes out, add `--draft` to `compose` or `reply`; the answer carries the draft ID for `hey draft show|edit|send|delete`. The person reviews and sends it from any HEY app, or you send it later with `hey draft send`.
+drafts/10	help:hey compose	--draft saves instead of sending — recipients become optional
+drafts/10	help:hey draft send	Sends the draft as it stands — recipients are required
+drafts/11	help:hey draft edit	Each flag replaces its field and an omitted flag keeps what the draft has
+drafts/12	help:hey draft edit	--to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it)
+drafts/13	help:hey draft edit	A scheduled delivery is preserved.
+drafts/14	help:hey draft send	Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour.
+drafts/15	help:hey draft list	A draft scheduled in a HEY app stays in this list until it goes out
+drafts/15	help:hey draft show	scheduled_delivery_at in UTC like every HEY timestamp
+drafts/15	help:hey draft edit	A draft scheduled between whole UTC hours, which HEY's API cannot express, is refused as a usage error (exit 1) rather than moved
+drafts/15	help:hey draft delete	Trashing a draft scheduled in a HEY app stops its delivery for as long as it stays in Trash.
+calendars/1	help:hey calendar list	JSON answers each calendar's id and kind, and its name except on the personal calendar, which has none; owned, personal and external appear only when true.
+calendars/2	skill	Everything a calendar holds is a recording, and each kind has its own command: `hey event`, `hey todo`, `hey journal`, `hey habit`, `hey timetrack`.
+calendars/3	help:hey event list	Calendar ID to read (defaults to every calendar)
+calendars/3	help:hey event list	Start date (YYYY-MM-DD)
+calendars/3	help:hey event list	End date (YYYY-MM-DD)
+calendars/3	help:hey event list	Fetch all results (override --limit)
+calendars/3	help:hey todo list	Calendar ID to read (defaults to the personal calendar)
+calendars/3	help:hey todo list	Start date (YYYY-MM-DD)
+calendars/3	help:hey todo list	End date (YYYY-MM-DD)
+calendars/3	help:hey todo list	Fetch all results (override --limit)
+calendars/3	help:hey journal list	Calendar ID to read (defaults to the personal calendar)
+calendars/3	help:hey journal list	Start date (YYYY-MM-DD)
+calendars/3	help:hey journal list	End date (YYYY-MM-DD)
+calendars/3	help:hey journal list	Fetch all results (override --limit)
+calendars/4	help:hey event list	Both dates are YYYY-MM-DD; an unreadable one, or an --ends-on before --starts-on, is a usage error rather than an empty result.
+calendars/4	help:hey todo list	Both dates are YYYY-MM-DD; an unreadable one, or an --ends-on before --starts-on, is a usage error rather than an empty result.
+calendars/4	help:hey journal list	Both dates are YYYY-MM-DD; an unreadable one, or an --ends-on before --starts-on, is a usage error rather than an empty result.
+calendars/5	help:hey event list	Naming only --starts-on moves the whole window, reading the default span from that day, rather than reading up to the default end.
+calendars/5	help:hey todo list	Naming only --starts-on moves the whole window, reading the default span from that day, rather than reading up to the default end.
+calendars/5	help:hey journal list	Naming only --starts-on moves the whole window, reading the default span from that day, rather than reading up to the default end.
+calendars/6	help:hey event day	today in your HEY account's time zone, whatever this machine's is
+calendars/6	help:hey event week	today in your HEY account's time zone, whatever this machine's is
+calendars/6	help:hey event list	today in your HEY account's time zone, whatever this machine's is
+calendars/6	help:hey habit list	today in your HEY account's time zone, whatever this machine's is
+calendars/6	help:hey habit complete	today in your HEY account's time zone, whatever this machine's is
+calendars/6	help:hey habit uncomplete	today in your HEY account's time zone, whatever this machine's is
+calendars/6	help:hey journal read	today in your HEY account's time zone, whatever this machine's is
+calendars/6	help:hey journal write	today in your HEY account's time zone, whatever this machine's is
+calendars/6	help:hey todo add	today in your HEY account's time zone, whatever this machine's is
+calendars/7	skill	name the date to skip the account read.
+calendars/8	help:hey event day	An account with no time zone set reads this machine's today, and says so on stderr.
+calendars/8	help:hey todo add	An account with no time zone set is refused rather than guessed at: pass --date.

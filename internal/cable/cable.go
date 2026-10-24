@@ -4,6 +4,7 @@ package cable
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -11,8 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/basecamp/actioncable-go"
+	actioncable "github.com/basecamp/actioncable-client/go/v2"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/version"
 )
@@ -37,11 +39,12 @@ func Dial(ctx context.Context, baseURL string, authMgr *auth.Manager, options ..
 		return nil, err
 	}
 
-	settings := make([]actioncable.Option, 0, 1+len(options))
+	settings := make([]actioncable.Option, 0, 2+len(options))
 	settings = append(settings, actioncable.WithHeaderFunc(func(ctx context.Context) (http.Header, error) {
 		return authHeader(ctx, baseURL, authMgr)
 	}))
 	settings = append(settings, options...)
+	settings = append(settings, actioncable.WithStopOnError(terminalConnectionError))
 
 	opening, giveUp := context.WithTimeout(ctx, openTimeout)
 	defer giveUp()
@@ -81,13 +84,18 @@ func URL(baseURL string) (string, error) {
 	return parsed.String(), nil
 }
 
+func terminalConnectionError(err error) bool {
+	var classified *apierr.Error
+	return errors.As(err, &classified) && classified.Code == apierr.CodeAuth
+}
+
 func authHeader(ctx context.Context, baseURL string, authMgr *auth.Manager) (http.Header, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, baseURL, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := authMgr.AuthenticateRequest(ctx, request); err != nil {
+	if err := authMgr.AuthenticateRequestFromStore(ctx, request); err != nil {
 		return nil, err
 	}
 	request.Header.Set("User-Agent", version.UserAgent())

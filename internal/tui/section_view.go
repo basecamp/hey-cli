@@ -11,6 +11,7 @@ import (
 // viewContext holds shared dependencies injected into every sectionView.
 type attachmentSaveFunc func(context.Context, string, string, bool) (int64, error)
 type attachmentOpenFunc func(string) error
+type urlOpenFunc func(string) error
 
 // The Imbox's cover crosses the seam as a preset name rather than a coverPreset,
 // so that what stores it does not have to know how covers are drawn.
@@ -26,6 +27,7 @@ type viewContext struct {
 	imageFetcher         imageFetcher
 	saveAttachment       attachmentSaveFunc
 	openAttachment       attachmentOpenFunc
+	openURL              urlOpenFunc
 	newAttachmentTempDir func() (string, error)
 	loadCover            coverLoadFunc
 	saveCover            coverSaveFunc
@@ -85,6 +87,20 @@ type inputCapturer interface {
 	CapturingInput() bool
 }
 
+// linkNavigator is an optional content-row capability. It keeps link-specific
+// keyboard routing out of sectionView, whose other implementations do not need it.
+type linkNavigator interface {
+	ClaimsLinkNavigation() bool
+	LinkSelectionActive() bool
+}
+
+// linkFooterProvider is implemented by a view that reserves a stable footer row
+// for contextual detail. The bool reports whether the row belongs on screen even
+// when its content is blank.
+type linkFooterProvider interface {
+	LinkFooter() (string, bool)
+}
+
 type accountSwitchBlocker interface {
 	AccountSwitchBlocked() bool
 }
@@ -93,6 +109,13 @@ type accountSwitchBlocker interface {
 // be canceled before the detail view opens.
 type pendingDetailCanceler interface {
 	CancelPendingDetail() bool
+}
+
+// selectionClearer is implemented by section views that hold a multi-row selection.
+// Escape clears it only after an open modal, an open detail and a pending detail read
+// have each had their turn at the key.
+type selectionClearer interface {
+	ClearSelection() bool
 }
 
 // detailExiter lets a section preserve the distinct back and exit behavior of

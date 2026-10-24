@@ -13,6 +13,9 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/basecamp/hey-cli/internal/terminal"
+	"github.com/basecamp/hey-cli/internal/timezone"
 )
 
 // A moment on a form is three questions that only make sense together — which day, what
@@ -56,6 +59,17 @@ type dateTimePicker struct {
 	zoneFilter  textinput.Model
 	zoneMatches []string
 	zoneCursor  int
+
+	// local is the clock Local means: the machine's, and a seam for tests, which would
+	// otherwise have to move the whole process's time.Local to put the widget somewhere.
+	local *time.Location
+
+	// opened is what the widget showed before the reader had a hand in it — the date, the
+	// time and the zone — and touched says they have had one: typed in the date or the time,
+	// stepped the date, or chosen a zone, even the one already chosen. They answer two
+	// different questions; see moved() and answered().
+	touched bool
+	opened  string
 }
 
 // newDateTimePicker starts on a moment. An all-day moment has no time of day and no zone,
@@ -68,10 +82,43 @@ func newDateTimePicker(at time.Time, allDay bool) *dateTimePicker {
 		allDay:     allDay,
 		zone:       localZoneLabel,
 		choices:    zoneChoices(),
+		local:      time.Local,
 	}
-	picker.dateInput.SetValue(at.Format("2006-01-02"))
-	picker.timeInput.SetValue(at.Format("15:04"))
+	picker.setMoment(at)
+	picker.markOpened()
 	return picker
+}
+
+// markOpened takes what the widget shows now as what it opened with: a form that fills in
+// a zone or a moment of its own after building the widget calls it again, so that the form's
+// own answer is not mistaken for the reader's.
+func (p *dateTimePicker) markOpened() {
+	p.touched = false
+	p.opened = p.shown()
+}
+
+// moved is whether the widget says something other than what it opened with. A form keeps the
+// instant an end arrived with for as long as it does not: choosing the zone already chosen,
+// typing and taking it back, or stepping the date there and back leave the end where it was.
+func (p *dateTimePicker) moved() bool {
+	return p.shown() != p.opened
+}
+
+// answered is whether the reader has had a hand in the widget at all, even to leave it as it
+// was. Choosing Local on a form that opened on Local is an answer, and nothing the form learns
+// afterwards should take it back.
+func (p *dateTimePicker) answered() bool {
+	return p.touched || p.moved()
+}
+
+func (p *dateTimePicker) shown() string {
+	return p.dateInput.Value() + "\x00" + p.timeInput.Value() + "\x00" + p.zone
+}
+
+// setMoment puts a date and a time of day on the widget, read on at's own clock.
+func (p *dateTimePicker) setMoment(at time.Time) {
+	p.dateInput.SetValue(at.Format("2006-01-02"))
+	p.timeInput.SetValue(at.Format("15:04"))
 }
 
 func dateTimeInput(placeholder string, width int) textinput.Model {
@@ -128,21 +175,35 @@ func (p *dateTimePicker) zoneName() string {
 
 // moment is the date and time read as belonging to the zone chosen, which is what a form
 // comparing two of these wants.
+//
+// A clock time is read the way HEY reads one, on Local as much as in a named zone, so the
+// form and `hey event` agree on what was typed: a time the clocks skip moves on to one that
+// exists (02:30 on the morning New York springs forward is 03:30), and a time they repeat is
+// the one HEY takes.
 func (p *dateTimePicker) moment() (time.Time, bool) {
-	in := time.Local
-	if name := p.zoneName(); name != "" {
-		zone, err := time.LoadLocation(name)
-		if err != nil {
-			return time.Time{}, false
-		}
-		in = zone
-	}
 	if p.allDay {
-		at, err := time.ParseInLocation("2006-01-02", p.date(), in)
+		at, err := time.ParseInLocation("2006-01-02", p.date(), p.local)
 		return at, err == nil
 	}
-	at, err := time.ParseInLocation("2006-01-02 15:04", p.date()+" "+p.clock(), in)
-	return at, err == nil
+	zone := p.clockZone()
+	if zone == nil {
+		return time.Time{}, false
+	}
+	return timezone.Placed(p.date(), p.clock(), zone)
+}
+
+// clockZone is the zone the widget's clock time is read in: the one chosen, or the machine's
+// for Local. A chosen name this build cannot load reads nowhere, and problem() says so.
+func (p *dateTimePicker) clockZone() *time.Location {
+	name := p.zoneName()
+	if name == "" {
+		return p.local
+	}
+	zone, ok := loadEventZone(name)
+	if !ok {
+		return nil
+	}
+	return zone
 }
 
 // problem says the first thing wrong with what the reader filled in, and nothing when the
@@ -158,7 +219,7 @@ func (p *dateTimePicker) problem() string {
 		return "Time must be HH:MM"
 	}
 	if name := p.zoneName(); name != "" {
-		if _, err := time.LoadLocation(name); err != nil {
+		if _, ok := loadEventZone(name); !ok {
 			return "That is not a time zone"
 		}
 	}
@@ -237,13 +298,9 @@ func (p *dateTimePicker) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			p.shiftDate(days)
 			return nil
 		}
-		var cmd tea.Cmd
-		p.dateInput, cmd = p.dateInput.Update(msg)
-		return cmd
+		return p.edit(&p.dateInput, msg)
 	case dateTimeFieldTime:
-		var cmd tea.Cmd
-		p.timeInput, cmd = p.timeInput.Update(msg)
-		return cmd
+		return p.edit(&p.timeInput, msg)
 	default:
 		// A printable key both opens the list and starts the filter, so the reader can type
 		// "zag" at the zone and land on Europe/Zagreb without first pressing anything.
@@ -253,6 +310,19 @@ func (p *dateTimePicker) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return opened
 	}
+}
+
+// edit hands a key to one of the text inputs, and counts it as the reader's answer when it
+// changed what the input holds. Retyping a time the same as it was counts too: the value
+// changes on the way.
+func (p *dateTimePicker) edit(input *textinput.Model, msg tea.KeyPressMsg) tea.Cmd {
+	before := input.Value()
+	var cmd tea.Cmd
+	*input, cmd = input.Update(msg)
+	if input.Value() != before {
+		p.touched = true
+	}
+	return cmd
 }
 
 // dateStep is the day-at-a-time keys: the arrows, which are unbound in a single-line text
@@ -277,6 +347,7 @@ func (p *dateTimePicker) shiftDate(days int) {
 		return
 	}
 	p.dateInput.SetValue(at.AddDate(0, 0, days).Format("2006-01-02"))
+	p.touched = true
 }
 
 func (p *dateTimePicker) openZoneList() tea.Cmd {
@@ -329,6 +400,7 @@ func (p *dateTimePicker) moveZoneCursor(delta int) {
 func (p *dateTimePicker) pickHighlightedZone() {
 	if p.zoneCursor >= 0 && p.zoneCursor < len(p.zoneMatches) {
 		p.zone = p.zoneMatches[p.zoneCursor]
+		p.touched = true
 	}
 	p.closeZoneList()
 }
@@ -376,7 +448,7 @@ func (p *dateTimePicker) view() string {
 	if !p.allDay {
 		segments = append(segments,
 			p.segment(dateTimeFieldTime, p.timeInput.View()),
-			p.segment(dateTimeFieldZone, p.zone))
+			p.segment(dateTimeFieldZone, terminal.SanitizeLine(p.zone)))
 	}
 	line := strings.Join(segments, styleMuted.Render(" · "))
 	if !p.zoneOpen {
@@ -412,9 +484,9 @@ func (p *dateTimePicker) zoneListView() string {
 	for i := first; i < last; i++ {
 		if i == p.zoneCursor {
 			fmt.Fprintf(&b, "%s\n", lipgloss.NewStyle().Foreground(colorActive).Bold(true).
-				Render("› "+p.zoneMatches[i]))
+				Render("› "+terminal.SanitizeLine(p.zoneMatches[i])))
 		} else {
-			fmt.Fprintf(&b, "  %s\n", p.zoneMatches[i])
+			fmt.Fprintf(&b, "  %s\n", terminal.SanitizeLine(p.zoneMatches[i]))
 		}
 	}
 	if hidden := len(p.zoneMatches) - last; hidden > 0 {

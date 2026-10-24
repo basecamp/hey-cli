@@ -33,8 +33,12 @@ func newAttachmentsSaveCommand() *attachmentsSaveCommand {
 	attachmentsSaveCommand.cmd = &cobra.Command{
 		Use:   "save <attachment-id>",
 		Short: "Save an attachment to disk",
+		Long: "Save an attachment to disk under its original filename, or at --output. Existing files are preserved unless --force is set. " +
+			"On macOS and Windows the saved file is marked as downloaded from the internet, so the system warns before running it: " +
+			"on macOS a save that cannot be marked fails, and on Windows the mark is a best effort, written wherever the drive can hold it. " +
+			"Other systems keep no such mark.",
 		Annotations: map[string]string{
-			"agent_notes": "Saves the attachment identified by an ID from `hey attachment list <thread-id>`. Existing files are preserved unless --force is set.",
+			"agent_notes": "Saves the attachment identified by an ID from `hey attachment list <thread-id>`. It is saved under its original filename unless --output names a destination. --output is a directory only if one already exists there (the file is saved into it under its original filename); otherwise it is the file name. Existing files are preserved unless --force is set. On macOS the saved file gets the quarantine attribute, and a save that cannot be marked fails; on Windows a Zone.Identifier mark is written as a best effort, and may be missing on drives that cannot hold it; other platforms add no mark.",
 		},
 		Example: `  hey attachment save 67890:1
   hey attachment save 67890:1 --output ./quarterly-report.pdf

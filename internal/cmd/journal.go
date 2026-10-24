@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -25,7 +24,7 @@ func newJournalCommand() *journalCommand {
 		Use:   "journal",
 		Short: "Read and write journal entries",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, read, write. Read defaults to today. Write accepts --content, stdin, or opens $EDITOR; content is Markdown, or raw HTML via --content-html.",
+			"agent_notes": "Subcommands: list, read, write. Read and write default to today in the HEY account's time zone; write refuses without one, so name the date. Read JSON answers content (HTML as HEY serves it), content_markdown (the form write takes) and content_markdown_lossless; when that is false, change content and write it with --content-html instead. Write replaces the whole entry and accepts --content, stdin, or opens $EDITOR (refused for an entry whose Markdown is not lossless); content is Markdown, or raw HTML via --content-html.",
 		},
 	}
 
@@ -50,6 +49,9 @@ func newJournalListCommand() *journalListCommand {
 	journalListCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List journal entries",
+		Annotations: map[string]string{
+			"agent_notes": "Reads the personal calendar unless --calendar names another. " + personalWindowNotes,
+		},
 		Example: `  hey journal list
   hey journal list --limit 10
   hey journal list --starts-on 2026-01-01 --ends-on 2026-01-31 --json`,
@@ -131,10 +133,26 @@ func newJournalReadCommand() *journalReadCommand {
 	journalReadCommand.cmd = &cobra.Command{
 		Use:   "read [date]",
 		Short: "Read a journal entry (default: today)",
+		Long: `Read a journal entry, today's by default.
+
+Without a date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set reads this machine's today, and says so on stderr.
+
+JSON answers content, the entry's HTML as HEY serves it; content_markdown, the entry as
+Markdown; and content_markdown_lossless, which says whether that Markdown holds everything in
+the entry. Write content_markdown back with hey journal write only when
+content_markdown_lossless is true. When it is false, the entry holds an attachment, an image
+or other markup Markdown cannot carry, and writing the Markdown would drop it: change content
+and write it back with hey journal write --content-html instead.
+
+A day with no entry is not an error: JSON answers ok with the summary "No journal entry for
+<date>" and no data, so --jq '.data.content' prints null. Guard a read that feeds a write
+with --jq '.data.content // error("no journal entry for this day")'.`,
 		Example: `  hey journal read
   hey journal read 2026-03-15
-  hey journal read --html
-  hey journal read --json`,
+  hey journal read --html > entry.html
+  hey journal read --json
+  hey journal read 2026-03-15 --jq '.data.content_markdown'`,
 		RunE: journalReadCommand.run,
 		Args: cobra.MaximumNArgs(1),
 	}
@@ -147,15 +165,22 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	date := time.Now().Format(dateLayout)
+	ctx := cmd.Context()
+	var date string
 	if len(args) > 0 {
 		if _, err := parseDateArg("date", args[0]); err != nil {
 			return err
 		}
 		date = args[0]
+	} else {
+		var account accountZone
+		today, err := account.todayToRead(ctx, cmd.ErrOrStderr(), "name the day, for example hey journal read 2026-10-14")
+		if err != nil {
+			return err
+		}
+		date = today.Format(dateLayout)
 	}
 
-	ctx := cmd.Context()
 	content, err := sdk.Journal().GetContent(ctx, date)
 	if err != nil {
 		return apierr.FromSDK(err)
@@ -185,7 +210,15 @@ func (c *journalReadCommand) run(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	return writeOK(map[string]string{"date": date, "content": content},
+	// content_markdown_lossless says whether the Markdown can be written back in place of
+	// the entry: one holding an attachment, an image or anything else Markdown cannot
+	// carry has to be changed as HTML instead.
+	return writeOK(map[string]any{
+		"date":                      date,
+		"content":                   content,
+		"content_markdown":          htmlutil.ToMarkdown(content),
+		"content_markdown_lossless": htmlutil.MarkdownIsLossless(content),
+	},
 		output.WithSummary(fmt.Sprintf("Journal entry for %s", date)),
 		output.WithBreadcrumbs(output.Breadcrumb{
 			Action:      "write",
@@ -210,9 +243,17 @@ func newJournalWriteCommand() *journalWriteCommand {
 		Short: "Write or edit a journal entry (default: today)",
 		Long: `Write or edit a journal entry, today's by default.
 
-Writing empty content removes the day's entry, and the command says "removed" rather than
-"saved". Omitting content opens $EDITOR on the day's existing entry; if that entry cannot
-be read the command stops rather than opening a blank buffer over it.`,
+Without a date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set is refused rather than guessed at: name the date.
+
+Content that trims to nothing — whitespace-only, or an emptied $EDITOR buffer — removes the
+day's entry, and the command says "removed" rather than "saved". Omitting content reads
+stdin when it is not a terminal, and otherwise opens $EDITOR on the day's existing entry as
+Markdown; if that entry cannot be read the command stops rather than opening a blank buffer
+over it. A literal "" argument counts as omitted content and does the same. An entry
+holding an attachment, an image or other content Markdown cannot carry is not opened in
+$EDITOR, since saving it would drop that content: change the entry's HTML (content in hey
+journal read --json) and write it back with --content-html.`,
 		Example: `  hey journal write "Shipped the pagination fix and paired with Jane on the cover art."
   hey journal write 2026-03-15 "Retrospective: the migration took two days longer than planned."
   hey journal write -c "Reviewed the Q3 numbers with Alice."
@@ -222,7 +263,7 @@ be read the command stops rather than opening a blank buffer over it.`,
 	}
 
 	journalWriteCommand.cmd.Flags().StringVarP(&journalWriteCommand.content, "content", "c", "", "Journal content as Markdown (or opens $EDITOR)")
-	journalWriteCommand.cmd.Flags().StringVar(&journalWriteCommand.contentHTML, "content-html", "", "Journal content as raw HTML instead of Markdown")
+	journalWriteCommand.cmd.Flags().StringVar(&journalWriteCommand.contentHTML, "content-html", "", "Journal content as raw HTML instead of Markdown; the trix-content wrapper HEY serves an entry in is taken off")
 	journalWriteCommand.cmd.MarkFlagsMutuallyExclusive("content", "content-html")
 
 	return journalWriteCommand
@@ -266,12 +307,21 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	ctx := cmd.Context()
 
+	// Today is the account's, and without it the write is refused before any content is
+	// read or an editor opened: writing over the wrong day's entry is not a guess to make.
 	if date == "" {
-		date = time.Now().Format(dateLayout)
+		var account accountZone
+		today, err := account.todayToWrite(ctx, `name the day first, for example hey journal write 2026-10-14 "Shipped the pagination fix"`)
+		if err != nil {
+			return err
+		}
+		date = today.Format(dateLayout)
 	}
 
 	if c.contentHTML != "" {
-		content = strings.TrimSpace(c.contentHTML)
+		// HTML read back from HEY carries its editor wrapper; writing it back as it is
+		// would nest the entry one level deeper on every round trip.
+		content = htmlutil.UnwrapTrixContent(strings.TrimSpace(c.contentHTML))
 	} else {
 		if content == "" && !stdinIsTerminal() {
 			piped, err := readStdin()
@@ -316,15 +366,22 @@ func (c *journalWriteCommand) run(cmd *cobra.Command, args []string) error {
 
 type journalContentFetcher func(context.Context, string) (string, error)
 
-// journalEntryFromEditor opens $EDITOR on the day's entry. A read that fails is fatal:
-// an empty day answers 204 as an empty string, so anything else means we do not know
-// what the day holds -- and saving an empty editor over it would replace the entry.
 // journalEntryFromEditor prefills $EDITOR with the day's entry as Markdown — the same
-// form the edited result is saved in.
+// form the edited result is saved in. A read that fails is fatal: an empty day answers
+// 204 as an empty string, so anything else means we do not know what the day holds --
+// and saving an empty editor over it would replace the entry. So is an entry holding an
+// attachment, an image or anything else Markdown cannot carry, because saving the
+// Markdown would drop it; that entry is changed as HTML instead.
 func journalEntryFromEditor(ctx context.Context, date string, fetch journalContentFetcher, open func(string) (string, error)) (string, error) {
 	existing, err := fetch(ctx, date)
 	if err != nil {
 		return "", apierr.FromSDK(err)
+	}
+	if !htmlutil.MarkdownIsLossless(existing) {
+		return "", apierr.ErrUsageHint(
+			fmt.Sprintf("the journal entry for %s holds an attachment or other markup Markdown cannot carry, so editing it as Markdown would drop it", date),
+			fmt.Sprintf("Change its HTML instead: read it with `hey journal read %s --jq '.data.content'` and write it back with `hey journal write %s --content-html '<the changed HTML>'`", date, date),
+		)
 	}
 	edited, err := open(htmlutil.ToMarkdown(existing).String())
 	if err != nil {

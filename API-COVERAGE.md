@@ -8,12 +8,13 @@ Every endpoint below is read as JSON through a typed SDK operation; nothing pars
 geared_pagination's opaque cursor out of the `Link` header, not an offset. An integer there
 is not an error — it is ignored, and the first page comes back again. `Topics().GetEntriesPage`
 is the SDK read that keeps that header; `hey thread read` and `hey attachment list` walk it
-through `internal/threadload`. The drafts index (`/entries/drafts.json`) pages the same way,
-which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
+through `internal/threadload`, and `mail.ReplyTarget` walks it for the message a reply or a
+forward answers. The drafts index (`/entries/drafts.json`) pages the same way, which is what
+`Entries().ListDraftsPage` and `hey draft list --page` exist for.
 
 | Endpoint | Method | Client | CLI Command | Status |
 |----------|--------|--------|-------------|--------|
-| `/boxes.json` | GET | SDK `Boxes().List` | `hey box list` | covered |
+| `/boxes.json` | GET | SDK `Boxes().List`, `BoxIDByKind` | `hey box list`, `hey contact deliver` (canonical destination lookup) | covered |
 | `/boxes/{id}.json` | GET | SDK `Boxes().Get`, `Boxes().GetPage` | `hey box view <id>`, TUI mail list growth | covered |
 | `/imbox.json` | GET | SDK `Boxes().GetImbox` | `hey box view imbox` | covered |
 | `/imbox/seen.json` | GET | SDK `Boxes().GetImboxSeen` | TUI Previously Seen screen | covered |
@@ -43,30 +44,35 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/my/clearances.json` | GET | SDK `Clearances().Screened`, `ScreenedPage` | `hey screener history`, TUI Screener History | covered |
 | `/my/clearances/{id}` | PATCH | SDK `Clearances().Rescreen` | — | unused by the CLI |
 | `/contacts.json` | GET | SDK `Contacts().List` | `hey contact list`, Contacts TUI | covered |
-| `/contacts/{id}.json` | GET | SDK `Contacts().Get` | `hey contact show`, Contacts TUI | covered |
+| `/contacts/{id}.json` | GET | SDK `Contacts().Get` | `hey contact show`, `hey contact deliver --to screened-out` (external-contact check), `hey contact photo set` (existence check before uploading), Contacts TUI | covered |
 | `/contacts.json` | POST | SDK `Contacts().Create` | `hey contact add`, Contacts TUI | covered |
 | `/contacts/{id}.json` | PATCH | SDK `Contacts().Update` | `hey contact update`, Contacts TUI | covered |
 | `/contacts/{id}.json` | DELETE | SDK `Contacts().Hide` | `hey contact hide`, Contacts TUI | covered |
 | `/contacts/{id}/reveal.json` | POST | SDK `Contacts().Reveal` | `hey contact show-again`, Contacts TUI | covered |
 | `/contacts/{id}/bundle.json` | POST | SDK `Contacts().Bundle` | `hey contact bundle` | covered |
 | `/contacts/{id}/bundle.json` | DELETE | SDK `Contacts().Unbundle` | `hey contact unbundle` | covered |
+| `/boxes/{id}/designations.json` | POST | SDK `Designations().Create` | `hey contact deliver <contact-id> --to imbox\|feed\|papertrail` | covered |
+| `/contacts/{id}/clearance.json` | PATCH | SDK `Contacts().Screen` | `hey contact deliver <contact-id> --to screened-out` | covered |
 | `/contacts/{id}/note.json` | GET | SDK `Contacts().Note` | `hey contact note show`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | PATCH | SDK `Contacts().SetNote` | `hey contact note set`, Contacts TUI | covered |
 | `/contacts/{id}/note.json` | DELETE | SDK `Contacts().DeleteNote` | `hey contact note delete`, Contacts TUI | covered |
+| `/contacts/{id}/uploaded_avatar.json` | PUT | SDK `Contacts().UpdateAvatar` | `hey contact photo set` | covered |
+| `/contacts/{id}/uploaded_avatar.json` | DELETE | SDK `Contacts().DeleteAvatar` | `hey contact photo remove` | covered |
+| `/autocompletable/contacts/addressable.json` | GET | SDK `Contacts().Addressable` | TUI composer's To, Cc and Bcc suggestions (new message, reply, forward) | covered |
 | `/calendars.json` | GET | SDK `Calendars().List` | `hey calendar list` | covered |
-| `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey event list`, `hey event edit <id>` (reading the event back), `hey todo list`, `hey journal list` | covered |
-| `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntries` | `hey thread read <id>`, `hey attachment list <topic-id>` | covered, but see the paging note below |
+| `/calendars/{id}/recordings.json` | GET | SDK `Calendars().GetRecordings` | `hey event list`, `hey event edit <id>` (reading the event back; with `--occurrence`, the occurrence's day and then the series' first day for its `Calendar::Countdown`), `hey event delete <id>` (checking the id is not a day of a series HEY has written out; with `--occurrence --apply-to future`, the occurrence's day), `hey todo list`, `hey journal list` | covered |
+| `/topics/{id}/entries.json` | GET | SDK `Topics().GetEntriesPage` | `hey thread read <id>`, `hey attachment list <topic-id>`, TUI thread view; `hey reply <topic-id>`, `hey compose --thread-id`, `hey forward <topic-id>` and TUI `r`/`f` when the topic's own page holds no emailed message (`mail.ReplyTarget`) | covered, but see the paging note above |
 | `/topics/{id}/publication` | POST | SDK `Publications().Create` | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication.json` | GET | SDK `Publications().Create` readback | `hey share <thread-id>` | covered |
 | `/topics/{id}/publication` | DELETE | SDK `Publications().Delete` | `hey unshare <thread-id>` | covered |
 | `/messages/{id}.json` | GET | SDK `Messages().Get` | `hey thread read <id>` (bodies), `hey reply <topic-id>` and TUI `r` (recipient fallback), `hey attachment list <topic-id>`, `hey attachment save <id>` | covered |
 | `/messages/{id}` | PUT | SDK `Messages().UpdateDraft`, `Messages().SendDraft` | `hey draft edit <id>`, `hey draft send <id>` | covered |
-| `/messages/{id}/edit.json` | GET | SDK `Messages().GetEdit` | `hey draft show <id>`, `hey draft edit/send` (reading the state an update resends) | covered |
+| `/messages/{id}/edit.json` | GET | SDK `Messages().GetEdit` | `hey draft show <id>`, `hey draft edit/send` (reading the state an update resends); each single-message send in the CLI and TUI (compose, reply, forward, draft send — not bulk replies), to confirm a delivery HEY answered with no thread was refused and kept as a draft (`mail.ConfirmDelivered`) | covered |
 | `/entries/{id}/replies/new.json` | GET | SDK `Entries().NewReply` | `hey reply <topic-id>` and `hey compose --thread-id` (recipients, with the acting user excluded) | covered |
 | `/entries/drafts.json` | GET | SDK `Entries().ListDraftsPage` | `hey draft list` (`--all`/`--page` follow its cursor) | covered |
 | `/entries/drafts/{id}` | DELETE | SDK `Entries().DeleteDraft` | `hey draft delete <id>...` | covered |
-| `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
-| signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach` | covered |
+| `/rails/active_storage/direct_uploads.json` | POST | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach`, `hey contact photo set` | covered |
+| signed Active Storage upload URL | PUT | SDK `Attachments().Upload` | `hey compose --attach`, `hey reply --attach`, `hey bulk-reply send --attach`, `hey contact photo set` | covered |
 | signed Active Storage blob URL | GET | SDK `DownloadBlob` | `hey attachment save <id>` | covered |
 | `/messages.json` | POST | SDK `Messages().Create`, `Messages().CreateDraft` | `hey compose`, `hey compose --draft`, `hey forward <topic-id>` | covered |
 | `/entries/{id}/replies` | POST | SDK `Entries().CreateReply`, `Entries().CreateReplyDraft` | `hey reply <topic-id>`, `hey reply --draft`, `hey compose --thread-id [--draft]` | covered |
@@ -89,9 +95,9 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/postings/bubble_up.json` | DELETE | SDK `Postings().CancelBubbleUp` | `hey bubble pop <id>` | covered |
 | `/calendar/events.json` | POST | SDK `CalendarEvents().Create` | `hey event add`, Calendar TUI `a` | covered |
 | `/calendar/events/{id}.json` | PATCH | SDK `CalendarEvents().Update` | `hey event edit <id>`, Calendar TUI `e` | covered: a write replaces rather than patches, so the caller reads the event and sends back what it keeps |
-| `/calendar/events/{id}` | DELETE | SDK `CalendarEvents().Delete` | `hey event delete <id>`, Calendar TUI `x` | covered |
-| `/calendar/events/{id}/occurrences/{date}.json` | PATCH | SDK `CalendarEvents().UpdateOccurrence` | Calendar TUI `e` on one day of a repeating event | covered; no CLI equivalent yet |
-| `/calendar/events/{id}/occurrences/{date}.json` | DELETE | SDK `CalendarEvents().DeleteOccurrence` | Calendar TUI `x` on one day of a repeating event | covered; no CLI equivalent yet |
+| `/calendar/events/{id}` | DELETE | SDK `CalendarEvents().Delete` | `hey event delete <id>`, Calendar TUI `x` on an event that is not one day of a series | covered: HEY destroys that recording alone, so a day of a series it has written out is not deleted this way — the series draws it again; the CLI refuses that id and the TUI deletes the day through its occurrence |
+| `/calendar/events/{id}/occurrences/{date}.json` | PATCH | SDK `CalendarEvents().UpdateOccurrence` | `hey event edit <id> --occurrence <id>_<date> --apply-to current\|future`, Calendar TUI `e` on one day of a repeating event | covered: `current` is `apply_to_future=0` and `future` is `apply_to_future=1`; the CLI sends the day's own content, reminders, circle and countdown back, refuses a schedule change for `current`, and requires the new series' complete `--repeat` schedule for `future` |
+| `/calendar/events/{id}/occurrences/{date}.json` | DELETE | SDK `CalendarEvents().DeleteOccurrence` | `hey event delete <id> --occurrence <id>_<date> --apply-to current\|future`, Calendar TUI `x` on one day of a repeating event, written out or not | covered: `current` is `apply_to_future=false` and writes the day into the series' exceptions; `future` is `apply_to_future=true` and stops the series the day before, or destroys it from its first day; the CLI refuses `future` from a written-out day whose boundary it cannot trust |
 | `/calendar/events/{id}.json` | GET | — | — | not served: HEY has no JSON show for an event, which is why `hey event edit` finds one through the recordings listing |
 | `/calendar/habits.json` | POST | SDK `Habits().Create` | `hey habit create`, Calendar TUI `a` | covered |
 | `/calendar/habits/{id}.json` | PATCH | SDK `Habits().Update` | `hey habit edit <id>`, Calendar TUI `e` | covered |
@@ -116,8 +122,8 @@ which is what `Entries().ListDraftsPage` and `hey draft list --page` exist for.
 | `/calendar/todos/{id}/completions.json` | DELETE | SDK `CalendarTodos().Uncomplete` | `hey todo uncomplete <id>` | covered |
 | `/calendar/todos/{id}.json` | DELETE | SDK `CalendarTodos().Delete` | `hey todo delete <id>` | covered |
 | `/boxes/{id}/postings/changes.json` | GET | SDK `Postings().AllChanges` | `hey watch` | covered |
-| `/cable` (`Postings::ChangesChannel`) | WS | `internal/cable` + actioncable-go | `hey watch`, TUI mail list | covered |
-| `/cable` (`Turbo::StreamsChannel`) | WS | `internal/cable` + actioncable-go | TUI Screener (stream name from `/clearances.json`) | covered |
-| `/identity.json` | GET | SDK `Identity().GetIdentity` | `hey account list`, `--account` validation | covered |
+| `/cable` (`Postings::ChangesChannel`) | WS | `internal/cable` + actioncable-client | `hey watch`, TUI mail list | covered |
+| `/cable` (`Turbo::StreamsChannel`) | WS | `internal/cable` + actioncable-client | TUI Screener (stream name from `/clearances.json`) | covered |
+| `/identity.json` | GET | SDK `Identity().GetIdentity` | `hey account list`, `--account` validation, `hey event add`/`edit` (the account's time zone, and the countdown an occurrence edit keeps) | covered |
 | `/oauth/authorizations/new` | GET | `internal/auth` (PKCE S256) | `hey auth login` | covered |
 | `/oauth/tokens` | POST | `internal/auth` | `hey auth login`, `hey auth refresh`, automatic refresh | covered |

@@ -118,11 +118,6 @@ func hyperlinkEnd(s string) (end, terminator int) {
 	return -1, 0
 }
 
-func allowedHyperlink(uri string) bool {
-	lower := strings.ToLower(uri)
-	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "mailto:")
-}
-
 // stripAll removes every escape sequence and control character, newlines and tabs
 // excepted, from text that contain could not vouch for.
 func stripAll(out string) string {

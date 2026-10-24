@@ -146,7 +146,7 @@ func newLabelReaderCommand(use, short, example string) *labelCommand {
 		Use:   use,
 		Short: short,
 		Annotations: map[string]string{
-			"agent_notes": "The ID comes from hey label list. Returns labeled email threads with topic_id for reading them, and answers --json, --styled, --markdown, --ids-only and --count.",
+			"agent_notes": "The ID comes from hey label list. Returns labeled email threads with topic_id for reading them, and answers --json, --styled, --markdown, --ids-only and --count. --json also carries next_page and total_count; pass --page <next_page> to continue or --all to fetch every page.",
 		},
 		Example: example,
 		RunE:    command.run,
@@ -241,6 +241,9 @@ func newLabelCreateCommand() *labelCreateCommand {
 	labelCreateCommand.cmd = &cobra.Command{
 		Use:   "create <name> <box-item-id>...",
 		Short: "Create a label and add it to email threads",
+		Annotations: map[string]string{
+			"agent_notes": "Files at least one thread as it creates the label, so it needs one or more box item IDs. HEY refuses a name you already use for a label, in any case, as a validation error; to file threads under an existing label, use hey label add --to <label-id>.",
+		},
 		Example: `  hey label create "Travel receipts" 12345
   hey label create "Project Apollo" 12345 67890`,
 		RunE: labelCreateCommand.run,

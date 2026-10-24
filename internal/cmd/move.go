@@ -25,12 +25,15 @@ func newMoveCommand() *moveCommand {
 	moveCommand.cmd = &cobra.Command{
 		Use:   "move <box-item-id>...",
 		Short: "Move email threads to another box",
-		Long:  "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Moving a Reply Later thread to Imbox removes Reply Later while preserving its seen state.",
+		Long: "Move one or more email threads to Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. " +
+			"Moving to any box but Imbox marks the threads seen, and a thread that cannot be replied to is not moved to Reply Later. " +
+			"Moving a Reply Later thread to Imbox removes Reply Later while preserving its seen state. " +
+			"A bundle row is refused, even one that opens as a single thread: it stands in for a sender's whole stream, and moving it takes that stream out of the box they are delivered to, so their next email arrives unbundled.",
 		Example: `  hey move 12345 --to feed
   hey move 12345 67890 --to imbox
   hey move 12345 --to 987`,
 		Annotations: map[string]string{
-			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. To remove Reply Later, move the threads to Imbox; seen threads then appear in Previously Seen. Use hey bubble up for Bubble Up.",
+			"agent_notes": "Accepts box item IDs from hey box view output. --to accepts a box name, kind, or ID. A thread that cannot be replied to is skipped silently when moving to Reply Later: no error, and the confirmation still counts it. To remove Reply Later, move the threads to Imbox; seen threads then appear in Previously Seen. Moving out of Reply Later does not return a thread to the box it was in before; it goes where --to says. Use hey bubble up for Bubble Up. A hey box view row with kind \"bundle\" is refused: moving one unbundles that sender's mail in the box they are delivered to. Change grouping with hey contact bundle|unbundle <contact-id>.",
 		},
 		RunE: moveCommand.run,
 		Args: usageMinOneArg(),
@@ -59,6 +62,14 @@ func (c *moveCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	bundles, err := bundlePostings(cmd.Context(), ids)
+	if err != nil {
+		return err
+	}
+	if len(bundles) > 0 {
+		return errBundleMove(bundles)
+	}
+
 	if err := sdk.Postings().Move(cmd.Context(), destination.Id, ids...); err != nil {
 		return apierr.FromSDK(err)
 	}
@@ -84,15 +95,15 @@ func resolveMoveDestination(ctx context.Context, nameOrID string) (*generated.Bo
 		return nil, apierr.ErrNotFound("box", nameOrID)
 	}
 
-	query := canonicalBoxName(nameOrID)
+	kind := boxKindFor(nameOrID)
 	for i := range *boxes {
 		box := &(*boxes)[i]
-		if canonicalBoxName(box.Kind) == query || canonicalBoxName(box.Name) == query {
+		if boxKindFor(box.Kind) == kind || boxKindFor(box.Name) == kind {
 			return validateMoveDestination(box)
 		}
 	}
 
-	return nil, apierr.ErrNotFound("box", nameOrID)
+	return nil, errMoveDestinationNotFound(nameOrID)
 }
 
 func validateMoveDestination(box *generated.Box) (*generated.Box, error) {
@@ -100,23 +111,4 @@ func validateMoveDestination(box *generated.Box) (*generated.Box, error) {
 		return nil, apierr.ErrUsageHint("Bubble Up is not a move destination", "Run: hey bubble up <box-item-id> --now (or --on <date>)")
 	}
 	return box, nil
-}
-
-func canonicalBoxName(name string) string {
-	name = strings.ToLower(strings.TrimSpace(name))
-	name = strings.NewReplacer(" ", "", "-", "", "_", "").Replace(name)
-
-	switch name {
-	case "feed", "thefeed":
-		return hey.BoxKindFeed
-	case "aside", "setaside":
-		return hey.BoxKindSetAside
-	case "later", "replylater":
-		return hey.BoxKindLater
-	case "trail", "papertrail":
-		return hey.BoxKindTrail
-	case "bubble", "bubbleup", "bubbled", "bubbledup":
-		return hey.BoxKindBubbleUp
-	}
-	return name
 }

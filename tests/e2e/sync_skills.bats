@@ -31,7 +31,7 @@ teardown() {
 @test "defaults to the skills/ tree and excludes *.go and dotfiles" {
   run "$SYNC"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Found 1 skill(s): skills/hey"* ]]
+  [[ "$output" == *"Found 1 skill(s) in skills/: hey"* ]]
   [[ "$output" == *"skills/hey/SKILL.md"* ]]
   [[ "$output" == *"skills/hey/reference/api.md"* ]]
   [[ "$output" != *"tool.go"* ]]
@@ -41,7 +41,7 @@ teardown() {
 @test "SKILLS_SOURCE points the sync at a tagged checkout" {
   SKILLS_SOURCE=release/skills run "$SYNC"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Found 1 skill(s): release/skills/hey"* ]]
+  [[ "$output" == *"Found 1 skill(s) in release/skills/: hey"* ]]
   [[ "$output" == *"skills/hey/SKILL.md"* ]]
   [[ "$output" != *"reference/api.md"* ]]
 }

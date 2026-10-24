@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 // Built-in OAuth client ID for the CLI app.
@@ -32,7 +34,31 @@ type Manager struct {
 	callbackWait callbackWaiter
 	listen       listenerFactory
 	mu           sync.Mutex
+
+	// cachedCredentials avoids opening a keyring session for every request. It is
+	// process-local; refreshLocked still rereads the store to coordinate rotation
+	// with other processes. Guarded by mu.
+	cachedCredentials *Credentials
+
+	// refreshHoldUntil parks refreshes after the token endpoint rate-limited one.
+	// Guarded by mu, which every path into refreshLocked already holds.
+	refreshHoldUntil time.Time
+
+	// refusedRefreshToken is a grant the server refused that the store could not
+	// delete, so this process remembers not to send it again. Guarded by mu.
+	refusedRefreshToken string
+
+	// credentialCleared runs after the manager has deleted a credential, or
+	// replaced it with a signed-out record, on its own verdict. The owner of the
+	// response cache can then drop what that credential fetched. Logout is not
+	// that: its callers already clear the cache themselves.
+	credentialCleared func()
 }
+
+// defaultRefreshHold is how long to sit out a rate limit that came without a
+// Retry-After. The token endpoint's window is an hour and it counts refusals, so a
+// `hey watch` redialling every fifteen seconds would spend it in minutes.
+const defaultRefreshHold = 15 * time.Minute
 
 // NewManager creates a new auth manager.
 func NewManager(baseURL string, httpClient *http.Client, configDir string) *Manager {
@@ -50,6 +76,14 @@ func normalizeBaseURL(u string) string {
 	return strings.TrimRight(u, "/")
 }
 
+func cloneCredentials(creds *Credentials) *Credentials {
+	if creds == nil {
+		return nil
+	}
+	clone := *creds
+	return &clone
+}
+
 // AccessToken returns a valid access token, refreshing if needed.
 // If HEY_TOKEN env var is set, it's used directly.
 func (m *Manager) AccessToken(ctx context.Context) (string, error) {
@@ -60,9 +94,9 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	creds, err := m.store.Load(m.baseURL)
+	creds, err := m.loadCredentialsLocked()
 	if err != nil {
-		return "", fmt.Errorf("not authenticated: %w", err)
+		return "", credentialLoadError(err)
 	}
 
 	// Check if token is expired (with 5-minute buffer)
@@ -70,7 +104,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 		if err = m.refreshLocked(ctx, creds); err != nil {
 			return "", err
 		}
-		creds, err = m.store.Load(m.baseURL)
+		creds, err = m.loadCredentialsLocked()
 		if err != nil {
 			return "", fmt.Errorf("failed to load refreshed credentials: %w", err)
 		}
@@ -85,12 +119,23 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 		return creds.SessionCookie, nil
 	}
 
-	return "", fmt.Errorf("no access token or session cookie available")
+	return "", errNoCredential("no access token or session cookie available", nil)
 }
 
 // AuthenticateRequest sets the appropriate auth header on an HTTP request.
 // Uses Bearer token if available, otherwise falls back to session cookie.
 func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) error {
+	return m.authenticateRequest(ctx, req, false)
+}
+
+// AuthenticateRequestFromStore rereads persistent credentials before setting the
+// auth header. Long-lived connections use it when they dial again, since they do
+// not have the SDK's 401 path to invalidate this manager's process-local cache.
+func (m *Manager) AuthenticateRequestFromStore(ctx context.Context, req *http.Request) error {
+	return m.authenticateRequest(ctx, req, true)
+}
+
+func (m *Manager) authenticateRequest(ctx context.Context, req *http.Request, reload bool) error {
 	if token := os.Getenv("HEY_TOKEN"); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 		return nil
@@ -99,9 +144,15 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	creds, err := m.store.Load(m.baseURL)
+	var creds *Credentials
+	var err error
+	if reload {
+		creds, err = m.reloadCredentialsLocked()
+	} else {
+		creds, err = m.loadCredentialsLocked()
+	}
 	if err != nil {
-		return fmt.Errorf("not authenticated: %w", err)
+		return credentialLoadError(err)
 	}
 
 	if creds.AccessToken != "" {
@@ -110,7 +161,7 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 			if err = m.refreshLocked(ctx, creds); err != nil {
 				return err
 			}
-			creds, err = m.store.Load(m.baseURL)
+			creds, err = m.loadCredentialsLocked()
 			if err != nil {
 				return fmt.Errorf("failed to load refreshed credentials: %w", err)
 			}
@@ -120,24 +171,39 @@ func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) er
 	}
 
 	if creds.SessionCookie != "" {
-		req.Header.Set("Cookie", "session_token="+creds.SessionCookie)
+		req.Header.Set("Cookie", sessionCookieHeader(creds.SessionCookie))
 		return nil
 	}
 
-	return fmt.Errorf("no access token or session cookie available")
+	return errNoCredential("no access token or session cookie available", nil)
 }
 
-// IsAuthenticated checks if there are valid credentials.
-func (m *Manager) IsAuthenticated() bool {
+// AuthenticationStatus reports whether usable credentials exist. A missing
+// credential is a known signed-out state; a storage failure leaves the state
+// unknown and is returned to the caller.
+func (m *Manager) AuthenticationStatus() (bool, error) {
 	if os.Getenv("HEY_TOKEN") != "" {
-		return true
+		return true, nil
 	}
 
-	creds, err := m.store.Load(m.baseURL)
-	if err != nil {
-		return false
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	creds, err := m.loadCredentialsLocked()
+	if errors.Is(err, ErrCredentialsNotFound) {
+		return false, nil
 	}
-	return creds.AccessToken != "" || creds.SessionCookie != ""
+	if err != nil {
+		return false, credentialLoadError(err)
+	}
+	return creds.AccessToken != "" || creds.SessionCookie != "", nil
+}
+
+// IsAuthenticated reports whether usable credentials exist. Callers that need
+// to distinguish signed out from unavailable storage use AuthenticationStatus.
+func (m *Manager) IsAuthenticated() bool {
+	authenticated, _ := m.AuthenticationStatus()
+	return authenticated
 }
 
 // LoginOptions configures the login flow.
@@ -220,12 +286,13 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 		RefreshToken:  token.RefreshToken,
 		OAuthType:     "oauth",
 		TokenEndpoint: tokenEndpoint,
+		InstallID:     installID,
 	}
 	if !token.ExpiresAt.IsZero() {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
-	return m.store.Save(m.baseURL, creds)
+	return m.saveCredentials(creds)
 }
 
 // LoginWithToken stores a pre-provided bearer token.
@@ -234,7 +301,7 @@ func (m *Manager) LoginWithToken(token string) error {
 		AccessToken: token,
 		OAuthType:   "token",
 	}
-	return m.store.Save(m.baseURL, creds)
+	return m.saveCredentials(creds)
 }
 
 // LoginWithCookie stores a session cookie.
@@ -243,12 +310,29 @@ func (m *Manager) LoginWithCookie(cookie string) error {
 		SessionCookie: cookie,
 		OAuthType:     "cookie",
 	}
-	return m.store.Save(m.baseURL, creds)
+	return m.saveCredentials(creds)
+}
+
+// OnCredentialCleared registers what to run when the manager clears a credential
+// on its own — today, when the server has refused the refresh token. Replacing a
+// credential with a signed-out record after deletion fails counts as clearing it.
+// Logout does not: its callers clear the cache themselves.
+func (m *Manager) OnCredentialCleared(fn func()) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.credentialCleared = fn
 }
 
 // Logout removes stored credentials.
 func (m *Manager) Logout() error {
-	return m.store.Delete(m.baseURL)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.store.Delete(m.baseURL); err != nil {
+		return err
+	}
+	m.cachedCredentials = nil
+	return nil
 }
 
 // Refresh forces a token refresh.
@@ -256,17 +340,39 @@ func (m *Manager) Refresh(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	creds, err := m.loadCredentialsLocked()
+	if err != nil {
+		return credentialLoadError(err)
+	}
+	return m.refreshLocked(ctx, creds)
+}
+
+func (m *Manager) loadCredentialsLocked() (*Credentials, error) {
+	if m.cachedCredentials != nil {
+		return cloneCredentials(m.cachedCredentials), nil
+	}
+	return m.reloadCredentialsLocked()
+}
+
+func (m *Manager) reloadCredentialsLocked() (*Credentials, error) {
 	creds, err := m.store.Load(m.baseURL)
 	if err != nil {
-		return fmt.Errorf("not authenticated: %w", err)
+		m.cachedCredentials = nil
+		return nil, err
 	}
+	m.cachedCredentials = cloneCredentials(creds)
+	return cloneCredentials(creds), nil
+}
 
-	// Cookie-based auth doesn't support refresh; treat as no-op.
-	if creds.RefreshToken == "" && creds.SessionCookie != "" {
-		return nil
+func (m *Manager) saveCredentials(creds *Credentials) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.store.Save(m.baseURL, creds); err != nil {
+		return err
 	}
-
-	return m.refreshLocked(ctx, creds)
+	m.cachedCredentials = cloneCredentials(creds)
+	return nil
 }
 
 // refreshLocked holds the store's cross-process lock for the whole load-refresh-save,
@@ -281,15 +387,48 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	}
 	defer unlock()
 
-	if stored, loadErr := m.store.load(m.baseURL); loadErr == nil {
-		if stored.AccessToken != "" && stored.AccessToken != creds.AccessToken {
-			return nil
-		}
-		creds = stored
+	stored, loadErr := m.store.load(m.baseURL)
+	if errors.Is(loadErr, ErrCredentialsNotFound) {
+		// Another process deleted the credential while we waited for the lock.
+		// Nothing stale may survive a forced read that proves it is gone.
+		m.cachedCredentials = nil
+		return errNotAuthenticated(loadErr)
+	}
+	if loadErr != nil {
+		return credentialLoadError(loadErr)
+	}
+	m.cachedCredentials = cloneCredentials(stored)
+	changed := stored.AccessToken != creds.AccessToken || stored.SessionCookie != creds.SessionCookie
+	if changed && (stored.AccessToken != "" || stored.SessionCookie != "") {
+		return nil
+	}
+	creds = cloneCredentials(stored)
+	if creds.AccessToken == "" && creds.RefreshToken == "" && creds.SessionCookie == "" {
+		return errNoCredential("stored credentials are signed out", nil)
 	}
 
+	// Cookie-based auth has nothing to refresh. The fresh read above still lets
+	// a 401 adopt a cookie another process stored before the SDK retries.
+	if creds.RefreshToken == "" && creds.SessionCookie != "" {
+		return nil
+	}
 	if creds.RefreshToken == "" {
 		return fmt.Errorf("no refresh token available")
+	}
+
+	if m.refusedRefreshToken != "" && creds.RefreshToken == m.refusedRefreshToken {
+		// Refused once already, and the store would not let go of it.
+		return errRefusedGrant(nil)
+	}
+
+	if held, until := m.refreshHeld(); held {
+		// Asking again inside the rate limit cannot get through. A token that has
+		// not actually expired is still good, so carry on with it: the SDK's own
+		// retry after a 401 costs one request at most.
+		if creds.ExpiresAt > time.Now().Unix() {
+			return nil
+		}
+		return errRefreshHeld(until)
 	}
 
 	tokenEndpoint := creds.TokenEndpoint
@@ -297,15 +436,16 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		tokenEndpoint = m.baseURL + "/oauth/tokens"
 	}
 
-	installID, err := m.store.installID()
+	installID, err := m.credentialInstallID(creds)
 	if err != nil {
-		return fmt.Errorf("install id: %w", err)
+		return err
 	}
 
 	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)
 	if err != nil {
-		return fmt.Errorf("token refresh failed: %w", err)
+		return m.accountForRefreshFailure(err, creds.RefreshToken)
 	}
+	m.refreshHoldUntil = time.Time{}
 	// A 200 without an access token is not a refresh. Storing the empty string would
 	// take the working token with it and leave nothing to authenticate with.
 	if token.AccessToken == "" {
@@ -322,7 +462,194 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
-	return m.store.save(m.baseURL, creds)
+	if err := m.store.save(m.baseURL, creds); err != nil {
+		return err
+	}
+	m.cachedCredentials = cloneCredentials(creds)
+	return nil
+}
+
+// credentialInstallID is the install a refresh presents: the one the tokens were issued
+// to. Credentials saved before they carried one were issued to this config directory's
+// install_id — the one every earlier login and refresh presented — so they take it when
+// the directory still holds a well-formed one, and HEY's binding of their family
+// matches. Without one they take an id derived from the refresh token, the same for every
+// holder of the credential, never a freshly minted one. The refresh's own save keeps
+// whichever they took, so every later refresh, from any config directory sharing the
+// keychain entry, presents it too.
+//
+// A stored id that isn't a well-formed install id is refused here rather than sent: HEY
+// would read it as another install and revoke the session, and substituting one would be
+// another install too. Signing in again stores a fresh one.
+func (m *Manager) credentialInstallID(creds *Credentials) (string, error) {
+	if creds.InstallID == "" {
+		directoryID, err := m.store.existingInstallID()
+		switch {
+		case err != nil:
+			return "", fmt.Errorf("install id: %w", err)
+		case directoryID != "":
+			creds.InstallID = directoryID
+		default:
+			creds.InstallID = adoptedInstallID(creds.RefreshToken)
+		}
+	}
+	if !isInstallID(creds.InstallID) {
+		return "", fmt.Errorf("stored credentials carry a malformed install_id; run `hey login` to sign in again")
+	}
+	return creds.InstallID, nil
+}
+
+// accountForRefreshFailure decides what a failed refresh costs the stored credential.
+// Only invalid_grant clears it: that is the one answer that proves re-sending can never
+// work. Anything softer keeps it, or a passing 502 would sign people out.
+func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) error {
+	var refusal *tokenEndpointError
+	if !errors.As(err, &refusal) {
+		// No answer from the server, so no verdict on the grant.
+		return fmt.Errorf("token refresh failed: %w", err)
+	}
+
+	if refusal.rateLimited() {
+		m.holdRefreshes(refusal.RetryAfter)
+		return errRefreshHeld(m.refreshHoldUntil)
+	}
+
+	if !refusal.grantRefused() {
+		return fmt.Errorf("token refresh failed: %w", err)
+	}
+
+	// Forget it under the lock that already spans this load-refresh-save, so the
+	// next command asks for a login instead of re-sending it.
+	if delErr := m.store.delete(m.baseURL); delErr != nil {
+		// Keep the process-local guard even if the durable fallback also fails.
+		m.refusedRefreshToken = sentRefreshToken
+
+		// The keyring can occasionally refuse a delete while still allowing a
+		// write. Replace the dead grant with a signed-out record so another
+		// process cannot load and submit it again. A later login overwrites this
+		// through the ordinary save path.
+		tombstone := &Credentials{}
+		if saveErr := m.store.save(m.baseURL, tombstone); saveErr != nil {
+			return errRefusedGrant(errors.Join(delErr, fmt.Errorf("replace refused credential: %w", saveErr)))
+		}
+		m.cachedCredentials = cloneCredentials(tombstone)
+		if m.credentialCleared != nil {
+			m.credentialCleared()
+		}
+		return errRefusedGrant(nil)
+	}
+	m.cachedCredentials = nil
+	// Cached mail must not outlive the credential that fetched it, here as much
+	// as on an explicit logout.
+	if m.credentialCleared != nil {
+		m.credentialCleared()
+	}
+	return errRefusedGrant(nil)
+}
+
+// refreshHeld reports whether this process is sitting out a rate limit, and until when.
+func (m *Manager) refreshHeld() (bool, time.Time) {
+	if m.refreshHoldUntil.IsZero() || !time.Now().Before(m.refreshHoldUntil) {
+		return false, time.Time{}
+	}
+	return true, m.refreshHoldUntil
+}
+
+// holdRefreshes parks refreshes until the rate limit has had time to clear, honoring
+// the server's Retry-After when it sends one. The hold only ever moves later.
+func (m *Manager) holdRefreshes(retryAfter time.Duration) {
+	if retryAfter <= 0 {
+		retryAfter = defaultRefreshHold
+	}
+	if until := time.Now().Add(retryAfter); until.After(m.refreshHoldUntil) {
+		m.refreshHoldUntil = until
+	}
+}
+
+// errNoCredential is an auth failure with the store's reason attached. It has to be
+// classified here: the SDK hands our errors back untouched, so an unclassified one
+// would reach the envelope as a generic API failure without the login hint.
+func errNoCredential(msg string, cause error) *apierr.Error {
+	err := apierr.ErrAuth(msg)
+	err.Cause = cause
+	return err
+}
+
+func credentialLoadError(err error) error {
+	if errors.Is(err, ErrCredentialsNotFound) {
+		return errNotAuthenticated(err)
+	}
+	return CredentialStorageError("could not read stored credentials", err)
+}
+
+// CredentialStorageError reports a credential store that could not be read. It is not
+// an authentication failure, so it keeps its own exit status; a keyring refusal gets
+// the hint that stops a caller from asking for another login.
+func CredentialStorageError(context string, err error) error {
+	if errors.Is(err, ErrKeyringRefused) {
+		return &apierr.Error{
+			Code:    apierr.CodeUnknown,
+			Message: fmt.Sprintf("%s: %v", context, err),
+			Hint:    keyringRefusedHint(),
+			Cause:   err,
+		}
+	}
+	return fmt.Errorf("%s: %w", context, err)
+}
+
+// keyringRefusedHint names where the process runs rather than the login, because a
+// new login lands in the same Keychain. The refusal comes from the desktop session, so
+// the restart advice holds inside Codex's sandbox too; there it comes after the step
+// that lets hey out of the sandbox.
+func keyringRefusedHint() string {
+	session := "the macOS Keychain won't hand your login to a process outside your Mac's desktop session, " +
+		"such as one started over SSH or by an agent's background server launched from there."
+	restart := "For Codex, quit it, run `codex app-server daemon restart` in Terminal on the Mac, then start Codex again."
+	if inCodexSandbox() {
+		return "Signing in again won't help. Let Codex run hey outside its sandbox. If it still fails there, " +
+			session + " " + restart
+	}
+	return "Signing in again won't help: " + session + " Run hey from Terminal on the Mac. " + restart
+}
+
+// NotLoggedInHint is the remedy for a missing login. Codex's sandbox hides the system
+// keyring, so a login that is saved reads as missing there.
+func NotLoggedInHint() string {
+	if inCodexSandbox() {
+		return "Codex's sandbox hides the system keyring, so a saved login looks missing here. " +
+			"If `hey auth status` in Terminal says you're logged in, let Codex run hey outside its sandbox; " +
+			"otherwise run `hey auth login` in Terminal."
+	}
+	return "Run: hey auth login"
+}
+
+func inCodexSandbox() bool {
+	return os.Getenv("CODEX_SANDBOX") != ""
+}
+
+func errNotAuthenticated(cause error) *apierr.Error {
+	err := errNoCredential(fmt.Sprintf("not authenticated: %v", cause), cause)
+	err.Hint = NotLoggedInHint()
+	return err
+}
+
+// errRefusedGrant reports a refresh token the server answered invalid_grant for.
+// cleanupErr is the failure to clear it from the store, when there was one.
+func errRefusedGrant(cleanupErr error) *apierr.Error {
+	if cleanupErr != nil {
+		err := errNoCredential(fmt.Sprintf("HEY refused the stored refresh token: the session has expired or was revoked. The stored credentials could not be cleared: %v", cleanupErr), cleanupErr)
+		err.Hint = "Run: hey auth logout, then: hey auth login"
+		return err
+	}
+	return apierr.ErrAuth("HEY refused the stored refresh token: the session has expired or was revoked. Changing your HEY password ends every session, including this one. The stored credentials have been cleared")
+}
+
+func errRefreshHeld(until time.Time) *apierr.Error {
+	wait := time.Until(until).Round(time.Second)
+	err := apierr.ErrRateLimit(int(wait / time.Second))
+	err.Message = fmt.Sprintf("HEY is rate-limiting token requests — not asking again for %s", wait)
+	err.Hint = "Wait for the limit to clear, then run the command again"
+	return err
 }
 
 // GetStore returns the credential store.
@@ -425,4 +752,13 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 	case <-time.After(5 * time.Minute):
 		return "", fmt.Errorf("authentication timeout")
 	}
+}
+
+// sessionCookieHeader sends a browser session cookie under both of the names
+// HEY signs it with. Browsers signed in since HEY moved to __Host-session_token
+// hold that cookie; older ones hold session_token. The value's signature is
+// bound to its name, so HEY accepts it under one and ignores it under the other,
+// and stored cookies work whichever name they were copied from.
+func sessionCookieHeader(value string) string {
+	return "__Host-session_token=" + value + "; session_token=" + value
 }

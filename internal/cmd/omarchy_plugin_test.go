@@ -598,6 +598,34 @@ func TestOmarchyPluginEnsureRetryIsThrottledAfterACloneFailure(t *testing.T) {
 	}
 }
 
+func TestOmarchyPluginAddFailureDoesNotAcceptADisabledPlugin(t *testing.T) {
+	env, _, _ := testOmarchyEnvScripted(t, nil)
+	stubConfirmOmarchyPanel(t, true, nil)
+	addRan := false
+	base := env.run
+	env.run = func(name string, args ...string) (string, error) {
+		command := strings.Join(append([]string{name}, args...), " ")
+		switch {
+		case strings.HasPrefix(command, "omarchy plugin list") && addRan:
+			return pluginListDisabled, nil
+		case strings.HasPrefix(command, "omarchy plugin add"):
+			addRan = true
+			return "rescan failed", errors.New("exit status 1")
+		default:
+			return base(name, args...)
+		}
+	}
+
+	step := omarchySetup{env: env}.installBarPlugin()
+	if step.Status != "failed" || step.Detail != "rescan failed" {
+		t.Fatalf("step = %q %q", step.Status, step.Detail)
+	}
+	marker, _ := readMarkerFile(t, env)
+	if !marker.PendingEnable || marker.LastCloneAt == "" {
+		t.Errorf("marker = %+v, want pending retry", marker)
+	}
+}
+
 func TestOmarchyPluginEnsureShellDownIsQuiet(t *testing.T) {
 	env, ran, _ := testOmarchyEnvScripted(t, map[string]omarchyReply{
 		"omarchy plugin list": {out: "omarchy-shell is not running (start it from the desktop)", err: errors.New("exit status 1")},
@@ -1510,7 +1538,7 @@ func TestSetupOmarchyJSONInstallsThePlugin(t *testing.T) {
 			return pluginListAbsent, nil
 		case strings.HasPrefix(command, "omarchy plugin add"):
 			enabled = true
-			return "Installed", nil
+			return "Cloning into '/home/user/.config/omarchy/plugins/.add.tmp.123'...", nil
 		default:
 			return "", nil
 		}
@@ -1535,6 +1563,59 @@ func TestSetupOmarchyJSONInstallsThePlugin(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("the plugin must actually be added: %v", *ran)
+	}
+}
+
+func TestSetupOmarchyJSONAcceptsEnabledPluginAfterAddFailure(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_BASE_URL", "")
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	stateHome := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	t.Setenv("OMARCHY_PATH", t.TempDir())
+	enabled := false
+	listCalls := 0
+	stubOmarchyRun(t, func(name string, args ...string) (string, error) {
+		command := strings.Join(append([]string{name}, args...), " ")
+		switch {
+		case name != "omarchy":
+			return "", exec.ErrNotFound
+		case strings.HasPrefix(command, "omarchy plugin list"):
+			listCalls++
+			if enabled {
+				return pluginListEnabled, nil
+			}
+			return pluginListAbsent, nil
+		case strings.HasPrefix(command, "omarchy plugin add"):
+			enabled = true
+			return "Cloning into '/home/user/.config/omarchy/plugins/.add.tmp.123'...", errors.New("exit status 1")
+		default:
+			return "", nil
+		}
+	})
+
+	root := newRootCmd()
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stdout)
+	root.SetArgs([]string{"setup", "omarchy", "--json"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("an enabled plugin is a successful install despite the add error: %v\n%s", err, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "installed and enabled") {
+		t.Errorf("steps = %s", stdout.String())
+	}
+	if listCalls < 2 {
+		t.Errorf("plugin list called %d times, want a post-error probe", listCalls)
+	}
+	marker, _, err := readOmarchyPluginMarker(filepath.Join(stateHome, "hey-cli", "omarchy", "bar-plugin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marker.PendingEnable || marker.InstalledAt == "" {
+		t.Errorf("marker = %+v, want finalized installation", marker)
 	}
 }
 

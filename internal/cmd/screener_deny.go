@@ -22,7 +22,7 @@ func newScreenerDenyCommand() *screenerDenyCommand {
 		Short: "Turn a sender away",
 		Long:  "Deny a sender, so what they sent is hidden and their future email never arrives.",
 		Annotations: map[string]string{
-			"agent_notes": "Clearance IDs come from `hey screener list`, not contact IDs. --spam also marks what they already sent as spam and trains HEY's filter on it, which is harder to undo than denying. Reverse with `hey screener approve <id>`.",
+			"agent_notes": "Clearance IDs come from `hey screener list`, not contact IDs. --spam also marks what they already sent as spam and, for a single ID, trains HEY's filter on it, which is harder to undo than denying; several IDs go through HEY's bulk endpoint, which does not train. Reverse with `hey screener approve <id>`.",
 		},
 		Example: `  hey screener deny 12345
   hey screener deny 12345 67890
@@ -31,7 +31,7 @@ func newScreenerDenyCommand() *screenerDenyCommand {
 		RunE: denyCommand.run,
 		Args: usageMinOneArg(),
 	}
-	denyCommand.cmd.Flags().BoolVar(&denyCommand.spam, "spam", false, "Also mark what they sent as spam and train the filter")
+	denyCommand.cmd.Flags().BoolVar(&denyCommand.spam, "spam", false, "Also mark what they sent as spam (and train the filter, for a single ID)")
 	return denyCommand
 }
 

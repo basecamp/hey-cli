@@ -60,7 +60,7 @@ func render(md string, width int) string {
 		return contain(LinkifyURLs(safe))
 	}
 
-	return contain(trimBlankLines(LinkifyURLs(out)))
+	return contain(trimBlankLines(LinkifyURLs(restoreNonASCIILinks(out))))
 }
 
 // trimBlankLines strips the padding glamour adds out to the wrap width, so a

@@ -45,7 +45,7 @@ hey setup omarchy does that explicitly. Set HEY_SETUP_VERBOSE=1 to show the deta
 installation progress, Omarchy status, and keybinding hint.`,
 		Args: cobra.NoArgs,
 		Annotations: map[string]string{
-			"agent_notes": "Runs the first-run wizard: OAuth sign-in, a look at the linked accounts, coding-agent setup, and the Omarchy integration when detected. --skip-agents and --skip-omarchy leave those integrations unchanged. --silent-success keeps required authentication and failure output, shows an installation spinner, and ends with SETUP COMPLETE. HEY_NONINTERACTIVE=1 suppresses interactive sign-in, but unskipped agent setup still writes skill files and the wizard persists the onboarded flag — there is no read-only mode; use `hey doctor` to inspect without changing anything. --json changes only the output format: a terminal on stdin (an allocated PTY included) still starts browser OAuth and waits for it. Logged out and non-interactive reports status incomplete with a remediation breadcrumb.",
+			"agent_notes": "Runs the first-run wizard: OAuth sign-in, a look at the linked accounts, coding-agent setup, and the Omarchy integration when detected. --skip-agents and --skip-omarchy leave those integrations unchanged. --silent-success keeps required authentication and failure output, shows an installation spinner, and ends with SETUP COMPLETE. HEY_NONINTERACTIVE=1 suppresses interactive sign-in, but setup still installs shell completions (unless a package manager already ships them), unskipped agent setup still writes skill files and installs the Claude Code plugin when Claude Code is detected, and the wizard persists the onboarded flag — there is no read-only mode; use `hey doctor` to inspect without changing anything. --json changes only the output format: a terminal on stdin (an allocated PTY included) still starts browser OAuth and waits for it. Logged out and non-interactive reports status incomplete with a remediation breadcrumb.",
 		},
 		RunE: setupCommand.run,
 	}
@@ -245,7 +245,11 @@ func (s *setupWizard) narrates() bool {
 // an agent harness on a pseudo-terminal — it reports "not logged in" instead
 // of parking a six-minute browser wait.
 func (s *setupWizard) signIn() (bool, error) {
-	if authMgr.IsAuthenticated() {
+	authenticated, err := authMgr.AuthenticationStatus()
+	if err != nil {
+		return false, err
+	}
+	if authenticated {
 		return true, nil
 	}
 	if !canSignInInteractively() {
@@ -676,7 +680,7 @@ func showWizardSuccess(w io.Writer, result wizardResult, outcome agentSetupOutco
 				barLine += " — " + bar.Detail
 			}
 			fmt.Fprintln(w, "Bar plugin: "+barLine)
-			desktop := "launcher entry, menu row and theme template in place"
+			desktop := "launcher entry and theme template in place"
 			for _, step := range result.Omarchy.Steps {
 				if step.Name != "bar plugin" && step.Status == "failed" {
 					desktop = step.Name + " failed: " + step.Detail

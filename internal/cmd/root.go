@@ -116,6 +116,10 @@ func newRootCmd() *cobra.Command {
 			configDir := config.ConfigDir()
 			httpClient := &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
+			// A refresh token HEY refuses is forgotten by the manager itself, on
+			// whatever command happened to send it. Cached mail must not outlive
+			// that credential any more than it outlives a logout.
+			authMgr.OnCredentialCleared(func() { clearHTTPCache(cmd.ErrOrStderr()) })
 			initSDK(authMgr, cfg.BaseURL)
 
 			// The agent-local setup subcommands and skill commands never read
@@ -130,9 +134,15 @@ func newRootCmd() *cobra.Command {
 				migrateOldCredentials(configDir)
 			}
 
-			if authMgr.IsAuthenticated() && commandUsesAccountScope(cmd) {
-				if err := selectConfiguredAccount(cmd.Context()); err != nil {
+			if commandUsesAccountScope(cmd) {
+				authenticated, err := authMgr.AuthenticationStatus()
+				if err != nil {
 					return err
+				}
+				if authenticated {
+					if err := selectConfiguredAccount(cmd.Context()); err != nil {
+						return err
+					}
 				}
 			}
 
@@ -152,7 +162,11 @@ func newRootCmd() *cobra.Command {
 			// First run: an interactive, logged-out bare `hey` gets the
 			// onboarding wizard (lite once onboarded — sign-in only). Every
 			// other bare `hey` prints help; the app lives at `hey tui`.
-			if interactiveStdio() && !machineReadableOutput(cmd) && !authMgr.IsAuthenticated() {
+			authenticated, err := authMgr.AuthenticationStatus()
+			if err != nil {
+				return err
+			}
+			if interactiveStdio() && !machineReadableOutput(cmd) && !authenticated {
 				return runSetupWizard(cmd, wizardOptions{full: !cfg.Onboarded})
 			}
 			return cmd.Help()
@@ -162,7 +176,7 @@ func newRootCmd() *cobra.Command {
 	root.CompletionOptions.HiddenDefaultCmd = true
 
 	root.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output JSON with metadata")
-	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Write the original HTML to a pipe or file (thread read, journal read, contact show, contact note show)")
+	root.PersistentFlags().BoolVar(&htmlOutput, "html", false, "Write the original HTML to a pipe or file (thread read, journal read, and a contact's note via contact show or contact note show)")
 	root.PersistentFlags().BoolVar(&quietFlag, "quiet", false, "Output result data only")
 	root.PersistentFlags().BoolVar(&idsOnly, "ids-only", false, "Output only IDs, one per line")
 	root.PersistentFlags().BoolVar(&countFlag, "count", false, "Output only the count of results")
@@ -396,7 +410,11 @@ var askToSignIn = func() (bool, error) {
 // stdout stays data); declined, piped or machine-output runs get the auth
 // error and exit code 3 instead.
 func requireAuth() error {
-	if authMgr.IsAuthenticated() {
+	authenticated, err := authMgr.AuthenticationStatus()
+	if err != nil {
+		return err
+	}
+	if authenticated {
 		return nil
 	}
 	if writer.IsStyled() && interactiveStdio() {
@@ -408,7 +426,9 @@ func requireAuth() error {
 			return nil
 		}
 	}
-	return apierr.ErrAuth("Not logged in")
+	notLoggedIn := apierr.ErrAuth("Not logged in")
+	notLoggedIn.Hint = auth.NotLoggedInHint()
+	return notLoggedIn
 }
 
 // migrateOldCredentials migrates credentials from the old config.json format

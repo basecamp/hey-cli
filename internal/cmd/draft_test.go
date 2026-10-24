@@ -38,8 +38,10 @@ func draftLifecycleServer(t *testing.T, editJSON string, writes *[]draftWrite) h
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
+			// What HEY answers for a delivered message (entries/_sent.jbuilder): the
+			// entry and the thread it went out on.
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"id":12345}`)
+			_, _ = io.WriteString(w, `{"id":12345,"topic_id":880}`)
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/entries/drafts/"):
 			*writes = append(*writes, draftWrite{Method: r.Method, Path: r.URL.Path})
 			w.WriteHeader(http.StatusNoContent)

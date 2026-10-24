@@ -100,7 +100,7 @@ type model struct {
 	// screen: every other section re-reads its data on entry, so a doorbell rung for a
 	// section nobody is looking at would be paid for and answered by nothing.
 	watchCalendar         CalendarWatcher
-	calendarChanges       <-chan struct{}
+	calendarChanges       <-chan CalendarWatchEvent
 	calendarWatchAttempt  uint64
 	calendarWatchFailures int
 	stopCalendarWatch     context.CancelFunc
@@ -194,6 +194,7 @@ func newViewContext(ctx context.Context, rootSDK, sdk *hey.Client, styles styles
 			return attachmentfiles.Save(ctx, sdk, destination, sourceURL, force)
 		},
 		openAttachment: openExternalFile,
+		openURL:        openExternalURL,
 		newAttachmentTempDir: func() (string, error) {
 			return os.MkdirTemp("", "hey-cli-attachment-*")
 		},
@@ -357,7 +358,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(watchThemeCmd(omarchyWatchDir(userHomeDir())), tea.RequestBackgroundColor)
 
 	case screenerClosedMsg:
-		return m.closeScreener()
+		return m.closeScreener(msg.toImbox)
 
 	case mailWatchStartedMsg:
 		if msg.attempt != m.mailWatchAttempt {
@@ -382,6 +383,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.closed {
 			m.mailWatchEvents = nil
 			cmd := m.mailWatchStopped()
+			m.updateHelpBindings()
+			return m, cmd
+		}
+		if msg.event.Err != nil {
+			cmd := m.mailWatchFailed(msg.event.Err)
 			m.updateHelpBindings()
 			return m, cmd
 		}
@@ -410,8 +416,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mailWatchAttempt++
 		return m, startMailWatchCmd(m.watchCtx, m.watchMail, m.mailWatchAttempt)
 
+	// The recipient list can arrive after the composer that asked for it has sent and
+	// the reader has gone to another section; the list is still Mail's to keep.
 	case mailRefreshDueMsg, postingsRefreshedMsg:
 		cmd, _ := m.mailView.Update(msg)
+		return m, m.stampViewCmd(cmd)
+
+	case recipientsLoadedMsg:
+		// Arriving mid-word opens the list under the field, and the help bar has
+		// to say what the list's keys do.
+		cmd, _ := m.mailView.Update(msg)
+		if m.activeView == m.mailView {
+			m.updateHelpBindings()
+		}
 		return m, m.stampViewCmd(cmd)
 
 	case screenerWatchStartedMsg:
@@ -446,7 +463,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if msg.err != nil {
-			return m, m.retryCalendarWatch()
+			return m, m.calendarWatchFailed(msg.err)
 		}
 		m.calendarChanges = msg.changes
 		m.calendarWatchFailures = 0
@@ -458,6 +475,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.closed {
 			return m, m.retryCalendarWatch()
+		}
+		if msg.event.Err != nil {
+			return m, m.calendarWatchFailed(msg.event.Err)
 		}
 		return m, tea.Batch(m.calendarChanged(), waitForCalendarChangeCmd(msg.attempt, m.calendarChanges))
 
@@ -670,17 +690,32 @@ func (m model) View() tea.View {
 	b.WriteString(content)
 
 	helpView := m.help.view()
-	if helpView != "" {
+	linkFooter, linkFooterVisible := m.linkFooter()
+	if helpView != "" || linkFooterVisible {
 		contentLines := strings.Count(b.String(), "\n")
-		helpH := strings.Count(helpView, "\n") + 1
+		helpH := 0
+		if helpView != "" {
+			helpH = strings.Count(helpView, "\n") + 1
+		}
 		footerH := 1 + helpH
+		if linkFooterVisible {
+			footerH += 1 + strings.Count(linkFooter, "\n")
+		}
 		padLines := m.height - contentLines - footerH - 1
 		for range max(padLines, 0) {
 			b.WriteString("\n")
 		}
 
 		b.WriteString(renderRule(m.width, ""))
-		b.WriteString("\n" + helpView)
+		if linkFooterVisible {
+			b.WriteString("\n")
+			if linkFooter != "" {
+				b.WriteString(m.styles.linkStatus.Render(linkFooter))
+			}
+		}
+		if helpView != "" {
+			b.WriteString("\n" + helpView)
+		}
 	}
 
 	v := tea.NewView(b.String())
@@ -712,11 +747,16 @@ func (m *model) updateHelpBindings() {
 		bindings = append(m.activeView.HelpBindings(), quitHint)
 	} else if m.activeView.InThread() {
 		extra := m.activeView.HelpBindings()
-		bindings = make([]helpBinding, 0, 3+len(extra))
-		bindings = append(bindings,
-			helpBinding{"↑↓", "scroll"},
-			helpBinding{"esc/q", "back"},
-		)
+		bindings = make([]helpBinding, 0, 4+len(extra))
+		bindings = append(bindings, helpBinding{"↑↓", "scroll"})
+		if navigator, ok := m.activeView.(linkNavigator); ok && navigator.ClaimsLinkNavigation() {
+			bindings = append(bindings,
+				helpBinding{"esc", "clear/back"},
+				helpBinding{"q", "back"},
+			)
+		} else {
+			bindings = append(bindings, helpBinding{"esc/q", "back"})
+		}
 		bindings = append(bindings, extra...)
 		bindings = append(bindings, quitHint)
 	} else {
@@ -725,7 +765,8 @@ func (m *model) updateHelpBindings() {
 			bindings = []helpBinding{
 				{"←→", "section"},
 				{"tab", "next row"},
-				{"shift+M/O/C/J", "jump"},
+				{"shift+M/C/J", "jump"},
+				{"o", "contacts"},
 				quitHint,
 			}
 		case rowSubnav:
@@ -751,7 +792,8 @@ func (m *model) updateHelpBindings() {
 	if m.canToggleHelp() && !m.help.hidden {
 		bindings = append(bindings, helpBinding{"?", "toggle help"})
 	}
-	if m.canOpenMailAccountPicker() && !m.mailAccountPicker {
+	// Keep the hint during writes; the key handler still waits for them to finish.
+	if m.canSwitchMailAccounts() && !m.loading && !m.activeView.InThread() && !m.mailAccountPicker {
 		if ic, ok := m.activeView.(inputCapturer); !ok || !ic.CapturingInput() {
 			description := "mail account"
 			if m.mailAccountDiscoveryErr != "" {
@@ -768,12 +810,46 @@ func (m *model) updateHelpBindings() {
 	}
 }
 
+// linkFooter is the link status as it goes on screen. A destination that wraps onto
+// more rows than the terminal can spare is replaced by a hint, and cannot be opened
+// until the terminal is enlarged.
+func (m model) linkFooter() (string, bool) {
+	text, visible := m.activeLinkFooter()
+	if visible && strings.Contains(text, "\n") && !m.linkFooterFits() {
+		return truncateToWidth("Enlarge the terminal to inspect this link", max(m.width, 0)), true
+	}
+	return text, visible
+}
+
+func (m model) activeLinkFooter() (string, bool) {
+	if provider, ok := m.activeView.(linkFooterProvider); ok {
+		return provider.LinkFooter()
+	}
+	return "", false
+}
+
+func (m model) linkFooterFits() bool {
+	text, visible := m.activeLinkFooter()
+	if !visible {
+		return false
+	}
+	statusHeight := 0
+	if m.mailWatchNotice() != "" {
+		statusHeight = 1
+	}
+	return m.height >= headerHeight+m.help.height()+3+statusHeight+1+strings.Count(text, "\n")
+}
+
 // contentHeight gives the active view every row that is not navigation or a
-// visible help footer. The footer carries two clear rows above its divider.
+// visible footer. Ordinary help has two clear rows above its divider; a link
+// footer uses one of them for its status row, and takes any further rows a
+// wrapped destination needs from the content.
 func (m model) contentHeight() int {
 	footerHeight := 0
-	if helpHeight := m.help.height(); helpHeight > 0 {
-		footerHeight = helpHeight + 3
+	helpHeight := m.help.height()
+	linkFooter, linkFooterVisible := m.linkFooter()
+	if helpHeight > 0 || linkFooterVisible {
+		footerHeight = helpHeight + 3 + strings.Count(linkFooter, "\n")
 	}
 	statusHeight := 0
 	if m.mailWatchNotice() != "" {
@@ -870,6 +946,11 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.updateHelpBindings()
 			return m, m.syncLoading(nil)
 		}
+		if msg.Key().Code == tea.KeyEscape {
+			if clearer, ok := m.activeView.(selectionClearer); ok && clearer.ClearSelection() {
+				m.updateHelpBindings()
+			}
+		}
 		return m, nil
 	}
 
@@ -877,8 +958,16 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if msg.Key().Code == tea.KeyTab && m.focus == rowContent {
+		if navigator, ok := m.activeView.(linkNavigator); ok && navigator.ClaimsLinkNavigation() {
+			cmd := m.activeView.HandleContentKey(msg)
+			m.updateHelpBindings()
+			return m, m.syncLoading(cmd)
+		}
+	}
+
 	if msg.Key().Code == tea.KeyTab {
-		if msg.Key().Mod == tea.ModShift {
+		if msg.Key().Mod.Contains(tea.ModShift) {
 			m.focus = (m.focus + 2) % 3
 		} else {
 			m.focus = (m.focus + 1) % 3
@@ -907,6 +996,11 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.updateHelpBindings()
 		return m, m.syncLoading(cmd)
 	case rowContent:
+		if msg.Key().Code == tea.KeyEnter {
+			if navigator, ok := m.activeView.(linkNavigator); ok && navigator.LinkSelectionActive() && !m.linkFooterFits() {
+				return m, nil
+			}
+		}
 		cmd := m.activeView.HandleContentKey(msg)
 		cmd = m.syncLoading(cmd)
 		m.updateHelpBindings()
@@ -917,7 +1011,8 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) canToggleHelp() bool {
-	if m.mailAccountPicker {
+	// An error box takes every key until it is dismissed, ? included.
+	if m.mailAccountPicker || m.err != nil {
 		return false
 	}
 	if m.activeView == m.screenerView {
@@ -1017,13 +1112,17 @@ func (m model) openScreener() (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m model) closeScreener() (tea.Model, tea.Cmd) {
+func (m model) closeScreener(toImbox bool) (tea.Model, tea.Cmd) {
 	if m.activeView != m.screenerView {
 		return m, nil
 	}
 	m.activeView = m.mailView
 	m.activeView.Resize(m.vc.width, m.vc.height)
-	cmd := m.syncLoading(m.mailView.refreshScreenerCount())
+	cmd := m.mailView.refreshScreenerCount()
+	if toImbox {
+		cmd = tea.Batch(cmd, m.mailView.switchBox(m.mailView.imboxIndex()))
+	}
+	cmd = m.syncLoading(cmd)
 	m.updateHelpBindings()
 	return m, cmd
 }
@@ -1119,12 +1218,21 @@ func (m *model) dropCalendarWatch() {
 // step the reader takes, so a watch that is down costs staleness, not a broken screen,
 // and the mail watch already announces a connection that is gone.
 func (m *model) retryCalendarWatch() tea.Cmd {
+	failures := m.calendarWatchFailures
 	m.dropCalendarWatch()
 	if !m.watchingCalendars() {
 		return nil
 	}
-	m.calendarWatchFailures++
+	m.calendarWatchFailures = failures + 1
 	return retryCalendarWatchLaterCmd(m.calendarWatchAttempt, mailWatchRetryDelay(m.calendarWatchFailures))
+}
+
+func (m *model) calendarWatchFailed(err error) tea.Cmd {
+	if !authenticationWatchError(err) {
+		return m.retryCalendarWatch()
+	}
+	m.dropCalendarWatch()
+	return nil
 }
 
 // calendarChanged is the calendar's doorbell. One write lands as several broadcasts —

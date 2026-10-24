@@ -136,6 +136,23 @@ func newSDKClient(extra ...hey.ClientOption) *hey.Client {
 	return hey.NewClient(sdkClientCfg, nil, opts...)
 }
 
+// newUncachedSDKClient builds a sibling of sdk — same configuration, same account —
+// without the response cache, for a read a 304 must not answer. The cache revalidates
+// on HEY's ETag, and an ETag can cover less than the body: /boxes.json's is the box
+// rows, so a box's posting_changes_url, feed version and all, can change under it.
+// The SDK has no per-request way past its cache, so this is a client of its own.
+func newUncachedSDKClient(ctx context.Context) (*hey.Client, error) {
+	uncached := *sdkClientCfg
+	uncached.CacheEnabled = false
+	uncached.CacheDir = ""
+	client := hey.NewClient(&uncached, nil, sdkClientOpts...)
+
+	if accountID, scoped := sdk.AccountID(); scoped {
+		return client.ForAccount(ctx, accountID)
+	}
+	return client, nil
+}
+
 func selectConfiguredAccount(ctx context.Context) error {
 	client, err := clientForAccountSelection(ctx, rootSDK, cfg.AccountID)
 	if err != nil {

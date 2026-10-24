@@ -44,7 +44,7 @@ jobs:
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.13.1  # keep in lockstep with test.yml Lint
+          version: v2.14.0  # keep in lockstep with test.yml Lint
           install-only: true
 
       - name: Cache BATS
@@ -66,7 +66,7 @@ jobs:
 
       - name: Run release quality gate
         run: |
-          make check-release-lockstep fmt-check vet lint test test-e2e tidy-check check-surface
+          make check-release-lockstep fmt-check vet lint test test-e2e test-sync-skills tidy-check check-surface
           go test -race -count=1 ./...
 
       - name: Run govulncheck
@@ -141,7 +141,7 @@ jobs:
 
       - name: Generate token for Homebrew tap
         id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -164,7 +164,7 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Install Syft
-        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
 
       # Fail fast: goreleaser's notarize block turns itself off when any of
       # these secrets is empty, so without this check a misconfigured canonical
@@ -214,7 +214,7 @@ jobs:
 
       - name: Set up Java for jsign
         if: github.repository == 'basecamp/hey-cli'
-        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
           java-version: '21'
@@ -244,7 +244,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Install GoReleaser
-        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           # Keep in sync with .mise.toml goreleaser version pin.
@@ -288,14 +288,19 @@ jobs:
           SIGN_ALIAS: 1346fa41-d9f0-4580-b7b9-a95cf5674354
         run: goreleaser release --clean
 
-      # The gate itself runs as a goreleaser build hook (.goreleaser.yaml),
-      # before archives, signing and publishing; this pass over dist/ is the
-      # consolidated per-platform table for the job summary.
       - name: Clean up Windows signing material
         if: always()
         run: rm -f "$RUNNER_TEMP/digicert-client-cert.p12" "$RUNNER_TEMP"/jsign-*.jar
 
+      # The gate itself runs as a goreleaser build hook (.goreleaser.yaml),
+      # before anything is archived or published, and again in make
+      # release-check before the tag exists. This pass over dist/ measures the
+      # signed binaries as shipped and is the consolidated per-platform table
+      # for the job summary. It must not fail the job: by now the release is
+      # published, and a failure here skipped the attestation, the upgrade
+      # smoke and every job after this one for v1.7.0.
       - name: Report release size budget
+        continue-on-error: true
         run: scripts/check-size-budget.sh
 
       - name: Attest build provenance
@@ -565,9 +570,31 @@ jobs:
         with:
           persist-credentials: false
 
+      # An older stable release can reach this job after a newer one has
+      # published — its run stalled, or its failed sync was rerun later — and
+      # the script mirrors the skills wholesale, so it would roll basecamp/skills
+      # back. The concurrency group serialises the jobs but does not order them,
+      # so this is the check the manual Sync skills workflow makes: only the
+      # latest stable release publishes. A failed lookup fails the job, which
+      # files the issue below rather than skipping in silence.
+      - name: Confirm this is the latest stable release
+        id: latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          latest=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
+          if [ "$TAG" = "$latest" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Skipping the skills sync for ${TAG}: the latest stable release is ${latest}, and syncing an older tag would roll basecamp/skills back."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate token for skills repo
+        if: steps.latest.outputs.publish == 'true'
         id: skills-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
@@ -576,6 +603,7 @@ jobs:
           permission-contents: write
 
       - name: Sync skills to distribution repo
+        if: steps.latest.outputs.publish == 'true'
         id: sync
         env:
           SKILLS_TOKEN: ${{ steps.skills-token.outputs.token }}

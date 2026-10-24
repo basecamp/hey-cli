@@ -6,18 +6,22 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/editor"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
 type composeCommand struct {
 	cmd         *cobra.Command
+	from        string
 	to          string
 	cc          string
 	bcc         string
@@ -35,8 +39,30 @@ func newComposeCommand() *composeCommand {
 	composeCommand.cmd = &cobra.Command{
 		Use:   "compose",
 		Short: "Write and send a new email",
+		Long: `Write and send a new email, or reply to a thread with --thread-id.
+
+--thread-id answers the thread's latest emailed message, as hey reply does: a note or
+share notice posted after it is internal and never emailed, and a thread holding nothing
+else is refused.
+
+A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
+or a top-level domain HEY does not know — is refused before anything is sent.
+
+A send answers the new message's id and the topic_id of the thread it is on (for hey
+thread read or hey reply), with its subject and delayed, which is true while Undo Send
+holds the delivery back. Whatever HEY's answer leaves out is left out here too; nothing
+is guessed in its place. --draft saves instead of sending and answers the draft's id.
+
+While Undo Send holds a message back (delayed), HEY leaves it out of its thread:
+hey thread read shows the thread without it, and a thread it started answers not_found,
+until the message goes out. Read the thread again then.
+
+If HEY refuses the send — usually because the account has reached its sending limit —
+it keeps the message as a draft; the command then fails with not_delivered (exit 7),
+naming the draft, which hey draft send sends later.`,
+		Args: recipientsChecked(nil),
 		Annotations: map[string]string{
-			"agent_notes": "Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not. Repeatable --attach files are uploaded before sending and can be sent without body text. The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out.",
+			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages. --from does not save a default sender. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not; --thread-id answers the thread's latest emailed message, never a note (kind \"comment\") or share notice (kind \"access_notice\"), and a thread with no emailed message is refused as not_found. Repeatable --attach files are uploaded before sending and can be sent without body text. With neither -m nor --message-html the body is read from stdin when stdin is not a terminal, and $EDITOR opens when it is (unless --attach files stand in for a body). The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out. A send answers the new message's id and the topic_id of its thread (for hey thread read), with subject and delayed (true while Undo Send holds it back) — only the fields HEY's answer carries, never guessed. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
@@ -49,13 +75,14 @@ func newComposeCommand() *composeCommand {
 		RunE: composeCommand.run,
 	}
 
+	composeCommand.cmd.Flags().StringVar(&composeCommand.from, "from", "", "Configured sender email or ID (see hey account senders)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.to, "to", "", "Recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.cc, "cc", "", "CC recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.bcc, "bcc", "", "BCC recipient email address(es)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.subject, "subject", "", "Message subject (required for a new message)")
 	composeCommand.cmd.Flags().StringVarP(&composeCommand.message, "message", "m", "", "Message body as Markdown (or opens $EDITOR)")
 	composeCommand.cmd.Flags().StringVar(&composeCommand.messageHTML, "message-html", "", "Message body as raw HTML instead of Markdown")
-	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Reply to this thread instead of starting a new one")
+	composeCommand.cmd.Flags().StringVar(&composeCommand.threadID, "thread-id", "", "Reply to this thread's latest emailed message instead of starting a new one")
 	composeCommand.cmd.Flags().StringArrayVar(&composeCommand.attachments, "attach", nil, "File to attach (repeatable)")
 	composeCommand.cmd.Flags().BoolVar(&composeCommand.draft, "draft", false, "Save as a draft instead of sending")
 	composeCommand.cmd.Flags().BoolVar(&composeCommand.noNameTag, "no-name-tag", false, "Leave the sender's HEY name tag off a new message")
@@ -65,6 +92,9 @@ func newComposeCommand() *composeCommand {
 }
 
 func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
+	if cmd.Flags().Changed("from") && (strings.TrimSpace(c.from) == "" || c.threadID != "") {
+		return apierr.ErrUsage("--from requires a sender email or ID and is only supported for new messages")
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}
@@ -72,6 +102,18 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	// A reply carries the thread's subject, so only a new message needs one.
 	if c.subject == "" && c.threadID == "" {
 		return apierr.ErrUsageHint("--subject is required", "hey compose --to <email> --subject <subject> -m <message>")
+	}
+
+	ctx := cmd.Context()
+	summary := sentWithAttachmentsSummary("Message sent", len(c.attachments))
+	var senderClient *hey.Client
+	var sender generated.Sender
+	if cmd.Flags().Changed("from") {
+		var err error
+		senderClient, sender, err = selectedSender(ctx, c.from, 0)
+		if err != nil {
+			return err
+		}
 	}
 
 	message := c.messageHTML
@@ -99,8 +141,6 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		message = htmlutil.FromMarkdown(markdownMessage)
 	}
 
-	ctx := cmd.Context()
-
 	if c.threadID != "" {
 		topicID, parseErr := strconv.ParseInt(c.threadID, 10, 64)
 		if parseErr != nil {
@@ -109,6 +149,9 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		target, resolveErr := resolveThreadReply(ctx, topicID)
 		if resolveErr != nil {
 			return resolveErr
+		}
+		if !replyHasRecipients(target.Addressed) {
+			return apierr.ErrUsage("could not determine thread recipients; use hey reply with --to, --cc or --bcc")
 		}
 		replySDK := target.client
 		messageWithAttachments, attachErr := attachFilesWithClient(ctx, replySDK, message, c.attachments)
@@ -123,43 +166,54 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 			}
 			return writeDraftSaved(cmd, draftID, len(c.attachments))
 		}
-		if err := replySDK.Entries().CreateReply(ctx, target.EntryID, target.ActingSenderID, target.Subject, messageWithAttachments,
-			target.Addressed.To, target.Addressed.CC, target.Addressed.BCC); err != nil {
+		sent, err := replySDK.Entries().CreateReply(ctx, target.EntryID, target.ActingSenderID, target.Subject, messageWithAttachments,
+			target.Addressed.To, target.Addressed.CC, target.Addressed.BCC)
+		if err != nil {
 			return apierr.FromSDK(err)
 		}
-	} else {
-		to := parseAddresses(c.to)
-		cc := parseAddresses(c.cc)
-		bcc := parseAddresses(c.bcc)
-		// A draft needs nobody on it yet; only a send does.
-		if len(to)+len(cc)+len(bcc) == 0 && !c.draft {
-			return apierr.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
+		if err := confirmSent(ctx, replySDK, sent); err != nil {
+			return err
 		}
-		messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
-		if attachErr != nil {
-			return attachErr
-		}
-		if !c.noNameTag {
-			var tagErr error
-			if messageWithAttachments, tagErr = appendSenderNameTag(ctx, messageWithAttachments); tagErr != nil {
-				return tagErr
-			}
-		}
-		if c.draft {
-			draftID, draftErr := sdk.Messages().CreateDraft(ctx, hey.DraftContent{
-				Subject: c.subject, Content: messageWithAttachments, To: to, CC: cc, BCC: bcc,
-			})
-			if draftErr != nil {
-				return apierr.FromSDK(draftErr)
-			}
-			return writeDraftSaved(cmd, draftID, len(c.attachments))
-		}
-		if err := sdk.Messages().Create(ctx, c.subject, messageWithAttachments, to, cc, bcc); err != nil {
-			return apierr.FromSDK(err)
-		}
+		return writeMessageSent(cmd, messageSent{line: summary, summary: summary, thread: topicID}, sent)
 	}
 
-	return writeMutation(cmd, sentWithAttachmentsSummary("Message sent", len(c.attachments)), nil)
+	to := parseAddresses(c.to)
+	cc := parseAddresses(c.cc)
+	bcc := parseAddresses(c.bcc)
+	// A draft needs nobody on it yet; only a send does.
+	if len(to)+len(cc)+len(bcc) == 0 && !c.draft {
+		return apierr.ErrUsage("a message needs at least one recipient (to, cc or bcc)")
+	}
+	if cmd.Flags().Changed("from") {
+		return c.composeFrom(cmd, senderClient, sender, message, to, cc, bcc)
+	}
+	messageWithAttachments, attachErr := attachFiles(ctx, message, c.attachments)
+	if attachErr != nil {
+		return attachErr
+	}
+	if !c.noNameTag {
+		var tagErr error
+		if messageWithAttachments, tagErr = appendSenderNameTag(ctx, messageWithAttachments); tagErr != nil {
+			return tagErr
+		}
+	}
+	if c.draft {
+		draftID, draftErr := sdk.Messages().CreateDraft(ctx, hey.DraftContent{
+			Subject: c.subject, Content: messageWithAttachments, To: to, CC: cc, BCC: bcc,
+		})
+		if draftErr != nil {
+			return apierr.FromSDK(draftErr)
+		}
+		return writeDraftSaved(cmd, draftID, len(c.attachments))
+	}
+	sent, err := sdk.Messages().Create(ctx, c.subject, messageWithAttachments, to, cc, bcc)
+	if err != nil {
+		return apierr.FromSDK(err)
+	}
+	if err := confirmSent(ctx, sdk, sent); err != nil {
+		return err
+	}
+	return writeMessageSent(cmd, messageSent{line: summary, summary: summary}, sent)
 }
 
 // appendSenderNameTag ends a new message — attachments included — with the sender's name
@@ -202,16 +256,38 @@ func writeDraftSaved(cmd *cobra.Command, draftID int64, attachments int) error {
 	)
 }
 
-func parseAddresses(s string) []string {
-	if s == "" {
+// recipientsChecked refuses a --to, --cc or --bcc address HEY would drop without
+// saying so (see mail.InvalidAddress). It runs as the command's arguments are checked,
+// which cobra does before the root's PersistentPreRunE resolves an account over the
+// network, so a bad address is refused before any request, upload or editor.
+func recipientsChecked(args cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, positional []string) error {
+		if args != nil {
+			if err := args(cmd, positional); err != nil {
+				return err
+			}
+		}
+		var lists [][]string
+		for _, name := range []string{"to", "cc", "bcc"} {
+			flag := cmd.Flags().Lookup(name)
+			if flag == nil || !flag.Changed {
+				continue
+			}
+			values := []string{flag.Value.String()}
+			if slice, ok := flag.Value.(pflag.SliceValue); ok {
+				values = slice.GetSlice()
+			}
+			for _, value := range values {
+				lists = append(lists, parseAddresses(value))
+			}
+		}
+		if address := mail.InvalidAddress(lists...); address != "" {
+			return apierr.ErrUsage("not a valid email address: " + address)
+		}
 		return nil
 	}
-	var addrs []string
-	for _, addr := range strings.Split(s, ",") {
-		addr = strings.TrimSpace(addr)
-		if addr != "" {
-			addrs = append(addrs, addr)
-		}
-	}
-	return addrs
+}
+
+func parseAddresses(s string) []string {
+	return mail.SplitAddresses(s)
 }

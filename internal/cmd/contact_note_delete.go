@@ -16,9 +16,12 @@ type contactNoteDeleteCommand struct {
 func newContactNoteDeleteCommand() *contactNoteDeleteCommand {
 	deleteCommand := &contactNoteDeleteCommand{}
 	deleteCommand.cmd = &cobra.Command{
-		Use:     "delete <id>",
-		Short:   "Delete a private contact note",
-		Long:    "Permanently delete the private note from a contact. The contact remains unchanged.",
+		Use:   "delete <id>",
+		Short: "Delete a private contact note",
+		Long:  "Permanently delete the private note from a contact. The contact remains unchanged.",
+		Annotations: map[string]string{
+			"agent_notes": "A hidden contact, an alias or another HEY user answers not_found.",
+		},
 		Example: `  hey contact note delete 12345`,
 		RunE:    deleteCommand.run,
 		Args:    usageExactOneArg(),

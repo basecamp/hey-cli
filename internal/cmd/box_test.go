@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 func TestValidateBoxArgs(t *testing.T) {
@@ -59,40 +62,56 @@ func TestValidateBoxArgs(t *testing.T) {
 	}
 }
 
+// Every spelling of a box HEY names — the short name hey search --in takes, the kind hey
+// box list shows, the display name — reads it on its own route, with no list lookup.
 func TestBoxCommandNamedRoutes(t *testing.T) {
 	tests := []struct {
-		name string
-		box  string
-		path string
+		name      string
+		path      string
+		spellings []string
 	}{
-		{name: "Imbox", box: "imbox", path: "/imbox.json"},
-		{name: "Feed", box: "the feed", path: "/feedbox.json"},
-		{name: "Paper Trail", box: "paper trail", path: "/paper_trail.json"},
-		{name: "Set Aside", box: "set aside", path: "/set_aside.json"},
-		{name: "Reply Later", box: "reply later", path: "/reply_later.json"},
-		{name: "Bubbled Up", box: "bubbled up", path: "/bubble_up.json"},
+		{name: "Imbox", path: "/imbox.json", spellings: []string{"imbox", "Imbox", "IMBOX"}},
+		{name: "The Feed", path: "/feedbox.json", spellings: []string{"feed", "feedbox", "the feed", "The Feed", "thefeed"}},
+		{name: "Paper Trail", path: "/paper_trail.json", spellings: []string{"papertrail", "trailbox", "paper trail", "Paper Trail", "paper-trail", "paper_trail", "trail"}},
+		{name: "Set Aside", path: "/set_aside.json", spellings: []string{"setaside", "asidebox", "set aside", "Set Aside", "set-aside", "aside"}},
+		{name: "Reply Later", path: "/reply_later.json", spellings: []string{"replylater", "laterbox", "reply later", "Reply Later", "reply-later", "later"}},
+		{name: "Bubble Up", path: "/bubble_up.json", spellings: []string{"bubbleup", "bubblebox", "bubble up", "Bubble Up", "bubbled up", "bubble"}},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var requests atomic.Int32
-			response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				requests.Add(1)
-				if r.Method != http.MethodGet || r.URL.Path != tt.path {
-					t.Errorf("request = %s %s, want GET %s", r.Method, r.URL.Path, tt.path)
-					http.NotFound(w, r)
-					return
+		for _, spelling := range tt.spellings {
+			t.Run(tt.name+"/"+spelling, func(t *testing.T) {
+				var requests atomic.Int32
+				response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					if r.Method != http.MethodGet || r.URL.Path != tt.path {
+						t.Errorf("request = %s %s, want GET %s", r.Method, r.URL.Path, tt.path)
+						http.NotFound(w, r)
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = fmt.Fprintf(w, `{"id":1,"kind":"box","name":%q,"postings":[]}`, tt.name)
+				}), "box", "view", spelling)
+				if err != nil {
+					t.Fatalf("execute box: %v", err)
 				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = fmt.Fprintf(w, `{"id":1,"kind":%q,"name":%q,"postings":[]}`, tt.box, tt.name)
-			}), "box", tt.box)
-			if err != nil {
-				t.Fatalf("execute box: %v", err)
-			}
-			if requests.Load() != 1 {
-				t.Errorf("requests = %d, want one named lookup", requests.Load())
-			}
-			if response.Summary != "0 threads in "+tt.name {
-				t.Errorf("summary = %q", response.Summary)
+				if requests.Load() != 1 {
+					t.Errorf("requests = %d, want one named lookup", requests.Load())
+				}
+				if response.Summary != "0 threads in "+tt.name {
+					t.Errorf("summary = %q", response.Summary)
+				}
+			})
+		}
+	}
+}
+
+// A script takes a box name from hey search --help, so every value --in accepts that
+// names a box has to name the same box here.
+func TestBoxCommandTakesEverySearchBox(t *testing.T) {
+	for kind, value := range searchInValues {
+		t.Run(value, func(t *testing.T) {
+			if got := boxKindFor(value); got != kind {
+				t.Errorf("boxKindFor(%q) = %q, want %q", value, got, kind)
 			}
 		})
 	}
@@ -100,13 +119,16 @@ func TestBoxCommandNamedRoutes(t *testing.T) {
 
 func TestBoxCommandNumericIDAndLimit(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/boxes/17.json" {
-			t.Errorf("request = %s %s, want GET /boxes/17.json", r.Method, r.URL.Path)
-			http.NotFound(w, r)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"id":17,"kind":"custom","name":"Receipts","next_history_url":"https://example.invalid/page-2","postings":[{"id":1,"summary":"First"},{"id":2,"summary":"Second"}]}`)
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":17,"kind":"custom","name":"Receipts"}]`)
+		case r.Method == http.MethodGet && r.URL.Path == "/boxes/17.json":
+			_, _ = io.WriteString(w, `{"id":17,"kind":"custom","name":"Receipts","next_history_url":"https://example.invalid/page-2","postings":[{"id":1,"summary":"First"},{"id":2,"summary":"Second"}]}`)
+		default:
+			t.Errorf("request = %s %s, want GET /boxes.json or /boxes/17.json", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
 	}), "box", "17", "--limit", "1")
 	if err != nil {
 		t.Fatalf("execute box: %v", err)
@@ -200,23 +222,77 @@ func TestBoxCommandFollowsPagesOnTheNamedRoute(t *testing.T) {
 	}
 }
 
-// A numeric ID reaches the same named route, because the box says what kind it is.
-func TestBoxCommandFollowsPagesForANumericImbox(t *testing.T) {
+// A numeric ID reads every page on the box's own route, the first included: /boxes/{id}
+// orders The Feed differently, so a first page read there would repeat or skip threads on
+// the second.
+func TestBoxCommandFollowsPagesForANumericFeed(t *testing.T) {
 	var requests []string
 	if _, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Query().Get("page") {
-		case "":
-			_, _ = io.WriteString(w, `{"id":9,"kind":"imbox","name":"Imbox","next_history_url":"/imbox.json?page=cursor-2","postings":[{"id":1}]}`)
+		switch {
+		case r.URL.Path == "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":8,"kind":"imbox","name":"Imbox"},{"id":9,"kind":"feedbox","name":"The Feed"}]`)
+		case r.URL.Query().Get("page") == "":
+			_, _ = io.WriteString(w, `{"id":9,"kind":"feedbox","name":"The Feed","next_history_url":"/feedbox.json?page=cursor-2","postings":[{"id":1}]}`)
 		default:
-			_, _ = io.WriteString(w, `{"id":9,"kind":"imbox","name":"Imbox","postings":[]}`)
+			_, _ = io.WriteString(w, `{"id":9,"kind":"feedbox","name":"The Feed","postings":[]}`)
 		}
 	}), "box", "9", "--all"); err != nil {
 		t.Fatalf("execute box: %v", err)
 	}
-	want := "[/boxes/9.json? /imbox.json?page=cursor-2]"
+	want := "[/boxes.json? /feedbox.json? /feedbox.json?page=cursor-2]"
 	if got := fmt.Sprint(requests); got != want {
+		t.Errorf("requests = %s, want %s", got, want)
+	}
+}
+
+// A Feed renamed in HEY is found in the box list by its name and then read on its own
+// route, first page included, for the same reason as a numeric ID: a first page from
+// /boxes/{id} would repeat or skip threads on the pages after it.
+func TestBoxCommandFollowsPagesForARenamedFeed(t *testing.T) {
+	var requests []string
+	if _, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":8,"kind":"imbox","name":"Imbox"},{"id":9,"kind":"feedbox","name":"Newsletters"}]`)
+		case r.URL.Path != "/feedbox.json":
+			t.Errorf("request = %s, want /feedbox.json", r.URL.Path)
+			http.NotFound(w, r)
+		case r.URL.Query().Get("page") == "":
+			_, _ = io.WriteString(w, `{"id":9,"kind":"feedbox","name":"Newsletters","next_history_url":"/feedbox.json?page=cursor-2","postings":[{"id":1}]}`)
+		default:
+			_, _ = io.WriteString(w, `{"id":9,"kind":"feedbox","name":"Newsletters","postings":[]}`)
+		}
+	}), "box", "newsletters", "--all"); err != nil {
+		t.Fatalf("execute box: %v", err)
+	}
+	want := "[/boxes.json? /feedbox.json? /feedbox.json?page=cursor-2]"
+	if got := fmt.Sprint(requests); got != want {
+		t.Errorf("requests = %s, want %s", got, want)
+	}
+}
+
+// An ID HEY does not list, such as one of another linked account's boxes, is still read
+// directly and answered however HEY answers it.
+func TestBoxCommandReadsAnUnlistedIDDirectly(t *testing.T) {
+	var requests []string
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":8,"kind":"imbox","name":"Imbox"}]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}), "box", "404")
+	if err == nil {
+		t.Fatal("execute box: want not found, got nil")
+	}
+	if got, want := fmt.Sprint(requests), "[/boxes.json /boxes/404.json]"; got != want {
 		t.Errorf("requests = %s, want %s", got, want)
 	}
 }
@@ -227,8 +303,10 @@ func TestBoxCommandFollowsPagesForACustomBox(t *testing.T) {
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.URL.Path+"?"+r.URL.RawQuery)
 		w.Header().Set("Content-Type", "application/json")
-		switch r.URL.Query().Get("page") {
-		case "":
+		switch {
+		case r.URL.Path == "/boxes.json":
+			_, _ = io.WriteString(w, `[{"id":17,"kind":"receipts","name":"Receipts"}]`)
+		case r.URL.Query().Get("page") == "":
 			_, _ = io.WriteString(w, `{"id":17,"kind":"receipts","name":"Receipts","next_history_url":"/boxes/17.json?page=cursor-2","postings":[{"id":1}]}`)
 		default:
 			_, _ = io.WriteString(w, `{"id":17,"kind":"receipts","name":"Receipts","next_history_url":"/boxes/17.json?page=cursor-3","postings":[{"id":2}]}`)
@@ -237,7 +315,7 @@ func TestBoxCommandFollowsPagesForACustomBox(t *testing.T) {
 	if err != nil {
 		t.Fatalf("execute box: %v", err)
 	}
-	want := "[/boxes/17.json? /boxes/17.json?page=cursor-2]"
+	want := "[/boxes.json? /boxes/17.json? /boxes/17.json?page=cursor-2]"
 	if got := fmt.Sprint(requests); got != want {
 		t.Errorf("requests = %s, want %s", got, want)
 	}
@@ -298,8 +376,57 @@ func TestBoxCommandUnknownNameReturnsNotFound(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `[{"id":17,"kind":"receipts","name":"Receipts"}]`)
 	}), "box", "newsletters")
-	if err == nil || !strings.Contains(err.Error(), `box "newsletters" not found`) {
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeNotFound || cliErr.Message != `box "newsletters" not found` {
 		t.Fatalf("error = %v, want box not found", err)
+	}
+	if !strings.Contains(cliErr.Hint, "imbox, feed, papertrail, setaside, replylater, or bubbleup") {
+		t.Errorf("hint = %q, want the valid box names", cliErr.Hint)
+	}
+}
+
+func TestBoxCommandPointsTrashAtSearch(t *testing.T) {
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[{"id":1,"kind":"imbox","name":"Imbox"}]`)
+	}), "box", "view", "Trash")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeNotFound {
+		t.Fatalf("error = %v, want not found", err)
+	}
+	if !strings.Contains(cliErr.Hint, "hey search --in trash") {
+		t.Errorf("hint = %q, want the search that reads Trash", cliErr.Hint)
+	}
+}
+
+// A box HEY lists under a kind nothing here knows is still found by that kind or its
+// name, spelled with the same folding as a named box.
+func TestBoxCommandFindsAnUnfamiliarBoxByEitherSpelling(t *testing.T) {
+	for _, spelling := range []string{"receipts_box", "Receipts-Box", "Tax Receipts", "taxreceipts"} {
+		t.Run(spelling, func(t *testing.T) {
+			var requests []string
+			response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests = append(requests, r.Method+" "+r.URL.Path)
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/boxes.json":
+					_, _ = io.WriteString(w, `[{"id":17,"kind":"receiptsbox","name":"Tax Receipts"}]`)
+				case "/boxes/17.json":
+					_, _ = io.WriteString(w, `{"id":17,"kind":"receiptsbox","name":"Tax Receipts","postings":[]}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}), "box", "view", spelling)
+			if err != nil {
+				t.Fatalf("execute box: %v", err)
+			}
+			if got, want := fmt.Sprint(requests), "[GET /boxes.json GET /boxes/17.json]"; got != want {
+				t.Errorf("requests = %s, want %s", got, want)
+			}
+			if response.Summary != "0 threads in Tax Receipts" {
+				t.Errorf("summary = %q", response.Summary)
+			}
+		})
 	}
 }
 

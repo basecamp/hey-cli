@@ -27,7 +27,12 @@ type recordingFilter struct {
 	// defaultWindow is the span to read when no dates are given. An event looks ahead from
 	// today, the way a calendar is read; a to-do or a journal entry looks back over years,
 	// because that is where the ones worth listing already are.
-	defaultWindow func(now time.Time) (time.Time, time.Time)
+	defaultWindow func(today time.Time) (time.Time, time.Time)
+
+	// today is the day a default window is laid around when no start is given. Without it
+	// that is the machine's today, which is close enough for a window that reaches years
+	// either way; a window that starts at today has to ask the account.
+	today func(ctx context.Context) (time.Time, error)
 
 	// defaultCalendars is where to look when --calendar is not given. Events are spread over
 	// every calendar the identity has; to-dos and journal entries live on the personal one.
@@ -36,15 +41,21 @@ type recordingFilter struct {
 
 // eventWindow reads from today forward, which is what somebody asking what is on their
 // calendar means.
-func eventWindow(now time.Time) (time.Time, time.Time) {
-	return now, now.AddDate(0, 0, 30)
+func eventWindow(today time.Time) (time.Time, time.Time) {
+	return today, today.AddDate(0, 0, 30)
 }
 
 // personalWindow reads years back and a year forward. A to-do or a journal entry is looked up
 // by having been written rather than by coming up, so its window is wide.
-func personalWindow(now time.Time) (time.Time, time.Time) {
-	return now.AddDate(-4, 0, 0), now.AddDate(1, 0, 0)
+func personalWindow(today time.Time) (time.Time, time.Time) {
+	return today.AddDate(-4, 0, 0), today.AddDate(1, 0, 0)
 }
+
+// recordingWindowNotes is what every listing of a window says about the dates it takes.
+const recordingWindowNotes = "Both dates are YYYY-MM-DD; an unreadable one, or an --ends-on before --starts-on, is a usage error rather than an empty result. Naming only --starts-on moves the whole window, reading the default span from that day, rather than reading up to the default end."
+
+// personalWindowNotes is the window of a to-do or a journal listing.
+const personalWindowNotes = "Without dates the window is 4 years before today to 1 year after it. " + recordingWindowNotes
 
 // registerFlags puts the window on a command. calendarUsage says where the listing looks
 // without it, since that differs per recording type and is the one thing a reader cannot
@@ -66,7 +77,21 @@ type recordingWindow struct {
 }
 
 func (f *recordingFilter) resolve(ctx context.Context) (recordingWindow, error) {
-	defaultStart, defaultEnd := f.defaultWindow(time.Now())
+	// A date that cannot be read is refused before today is asked for.
+	if f.endsOn != "" {
+		if _, err := parseDateArg("ends-on date", f.endsOn); err != nil {
+			return recordingWindow{}, err
+		}
+	}
+
+	today := calendarDay(clockNow())
+	if f.startsOn == "" && f.today != nil {
+		var err error
+		if today, err = f.today(ctx); err != nil {
+			return recordingWindow{}, err
+		}
+	}
+	defaultStart, defaultEnd := f.defaultWindow(today)
 
 	startsOn := f.startsOn
 	if startsOn == "" {
@@ -113,9 +138,16 @@ func (f *recordingFilter) resolve(ctx context.Context) (recordingWindow, error) 
 // occurrences inside them. Series can start long before the requested window, which puts
 // them on a later page after newer one-off events even when they recur inside it.
 func (w recordingWindow) read(ctx context.Context, recType string) ([]generated.Recording, error) {
+	return w.readTypes(ctx, recType)
+}
+
+// readTypes is read over several recording types at once, in one pass over the pages. An
+// event's countdown is a recording of its own kind under the event, so an edit that means
+// to keep one reads both kinds from the same window rather than paging it twice.
+func (w recordingWindow) readTypes(ctx context.Context, recTypes ...string) ([]generated.Recording, error) {
 	recordings := []generated.Recording{}
 	for _, calendarID := range w.calendars {
-		calendarRecordings, err := w.readCalendar(ctx, calendarID, recType)
+		calendarRecordings, err := w.readCalendar(ctx, calendarID, recTypes)
 		if err != nil {
 			return nil, err
 		}
@@ -124,7 +156,7 @@ func (w recordingWindow) read(ctx context.Context, recType string) ([]generated.
 	return recordings, nil
 }
 
-func (w recordingWindow) readCalendar(ctx context.Context, calendarID int64, recType string) ([]generated.Recording, error) {
+func (w recordingWindow) readCalendar(ctx context.Context, calendarID int64, recTypes []string) ([]generated.Recording, error) {
 	params := &generated.GetCalendarRecordingsParams{StartsOn: &w.startsOn, EndsOn: &w.endsOn}
 	recordings := []generated.Recording{}
 	seenPages := map[string]bool{}
@@ -138,7 +170,9 @@ func (w recordingWindow) readCalendar(ctx context.Context, calendarID int64, rec
 			return recordings, nil
 		}
 
-		recordings = append(recordings, filterRecordingsByType(page.Recordings, recType)...)
+		for _, recType := range recTypes {
+			recordings = append(recordings, filterRecordingsByType(page.Recordings, recType)...)
+		}
 		if page.NextPage == "" || calendarRecordingsEmpty(page.Recordings) {
 			return recordings, nil
 		}

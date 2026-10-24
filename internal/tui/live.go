@@ -33,13 +33,15 @@ const (
 	MailConnectionReconnected
 )
 
-// MailWatchEvent reports either a changed box or a connection transition. A disconnected
-// event says whether the connection is already retrying; a reconnect asks the TUI to
-// catch up the box on screen because broadcasts sent during the gap were missed.
+// MailWatchEvent reports a changed box, a connection transition, or why an established
+// watch stopped. A disconnected event says whether the connection is already retrying;
+// a reconnect asks the TUI to catch up the box on screen because broadcasts sent during
+// the gap were missed. Err is set only for the final event before the stream closes.
 type MailWatchEvent struct {
 	BoxID         int64
 	Connection    MailConnection
 	WillReconnect bool
+	Err           error
 }
 
 // ScreenerWatcher opens the stream that says The Screener changed. ctx owns this signed
@@ -48,12 +50,16 @@ type MailWatchEvent struct {
 // a watcher opens after that name has been read.
 type ScreenerWatcher func(ctx, connectionCtx context.Context, signedStreamName string) (<-chan struct{}, error)
 
+// CalendarWatchEvent reports a calendar change or why an established watch stopped. Err
+// is set only for the final event before the stream closes.
+type CalendarWatchEvent struct{ Err error }
+
 // CalendarWatcher opens the stream that says a calendar changed. It subscribes every
 // calendar the account can see and folds them into one doorbell: which calendar rang does
 // not matter, because the TUI re-reads whatever span is on screen either way. A watcher
 // discovers calendars added or removed while it runs on its own and rings for those too.
 // The stream closes when ctx is done, or when whatever is behind it has given up for good.
-type CalendarWatcher func(ctx, connectionCtx context.Context) (<-chan struct{}, error)
+type CalendarWatcher func(ctx, connectionCtx context.Context) (<-chan CalendarWatchEvent, error)
 
 // AnyBoxChanged stands for "something changed, we don't know what" — a watcher sends it
 // after a reconnect, where the changes broadcast while it was away were missed.
@@ -141,17 +147,26 @@ func mailWatchRetryDelay(failures int) time.Duration {
 	return min(delay, mailWatchMaximumRetry)
 }
 
-func retryableMailWatchError(err error) bool {
+func retryableWatchError(err error) bool {
+	code := watchErrorCode(err)
+	return code == apierr.CodeNetwork || code == apierr.CodeRateLimit
+}
+
+func authenticationWatchError(err error) bool {
+	return watchErrorCode(err) == apierr.CodeAuth
+}
+
+func watchErrorCode(err error) string {
 	var known *apierr.Error
-	if errors.As(err, &known) {
-		return known.Code == apierr.CodeNetwork
+	if !errors.As(err, &known) {
+		known = apierr.AsError(apierr.FromSDK(err))
 	}
-	return apierr.AsError(apierr.FromSDK(err)).Code == apierr.CodeNetwork
+	return known.Code
 }
 
 func (m *model) mailWatchFailed(err error) tea.Cmd {
 	m.mailWatchEvents = nil
-	if retryableMailWatchError(err) {
+	if retryableWatchError(err) {
 		m.mailWatchStatus = mailWatchReconnecting
 		m.mailWatchReason = "Offline — reconnecting to HEY"
 		return m.retryMailWatch()
@@ -268,15 +283,16 @@ func refreshScreenerLaterCmd(delay time.Duration) tea.Cmd {
 // over the current one.
 type calendarWatchStartedMsg struct {
 	attempt uint64
-	changes <-chan struct{}
+	changes <-chan CalendarWatchEvent
 	err     error
 }
 
-// calendarChangedMsg reports that a calendar changed, or that the stream has closed. The
-// frame HEY broadcasts carries nothing the TUI can use: it is a doorbell, and the span on
-// screen is read again behind it.
+// calendarChangedMsg reports that a calendar changed, why its established watch stopped,
+// or that the stream has closed. The ordinary frame HEY broadcasts carries nothing the
+// TUI can use: it is a doorbell, and the span on screen is read again behind it.
 type calendarChangedMsg struct {
 	attempt uint64
+	event   CalendarWatchEvent
 	closed  bool
 }
 
@@ -298,13 +314,13 @@ func startCalendarWatchCmd(ctx, connectionCtx context.Context, watch CalendarWat
 	}
 }
 
-func waitForCalendarChangeCmd(attempt uint64, changes <-chan struct{}) tea.Cmd {
+func waitForCalendarChangeCmd(attempt uint64, changes <-chan CalendarWatchEvent) tea.Cmd {
 	if changes == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		_, open := <-changes
-		return calendarChangedMsg{attempt: attempt, closed: !open}
+		event, open := <-changes
+		return calendarChangedMsg{attempt: attempt, event: event, closed: !open}
 	}
 }
 

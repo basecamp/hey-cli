@@ -6,8 +6,10 @@
 # needs a way back without cutting a new tag. This is it.
 #
 # scripts/sync-skills.sh mirrors the skills/ tree at the given ref into
-# basecamp/skills and no-ops when the content already matches, so re-running it
-# for an already-synced release is safe.
+# basecamp/skills — only this CLI's skills, tracked in its own manifest there
+# (.managed-skills.hey-cli); other CLIs' skills are never touched — and no-ops
+# when the content already matches, so re-running it for an already-synced
+# release is safe.
 name: Sync skills
 
 on:
@@ -53,8 +55,8 @@ jobs:
             exit 1
           fi
 
-          # sync-skills.sh mirrors the tree wholesale, so syncing an older tag
-          # would roll basecamp/skills back. The only reason to run this by
+          # sync-skills.sh mirrors this CLI's skills wholesale, so syncing an
+          # older tag would roll them back in basecamp/skills. The only reason to run this by
           # hand is that the newest release failed to sync — so require exactly
           # that release.
           latest=$(gh release view --repo "${GITHUB_REPOSITORY}" --json tagName --jq .tagName)
@@ -88,7 +90,7 @@ jobs:
       # stops DRY_RUN=remote from pushing even if the script were wrong.
       - name: Generate token for skills repo
         id: skills-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
           client-id: ${{ vars.RELEASE_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

@@ -35,7 +35,10 @@ func newTuiRunner(use string, hidden bool) *cobra.Command {
 		Use:    use,
 		Short:  "Launch the interactive terminal UI",
 		Hidden: hidden,
-		Args:   cobra.NoArgs,
+		Annotations: map[string]string{
+			"agent_notes": "For a person at a terminal, not for agents. Ctrl+A switches linked mail accounts when there is more than one.",
+		},
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			topicSet := cmd.Flags().Changed("topic")
 			topicTitleSet := cmd.Flags().Changed("topic-title")

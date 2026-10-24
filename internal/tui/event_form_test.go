@@ -28,7 +28,7 @@ func eventFormCalendars() []Calendar {
 // newTestEventForm is the form as the calendar view opens it, with nothing remembered about
 // which calendar was filed on last.
 func newTestEventForm(mode eventFormMode, event Recording, on time.Time, calendars []Calendar) *eventForm {
-	return newEventForm(mode, event, on, calendars, 0, newStyles())
+	return newEventForm(mode, event, on, calendars, 0, "", newStyles())
 }
 
 // focusOn puts the form on a field the way tab would, so a picker underneath is focused too.
@@ -84,6 +84,44 @@ func TestEventFormIsOnlyOfferedCalendarsHEYWillTake(t *testing.T) {
 	}
 	if v.eventForm != nil {
 		t.Error("the form opened with nowhere to file the event")
+	}
+}
+
+// HEY lists calendars by when they were made, and every account is given Maybe right after
+// the personal calendar, so the first fileable calendar is Maybe. A new event opens where HEY
+// puts one when none is named — `owned_calendars.internal.normal.first!` — unless the reader
+// filed on another calendar last time.
+func TestNewEventFormOpensOnHEYsDefaultCalendarRatherThanMaybe(t *testing.T) {
+	v := dayWithEvents(t)
+	v.calendars = []Calendar{
+		{ID: 1101, Personal: true, Kind: "normal"},
+		{ID: 1102, Name: "Maybe", Owned: true, Kind: "maybe"},
+		{ID: 1103, Name: "Family", Kind: "normal"},
+		{ID: 1104, Name: "General", Owned: true, Kind: "normal"},
+	}
+
+	v.HandleContentKey(keyPress("a"))
+	if v.eventForm == nil {
+		t.Fatal("a did not open the form")
+	}
+	if got := v.eventForm.values().CalendarID; got != 1104 {
+		t.Errorf("the form would file on %d, want 1104, the first ordinary calendar the reader owns", got)
+	}
+
+	// The calendar filed on last still wins, Maybe included: that was the reader's choice.
+	v.eventForm = nil
+	v.vc.loadLastCalendar = func() int64 { return 1102 }
+	v.HandleContentKey(keyPress("a"))
+	if got := v.eventForm.values().CalendarID; got != 1102 {
+		t.Errorf("the form would file on %d, want 1102, the calendar filed on last", got)
+	}
+
+	// A remembered calendar that is no longer offered falls back to HEY's default, not to Maybe.
+	v.eventForm = nil
+	v.vc.loadLastCalendar = func() int64 { return 999999 }
+	v.HandleContentKey(keyPress("a"))
+	if got := v.eventForm.values().CalendarID; got != 1104 {
+		t.Errorf("the form would file on %d, want 1104 when the remembered calendar is gone", got)
 	}
 }
 
@@ -221,21 +259,21 @@ func TestEventFormNamesTheAccountACalendarBelongsTo(t *testing.T) {
 func TestNewEventFormOpensOnTheRememberedCalendar(t *testing.T) {
 	on := time.Date(2026, 8, 20, 9, 0, 0, 0, time.Local)
 
-	form := newEventForm(eventFormCreate, Recording{}, on, eventFormCalendars(), 486532, newStyles())
+	form := newEventForm(eventFormCreate, Recording{}, on, eventFormCalendars(), 486532, "", newStyles())
 	if got := form.values().CalendarID; got != 486532 {
 		t.Errorf("calendar = %d, want the remembered one", got)
 	}
 
 	// A calendar the reader has since lost access to is not in the list, and the form falls
 	// back to the first rather than filing somewhere HEY would refuse.
-	form = newEventForm(eventFormCreate, Recording{}, on, eventFormCalendars(), 999999, newStyles())
+	form = newEventForm(eventFormCreate, Recording{}, on, eventFormCalendars(), 999999, "", newStyles())
 	if got := form.values().CalendarID; got != 240334 {
 		t.Errorf("calendar = %d, want the first offered", got)
 	}
 
 	// An edit opens on the event's own calendar whatever was remembered.
 	event := Recording{ID: 99, CalendarID: 240334, Type: "Calendar::Event"}
-	form = newEventForm(eventFormEdit, event, on, eventFormCalendars(), 486532, newStyles())
+	form = newEventForm(eventFormEdit, event, on, eventFormCalendars(), 486532, "", newStyles())
 	if got := form.values().CalendarID; got != 240334 {
 		t.Errorf("calendar = %d, want the one the event is on", got)
 	}
@@ -898,6 +936,8 @@ func calendarWithEventServer(t *testing.T) (*calendarView, *recordedEventRequest
 			_, _ = io.WriteString(w, `{"id":1,"type":"Calendar::Event","title":"Renamed"}`)
 		case req.Method == http.MethodDelete && strings.HasPrefix(req.URL.Path, "/calendar/events/"):
 			w.WriteHeader(http.StatusNoContent)
+		case req.Method == http.MethodGet && req.URL.Path == "/identity.json":
+			_, _ = io.WriteString(w, `{"id":7,"first_week_day":0,"time_zone":"America/Indiana/Indianapolis"}`)
 		default:
 			_, _ = io.WriteString(w, `{"starts_at":"2026-08-20T00:00:00Z","ends_at":"2026-08-20T23:59:59Z","kind":"day","recordings":{}}`)
 		}

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	actioncable "github.com/basecamp/actioncable-go"
+	actioncable "github.com/basecamp/actioncable-client/go/v2"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
@@ -25,7 +25,7 @@ func TestRelayMailChangesNamesTheChangedBoxAndConnectionState(t *testing.T) {
 	connection := newMailConnectionNotifier()
 	events := make(chan tui.MailWatchEvent, mailChangeBacklog)
 
-	go relayMailChanges(t.Context(), messages, connection, events)
+	go relayMailChanges(t.Context(), messages, connection, events, nil)
 
 	messages <- actioncable.Message(`{"change":"upsert","box_id":24088}`)
 	if got := <-events; got.BoxID != 24088 || got.Connection != tui.MailConnectionUnchanged {
@@ -46,6 +46,26 @@ func TestRelayMailChangesNamesTheChangedBoxAndConnectionState(t *testing.T) {
 	messages <- actioncable.Message(`{"box_id":31145}`)
 	if got := <-events; got.BoxID != 31145 {
 		t.Errorf("event = %+v, want the stream to carry on past what it can't read", got)
+	}
+}
+
+func TestRelayMailChangesReportsWhyAnEstablishedSubscriptionStopped(t *testing.T) {
+	messages := make(chan actioncable.Message)
+	connection := newMailConnectionNotifier()
+	events := make(chan tui.MailWatchEvent, mailChangeBacklog)
+	events <- tui.MailWatchEvent{BoxID: 1}
+	refused := &actioncable.DisconnectError{Reason: actioncable.ReasonUnauthorized, Reconnect: false}
+
+	go relayMailChanges(t.Context(), messages, connection, events, func() error { return refused })
+	close(messages)
+
+	var got tui.MailWatchEvent
+	for event := range events {
+		got = event
+	}
+	var known *apierr.Error
+	if !errors.As(got.Err, &known) || known.Code != apierr.CodeAuth {
+		t.Errorf("final event error = %T %v, want an authentication error", got.Err, got.Err)
 	}
 }
 
@@ -92,7 +112,7 @@ func TestARelayIsTheOnlyWriterToTheStreamItCloses(t *testing.T) {
 	mail := make(chan tui.MailWatchEvent, mailChangeBacklog)
 	screener := make(chan struct{}, 1)
 
-	go relayMailChanges(relaying, mailMessages, connection, mail)
+	go relayMailChanges(relaying, mailMessages, connection, mail, nil)
 	go relayScreenerChanges(relaying, screenerMessages, reconnects, screener)
 
 	stop()
@@ -140,6 +160,7 @@ func (t scriptedCableTransport) Dial(context.Context, string, actioncable.DialOp
 
 type scriptedCableConn struct {
 	reads       chan []byte
+	writes      chan []byte
 	done        chan struct{}
 	once        sync.Once
 	subprotocol string
@@ -148,6 +169,7 @@ type scriptedCableConn struct {
 func newScriptedCableConn() *scriptedCableConn {
 	return &scriptedCableConn{
 		reads:       make(chan []byte, 2),
+		writes:      make(chan []byte, 2),
 		done:        make(chan struct{}),
 		subprotocol: actioncable.SubprotocolV1JSON,
 	}
@@ -166,7 +188,16 @@ func (c *scriptedCableConn) Read(ctx context.Context) ([]byte, error) {
 	}
 }
 
-func (c *scriptedCableConn) Write(context.Context, []byte) error { return nil }
+func (c *scriptedCableConn) Write(ctx context.Context, payload []byte) error {
+	select {
+	case c.writes <- payload:
+		return nil
+	case <-c.done:
+		return io.EOF
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
 
 func (c *scriptedCableConn) Close() error {
 	c.once.Do(func() { close(c.done) })
@@ -210,11 +241,17 @@ func TestSubscribeTuiCableKeepsALiveClientThatTurnedASubscriptionDown(t *testing
 	tuiCable.client = client
 	t.Cleanup(func() { tuiCable.client = nil })
 
+	subscribing, stop := context.WithTimeout(t.Context(), time.Second)
+	defer stop()
 	go func() {
-		conn.reads <- []byte(`{"type":"reject_subscription","identifier":"{\"channel\":\"Postings::ChangesChannel\"}"}`)
+		select {
+		case <-conn.writes:
+			conn.reads <- []byte(`{"type":"reject_subscription","identifier":"{\"channel\":\"Postings::ChangesChannel\"}"}`)
+		case <-subscribing.Done():
+		}
 	}()
 
-	_, stopped, err := subscribeTuiCable(t.Context(), client, actioncable.Identifier{Channel: changesChannel})
+	_, stopped, err := subscribeTuiCable(subscribing, client, actioncable.Identifier{Channel: changesChannel})
 	if stopped {
 		t.Fatal("a rejection should not condemn the connection the other watches share")
 	}
@@ -293,6 +330,36 @@ func TestTuiSubscribeReplacesAClientThatStoppedItself(t *testing.T) {
 	}
 }
 
+func TestCalendarStreamReportsWhyAnEstablishedSubscriptionStopped(t *testing.T) {
+	watch := newCalendarStreamWatch()
+	ring(watch.rings, struct{}{})
+	go watch.run(t.Context(), t.Context(), hey.CalendarChangesCursor{})
+
+	watch.dead <- &actioncable.DisconnectError{Reason: actioncable.ReasonUnauthorized, Reconnect: false}
+	var got tui.CalendarWatchEvent
+	for event := range watch.changes {
+		got = event
+	}
+	var known *apierr.Error
+	if !errors.As(got.Err, &known) || known.Code != apierr.CodeAuth {
+		t.Errorf("final event error = %T %v, want an authentication error", got.Err, got.Err)
+	}
+}
+
+func TestCalendarStreamLateDoorbellsCannotWriteToItsClosedOutput(t *testing.T) {
+	ctx, stop := context.WithCancel(t.Context())
+	watch := newCalendarStreamWatch()
+	go watch.run(ctx, ctx, hey.CalendarChangesCursor{})
+	stop()
+	if _, open := <-watch.changes; open {
+		t.Fatal("the canceled watch should close its output")
+	}
+
+	for range 3 {
+		ring(watch.rings, struct{}{})
+	}
+}
+
 func TestRingDropsWhatWouldBlock(t *testing.T) {
 	notifications := make(chan struct{}, 1)
 
@@ -332,9 +399,9 @@ func TestCalendarStreamWatchPollFollowsTheCalendarSet(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	next, alive := watch.pollOnce(context.Background(), context.Background(), cursor)
-	if !alive {
-		t.Fatal("a poll that read cleanly should keep the watch alive")
+	next, err := watch.pollOnce(context.Background(), context.Background(), cursor)
+	if err != nil {
+		t.Fatalf("a poll that read cleanly should keep the watch alive: %v", err)
 	}
 	if next.Since != "2026-08-18T09:20:00.000Z" {
 		t.Errorf("cursor = %+v, want it moved to where the feed left off", next)
@@ -346,9 +413,53 @@ func TestCalendarStreamWatchPollFollowsTheCalendarSet(t *testing.T) {
 		t.Error("a dropped stream should leave the map")
 	}
 	select {
-	case <-watch.changes:
+	case <-watch.rings:
 	default:
 		t.Error("a changed calendar set should ring the doorbell")
+	}
+}
+
+func TestCalendarStreamWatchPollReportsSubscriptionAuthenticationFailure(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<`+r.URL.Path+`?since=2026-08-18T09%3A20%3A00.000Z>; rel="next"`)
+		_, _ = w.Write([]byte(`{
+			"added": [{"calendar": {"id": 514, "name": "Book Club"},
+			           "recording_changes_url": "/calendars/514/recording/changes.json?since=2026-08-18T09%3A14%3A00.000Z&v=1",
+			           "signed_stream_name": "book-club-stream"}]
+		}`))
+	}))
+	t.Cleanup(server.Close)
+
+	previousSDK, previousCfg, previousAuthMgr := sdk, cfg, authMgr
+	sdk = hey.NewClient(
+		&hey.Config{BaseURL: server.URL},
+		&hey.StaticTokenProvider{Token: "test-token"},
+		hey.WithMaxRetries(0),
+	)
+	cfg = &config.Config{BaseURL: server.URL}
+	authMgr = auth.NewManager(server.URL, server.Client(), t.TempDir())
+	stopped := actioncable.New("ws://cable.example.test/cable")
+	_ = stopped.Close()
+	tuiCable.client = stopped
+	t.Cleanup(func() {
+		sdk, cfg, authMgr = previousSDK, previousCfg, previousAuthMgr
+		tuiCable.client = nil
+	})
+
+	watch := newCalendarStreamWatch()
+	cursor, err := hey.CalendarChangesCursorFrom(server.URL + "/calendar/changes.json?since=2026-08-18T09%3A00%3A00.000Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = watch.pollOnce(context.Background(), context.Background(), cursor)
+	var known *apierr.Error
+	if !errors.As(err, &known) || known.Code != apierr.CodeAuth {
+		t.Errorf("poll error = %T %v, want the subscription authentication failure", err, err)
 	}
 }
 
@@ -367,9 +478,9 @@ func TestCalendarStreamWatchPollSkipsAFailedRead(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	next, alive := watch.pollOnce(context.Background(), context.Background(), cursor)
-	if !alive {
-		t.Error("a read that failed should be retried by the next poll, not end the watch")
+	next, err := watch.pollOnce(context.Background(), context.Background(), cursor)
+	if err != nil {
+		t.Errorf("a read that failed should be retried by the next poll, not end the watch: %v", err)
 	}
 	if next.Since != cursor.Since {
 		t.Errorf("cursor = %+v, want it left where it was", next)

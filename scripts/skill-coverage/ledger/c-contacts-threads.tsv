@@ -1,0 +1,164 @@
+contacts/1	help:hey contact list	List contacts
+contacts/2	help:hey contact list	Results page
+contacts/3	help:hey contact list	Fetch up to 100 results pages from --page onward
+contacts/3	help:hey contact list	Filter JSON with a built-in jq expression
+contacts/4	help:hey contact show	Returns contact details, aliases, screening status, and the private note
+contacts/4	help:hey contact show	The embedded postings are one page of the contact's threads
+contacts/5	help:hey contact threads	List every email thread a contact is on, seen and unseen
+contacts/5	help:hey contact threads	Fetch all results (override --limit)
+contacts/6	help:hey contact add	Name and email are required.
+contacts/7	help:hey contact add	Repeat --alias for alternate email addresses.
+contacts/8	help:hey contact update	New contact name
+contacts/9	help:hey contact update	--alias= clears every alias.
+contacts/10	help:hey contact hide	Hide a contact from contact lists, autocomplete, and search results.
+contacts/11	help:hey contact show-again	Reverses `hey contact hide <id>`.
+contacts/12	help:hey contact deliver	Choose where future email from a contact arrives.
+contacts/12	help:hey contact deliver	Delivery destination: imbox, feed, papertrail, or screened-out
+contacts/13	help:hey contact deliver	Delivery destination: imbox, feed, papertrail, or screened-out
+contacts/13	help:hey contact deliver	Screened Out applies only to external email contacts.
+contacts/14	help:hey contact bundle	Group mail from a contact into one bundle in HEY instead of listing every thread separately.
+contacts/15	help:hey contact unbundle	Stop grouping mail from a contact so each thread appears separately in HEY.
+contacts/16	help:hey contact note show	Read a private contact note
+contacts/17	help:hey contact note show	note_markdown (the note as Markdown, the form hey contact note set takes) and note_markdown_lossless
+contacts/17	help:hey contact note set	Read it as note_markdown only when hey contact note show answers note_markdown_lossless as true
+contacts/18	help:hey contact note set	Accepts --note, positional content, stdin
+contacts/19	help:hey contact note set	Accepts --note, positional content, stdin
+contacts/20	help:hey contact note set	Private note as raw HTML instead of Markdown
+contacts/21	help:hey contact note delete	Delete a private contact note
+contacts/22	help:hey contact list	Returns contact IDs, names, and email addresses.
+contacts/22	help:hey contact list	Each row carries the contact's id, name, primary email_address and updated_at.
+contacts/23	help:hey contact list	Lists only non-HEY senders you have screened in: other HEY users, senders still in or denied by The Screener, aliases and hidden contacts are left out, so an address missing here does not mean HEY has no contact for it.
+contacts/24	help:hey contact list	Use --all to fetch up to 100 pages.
+contacts/24	help:hey contact list	There is no search: to find a contact by email, read every page with --all (the notice names the --page to continue from) and filter with --jq
+contacts/25	help:hey contact list	That matches primary addresses only; a contact's aliases are on hey contact show.
+contacts/26	help:hey contact show	Returns contact details, aliases, screening status, and the private note
+contacts/26	help:hey contact show	The embedded postings are one page of the contact's threads and can run to tens of kilobytes
+contacts/27	help:hey contact show	hey contact threads <id> pages through all of them.
+contacts/27	help:hey contact show	drop them with --jq '.data | del(.postings)' or read just the note with hey contact note show
+contacts/28	help:hey contact update	Omitted name and email fields stay unchanged.
+contacts/29	help:hey contact update	Supplying --alias replaces the complete alias list; use --alias= to clear it.
+contacts/30	help:hey contact hide	HEY has no contact delete; hiding is what stands in for it.
+contacts/31	help:hey contact hide	Hide a contact from contact lists, autocomplete, and search results. The contact remains available by ID and can be shown again.
+contacts/31	help:hey contact show-again	Reverses `hey contact hide <id>`.
+contacts/32	help:hey contact update	A hidden contact, an alias or another HEY user cannot be edited and answers not_found.
+contacts/32	help:hey contact note set	A hidden contact, an alias or another HEY user answers not_found.
+contacts/32	help:hey contact note delete	A hidden contact, an alias or another HEY user answers not_found.
+contacts/33	help:hey contact deliver	Use a contact ID from `hey contact list`, not a clearance ID, box item ID, box ID, or email address.
+contacts/34	help:hey contact deliver	Pass the exact --to token: imbox, feed, papertrail, or screened-out.
+contacts/35	help:hey contact deliver	Imbox removes a custom box preference; selecting Imbox, The Feed, or Paper Trail does not approve a contact that is already Screened Out.
+contacts/36	help:hey contact deliver	Screened Out applies only to external email contacts.
+contacts/36	help:hey contact deliver	screened-out is the deny/block choice.
+contacts/37	help:hey contact deliver	Selecting The Feed removes an existing bundle; Imbox and Paper Trail preserve eligible bundles.
+contacts/38	help:hey contact deliver	This command is write-only because HEY does not expose the current setting as structured data. Existing mail may move asynchronously, so success means HEY accepted the change
+contacts/39	help:hey contact bundle	Group mail from a contact into one bundle in HEY instead of listing every thread separately.
+contacts/39	help:hey contact unbundle	Unbundling reverses `hey contact bundle <id>` and preserves the underlying threads.
+contacts/40	help:hey contact bundle	HEY bundles only a contact with no box preference or one sent to the Paper Trail; for any other it answers success and changes nothing.
+contacts/41	help:hey contact note set	Set replaces the whole note: to add to one, read it, change it and set all of it.
+contacts/42	help:hey contact note set	Accepts --note, positional content, stdin, or opens $EDITOR with the existing note as Markdown, which is refused when that Markdown would drop part of the note. The note is Markdown, or raw HTML via --note-html.
+contacts/42	help:hey contact note delete	Permanently delete the private note from a contact. The contact remains unchanged.
+contacts/42	help:hey contact note set	An empty note is refused; hey contact note delete clears one.
+contacts/43	help:hey contact note show	JSON answers note (HEY's plain text, formatting dropped), note_html (as HEY serves it), note_markdown (the note as Markdown, the form hey contact note set takes) and note_markdown_lossless.
+contacts/44	help:hey contact note set	To add to a note, read note_markdown from hey contact note show, change it, and set all of it
+contacts/45	skill	the read checks the flag itself and fails when it is `false`, so nothing is written:
+contacts/46	skill	note=$(hey contact note show 12345 --jq 'if .data.note_markdown_lossless then .data.note_markdown else error("note_markdown would drop part of this note: change note_html with --note-html") end') &&
+contacts/47	skill	printf '%s\n\nMoved to the Lisbon office in March.\n' "$note" | hey contact note set 12345
+contacts/48	help:hey contact note show	note_markdown_lossless, which is false when the note holds an attachment or markup Markdown cannot carry
+contacts/48	help:hey contact note set	which is refused when that Markdown would drop part of the note
+contacts/49	help:hey contact note set	when note_markdown_lossless is false, change note_html and set it with --note-html instead
+contacts/49	help:hey contact note set	wrapper HEY serves note_html in, so HTML read back does not nest.
+contacts/50	skill	note=$(hey contact note show 12345 --jq '.data.note_html') &&
+contacts/51	skill	hey contact note set 12345 --note-html "$note<p>Moved to the Lisbon office in March.</p>"
+contacts/52	skill	Keep the `&&`: a failed read must not go on to write.
+contacts/53	help:hey contact note set	The read and the write are not atomic: a save by someone else in between is lost, so write straight after reading.
+contacts/54	help:hey contact note	A note belongs to the HEY account that holds the contact and is reached only through the user's own login
+contacts/55	help:hey contact	Select a linked mail account ID or all
+contacts/55	help:hey account	Use list to discover IDs
+email-threads/1	help:hey thread read	Returns a thread with all entries, oldest first.
+email-threads/2	help:hey thread read	Write the original HTML to a pipe or file (thread read, journal read, and a contact's note via contact show or contact note show)
+email-threads/3	help:hey thread read	Take a thread that could only be read in part, with a notice saying what is missing
+email-threads/4	help:hey share	Get a sharing link for an email thread
+email-threads/5	help:hey unshare	Turn off an email thread's sharing link
+email-threads/6	help:hey thread read	Read every entry in a thread, oldest first.
+email-threads/7	help:hey thread read	Entry bodies are Markdown
+email-threads/7	help:hey thread read	Entry bodies are Markdown, converted from HEY's Trix HTML so headings, lists, quotes, tables and code survive and links keep their URLs (read a body as structure, not flattened text)
+email-threads/8	help:hey thread read	the creator is the entry's author (the external sender for inbound mail, your own contact for mail you sent)
+email-threads/9	help:hey thread read	a non-default send-as address you sent from is the optional sender on a hydrated entry
+email-threads/9	help:hey thread read	take the From address from sender.email_address when sender is present and from creator.email_address otherwise.
+email-threads/10	help:hey thread read	Each entry whose message was read carries recipients as to, cc and bcc contact lists.
+email-threads/10	help:hey thread read	A known-empty line is []; an entry whose message was not read omits recipients.
+email-threads/11	help:hey thread read	In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded
+email-threads/12	help:hey thread read	distinct from the visible recipients
+email-threads/13	help:hey thread read	with an optional resolved contact
+email-threads/13	help:hey thread read	received_via is omitted for sent and generated messages and for an entry whose message was not read.
+email-threads/14	help:hey thread read	--html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML.
+email-threads/14	help:hey thread read	It is refused (usage error) when stdout is a terminal, so redirect it to a file or a pipe.
+email-threads/15	help:hey thread read	A thread that could only be read in part is refused unless --allow-partial is passed
+email-threads/15	help:hey thread read	Take a thread that could only be read in part, with a notice saying what is missing
+email-threads/16	help:hey thread read	Use the topic ID with hey reply or hey forward.
+email-threads/16	help:hey reply	The reply is addressed the way HEY addresses a reply
+email-threads/17	help:hey thread read	Each entry's kind says what it is: message for mail, while comment (a note) and access_notice (a share notice) are internal — visible to everyone with access to the thread, never emailed — and --markdown, styled and --html output head them as a note or share notice rather than with a From line.
+email-threads/18	help:hey share	Anyone with the link can see the entire thread and future emails or replies sent to it.
+email-threads/18	help:hey share	Returns the sharing link in the url field.
+email-threads/19	help:hey share	Anyone with the link can see the entire thread
+email-threads/20	help:hey unshare	Turn off the sharing link for an email thread.
+email-threads/21	skill	Every email thread has two IDs: `id`, its **box item ID** (one posting in one box), and `topic_id`, its **thread ID**.
+email-threads/22	skill	- **Box item ID** (`id`): `hey seen`, `unseen`, `move`, `label add|remove|create`, `trash`, `spam`, `ignore`, `stop-ignoring`, `bubble up|pop`, `set-aside group`, `bulk-reply` and `bundle view`.
+email-threads/23	skill	- **Thread ID** (`topic_id`): `hey thread read|update`, `share`, `unshare`, `attachment list`, `reply`, `forward`, `compose --thread-id`, `collection add|remove` and `workflow add|move|remove`.
+email-threads/24	skill	Passing the wrong kind is not redirected.
+email-threads/25	skill	Thread listings (`hey box view`, `label view`, `collection view`, `bundle view`, `contact threads`, `search`) carry both IDs, with two exceptions: a bundle row can omit `topic_id`, and a search result omits `id` when you have no box item for its thread.
+email-attachments/1	help:hey attachment list	List every named downloadable file in a thread, including named inline images.
+email-attachments/2	help:hey attachment save	Saves the attachment identified by an ID from `hey attachment list <thread-id>`.
+email-attachments/3	help:hey attachment save	Destination file or directory
+email-attachments/3	help:hey attachment save	--output is a directory only if one already exists there (the file is saved into it under its original filename)
+email-attachments/4	help:hey attachment save	Replace an existing destination file
+email-attachments/5	help:hey attachment list	A direct attachment's ID is <message id>:<position>, so 67890:1 is the first direct attachment of message 67890.
+email-attachments/6	help:hey attachment list	Named files inside a message's embedded HTML, named inline images included, get opaque IDs scoped to their message.
+email-attachments/7	help:hey attachment	Pass a returned ID to `hey attachment save <id>`.
+email-attachments/8	help:hey attachment save	Save an attachment to disk under its original filename, or at --output.
+email-attachments/8	help:hey attachment save	--output is a directory only if one already exists there (the file is saved into it under its original filename); otherwise it is the file name.
+email-attachments/9	help:hey attachment save	Existing files are preserved unless --force is set.
+email-reply-forward-compose/1	help:hey reply	Reply message as Markdown (or opens $EDITOR)
+email-reply-forward-compose/2	help:hey reply	Without -m or --message-html the message is read from stdin when stdin is not a terminal, and $EDITOR opens when it is
+email-reply-forward-compose/3	help:hey reply	To recipient email address (repeatable or comma-separated)
+email-reply-forward-compose/4	help:hey reply	Replace HEY's reply recipients with the explicit To, CC and BCC lists
+email-reply-forward-compose/4	help:hey reply	Print the resolved reply envelope without sending
+email-reply-forward-compose/5	help:hey reply	File to attach (repeatable)
+email-reply-forward-compose/6	help:hey forward	Forward the latest message in a thread
+email-reply-forward-compose/7	help:hey forward	Optional Markdown note above the forwarded message
+email-reply-forward-compose/8	help:hey compose	Message body as Markdown (or opens $EDITOR)
+email-reply-forward-compose/8	help:hey compose	With neither -m nor --message-html the body is read from stdin when stdin is not a terminal, and $EDITOR opens when it is
+email-reply-forward-compose/9	help:hey compose	Message body as Markdown (or opens $EDITOR)
+email-reply-forward-compose/10	help:hey compose	Repeatable --attach files are uploaded before sending and can be sent without body text.
+email-reply-forward-compose/11	help:hey compose	File to attach (repeatable)
+email-reply-forward-compose/12	help:hey compose	CC recipient email address(es)
+email-reply-forward-compose/12	help:hey compose	BCC recipient email address(es)
+email-reply-forward-compose/13	help:hey compose	Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not
+email-reply-forward-compose/14	help:hey compose	The body is Markdown; use --message-html to send raw HTML instead.
+email-reply-forward-compose/15	help:hey compose	Message body as raw HTML instead of Markdown
+email-reply-forward-compose/16	help:hey reply	Reply to a thread's latest emailed message.
+email-reply-forward-compose/17	help:hey reply	both are internal — visible to everyone with access to the thread, never emailed. A thread holding nothing else is refused.
+email-reply-forward-compose/17	help:hey forward	never an internal note or share notice posted after it
+email-reply-forward-compose/18	help:hey reply	The reply is addressed the way HEY's own web app addresses one: everyone that entry was addressed to, with whoever wrote it on the To line, minus your own addresses.
+email-reply-forward-compose/19	help:hey reply	If HEY's prefill is unavailable or names no one, a send falls back to the message's own recipients, which can include you.
+email-reply-forward-compose/20	help:hey reply	Repeatable --to, --cc and --bcc values add or move recipients on those lines
+email-reply-forward-compose/21	help:hey reply	--replace-recipients uses only the explicit lists.
+email-reply-forward-compose/22	help:hey reply	--dry-run is read-only, needs no message, and returns the resolved sender, recipients, subject, account, thread and entry.
+email-reply-forward-compose/22	help:hey reply	A dry run does not read the original message body; run --dry-run --json first when changing the envelope.
+email-reply-forward-compose/23	help:hey reply	When HEY's reply prefill is unavailable a dry run will not guess the original lists and is refused as a usage error; pass --replace-recipients with explicit --to, --cc or --bcc addresses.
+email-reply-forward-compose/24	help:hey reply	A reply HEY cannot address is refused as a usage error unless an explicit --to, --cc or --bcc recipient makes it addressable.
+email-reply-forward-compose/25	skill	Message bodies, drafts, journal entries, snippets and contact notes are Markdown by default (`-m`, `--content`, `--note`, positional content, stdin and `$EDITOR` alike) and are converted to rich text on the way out; clip passages, event notes and time track notes are plain text.
+email-reply-forward-compose/26	help:hey compose	Message body as raw HTML instead of Markdown
+email-reply-forward-compose/26	help:hey reply	Reply message as raw HTML instead of Markdown
+email-reply-forward-compose/26	help:hey forward	The note as raw HTML instead of Markdown
+email-reply-forward-compose/26	help:hey draft edit	Replace the body with raw HTML instead of Markdown
+email-reply-forward-compose/26	help:hey bulk-reply send	Reply message as raw HTML instead of Markdown
+email-reply-forward-compose/26	help:hey journal write	Journal content as raw HTML instead of Markdown
+email-reply-forward-compose/26	help:hey snippet create	Snippet content as raw HTML instead of Markdown
+email-reply-forward-compose/26	help:hey snippet update	New snippet content as raw HTML instead of Markdown
+email-reply-forward-compose/26	help:hey contact note set	Private note as raw HTML instead of Markdown
+email-reply-forward-compose/27	skill	Each Markdown flag has an HTML twin (such as `--message-html`, `--note-html`, `--content-html`) for raw HTML, and each pair is mutually exclusive.
+email-reply-forward-compose/28	help:hey journal write	the trix-content wrapper HEY serves an entry in is taken off
+email-reply-forward-compose/28	help:hey snippet create	the trix-content wrapper HEY serves content_html in is taken off
+email-reply-forward-compose/28	help:hey snippet update	the trix-content wrapper HEY serves content_html in is taken off
+email-reply-forward-compose/28	help:hey contact note set	--note-html. --note-html takes off the <div class="trix-content"> wrapper HEY serves note_html in
+email-reply-forward-compose/29	skill	A fenced code block's language survives for the languages HEY highlights (Ruby, Python, JavaScript, TypeScript, Go, Rust, Java, C#, C++, PHP, Swift, HTML and CSS); any other is dropped.

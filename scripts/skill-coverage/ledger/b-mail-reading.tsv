@@ -1,0 +1,248 @@
+reading-email/1	help:hey thread read	Read every entry in a thread, oldest first.
+reading-email/2	help:hey box list	List your HEY boxes
+reading-email/3	help:hey box view	List email threads in a box
+reading-email/4	help:hey label list	List your email labels
+reading-email/4	help:hey label view	List email threads with a label
+reading-email/5	help:hey label add	Add a label to email threads
+reading-email/5	help:hey label create	Create a label and add it to email threads
+reading-email/5	help:hey label remove	Remove labels from email threads
+reading-email/6	help:hey collection list	List your email collections
+reading-email/6	help:hey collection view	List email threads in a collection
+reading-email/7	help:hey collection create	Create a collection
+reading-email/7	help:hey collection update	Update a collection
+reading-email/7	help:hey collection add	Add email threads to a collection
+reading-email/7	help:hey collection remove	Remove email threads from a collection
+reading-email/8	help:hey set-aside view	List the email threads in Set Aside, with the group each one belongs to.
+reading-email/8	help:hey set-aside group list	List the groups in Set Aside
+reading-email/9	help:hey set-aside group create	Gather email threads into a new Set Aside group
+reading-email/9	help:hey set-aside group add	Add email threads to a Set Aside group
+reading-email/9	help:hey set-aside group remove	Take email threads out of their Set Aside group
+reading-email/9	help:hey set-aside group delete	Deleting a group moves its threads to Previously Seen in the Imbox
+reading-email/10	help:hey search	Search email threads and messages
+reading-email/11	help:hey search filters	List available search refinement values
+reading-email/12	help:hey contact list	List contacts
+reading-email/12	help:hey contact show	View a contact
+reading-email/13	help:hey contact list	Returns contact IDs, names, and email addresses. Use --all to fetch up to 100 pages.
+reading-email/13	help:hey contact list	to find a contact by email, read every page with --all (the notice names the --page to continue from) and filter with --jq '.data[] | select(.email_address == "jane@example.com") | .id'
+reading-email/14	help:hey contact threads	List every thread with a contact
+reading-email/15	help:hey contact deliver	Choose where future email from a contact arrives. Pass a contact ID and one of the exact --to values: imbox, feed, papertrail, or screened-out.
+reading-email/16	help:hey bundle view	List the unseen email threads a bundle groups. A bundle is a hey box view row with kind "bundle"
+reading-email/17	help:hey thread read	Read every entry in a thread, oldest first.
+reading-email/18	help:hey thread update	Rename a thread: change the subject HEY shows for it in your boxes and at the top of the thread
+reading-email/18	help:hey thread update	Nothing is emailed: the other people on the thread keep the subject they received, and messages already sent keep the subject they were sent with.
+reading-email/19	help:hey share	Get a sharing link for an email thread
+reading-email/20	help:hey unshare	Turn off the sharing link for an email thread.
+reading-email/21	help:hey seen	Mark email threads as seen
+reading-email/22	help:hey unseen	Mark email threads as unseen
+reading-email/23	help:hey move	Move email threads to another box
+reading-email/24	help:hey move	To remove Reply Later, move the threads to Imbox
+reading-email/25	help:hey trash	Move email threads to Trash
+reading-email/26	help:hey spam	Mark email threads as spam
+reading-email/27	help:hey ignore	Ignore one or more email threads so new replies do not bring them back to your attention.
+reading-email/28	help:hey stop-ignoring	Stop ignoring email threads
+reading-email/29	help:hey screener list	List the senders waiting to be screened
+reading-email/30	help:hey screener approve	Let a sender through
+reading-email/30	help:hey screener deny	Turn a sender away
+reading-email/30	help:hey screener approve	Clearance IDs come from `hey screener list`, not contact IDs.
+reading-email/31	help:hey tui	Launch the interactive terminal UI
+sending-email/1	help:hey compose	Write and send a new email
+sending-email/2	help:hey reply	Reply to a thread
+sending-email/2	help:hey reply	Reply message as Markdown (or opens $EDITOR)
+sending-email/3	help:hey reply	Accepts message via -m, stdin, or $EDITOR
+sending-email/3	help:hey reply	Without -m or --message-html the message is read from stdin when stdin is not a terminal, and $EDITOR opens when it is.
+sending-email/4	help:hey reply	File to attach (repeatable)
+sending-email/5	help:hey bulk-reply	Always run `hey bulk-reply preview <box-item-id>...` before sending.
+sending-email/6	help:hey bulk-reply undo	Works only while HEY's undo window remains open. The bulk reply ID is returned by `hey bulk-reply send`.
+sending-email/7	help:hey forward	Forward the latest message in a thread
+sending-email/7	help:hey forward	Recipient email address(es)
+sending-email/8	help:hey forward	Optional Markdown note above the forwarded message
+sending-email/9	help:hey compose	Write and send a new email
+sending-email/9	help:hey compose	Message subject (required for a new message)
+sending-email/10	help:hey compose	Repeatable --attach files are uploaded before sending and can be sent without body text.
+sending-email/11	help:hey compose	CC recipient email address(es)
+sending-email/12	help:hey compose	BCC recipient email address(es)
+sending-email/13	help:hey attachment list	List a thread's attachments
+sending-email/14	help:hey attachment save	Save an attachment to disk
+sending-email/14	help:hey attachment save	Destination file or directory
+sending-email/15	help:hey compose	--draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete.
+sending-email/15	help:hey reply	--draft saves the reply as a draft, carries the resolved recipients, and answers the draft ID for hey draft show/edit/send/delete.
+sending-email/16	help:hey draft show	Read a draft back
+sending-email/17	help:hey draft edit	Each flag replaces its field and an omitted flag keeps what the draft has
+sending-email/18	help:hey draft send	Sends the draft as it stands — recipients are required
+sending-email/19	help:hey draft delete	Trash drafts
+sending-email/20	help:hey draft list	List draft emails
+sending-email/21	help:hey compose	A send answers the new message's id and the topic_id of its thread (for hey thread read)
+sending-email/21	help:hey reply	A send answers the reply's id and the topic_id of the thread it landed on
+sending-email/21	help:hey forward	id and topic_id name the new message and the thread it started
+sending-email/21	help:hey draft send	The answer carries the delivered message's id and its thread's topic_id
+sending-email/22	help:hey compose	While Undo Send holds a message back (delayed), HEY leaves it out of its thread: hey thread read shows the thread without it, and a thread it started answers not_found, until the message goes out. Read the thread again then.
+sending-email/22	help:hey reply	While Undo Send holds a message back (delayed), HEY leaves it out of its thread: hey thread read shows the thread without it, and a thread it started answers not_found, until the message goes out. Read the thread again then.
+sending-email/22	help:hey forward	While Undo Send holds a message back (delayed), HEY leaves it out of its thread: hey thread read shows the thread without it, and a thread it started answers not_found, until the message goes out. Read the thread again then.
+sending-email/22	help:hey draft send	While Undo Send holds a message back (delayed), HEY leaves it out of its thread: hey thread read shows the thread without it, and a thread it started answers not_found, until the message goes out. Read the thread again then.
+sending-email/23	help:hey compose	Whatever HEY's answer leaves out is left out here too; nothing is guessed in its place.
+sending-email/23	help:hey reply	Whatever HEY's answer leaves out is left out here too
+sending-email/23	help:hey forward	Whatever HEY's answer leaves out is left out here too; nothing is guessed in its place.
+sending-email/23	help:hey draft send	when HEY's answer names no entry, the id stays the draft's and only the fields HEY served are added
+sending-email/24	help:hey compose	A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>
+sending-email/24	help:hey reply	A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>
+sending-email/24	help:hey forward	A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>
+sending-email/24	help:hey draft send	A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>
+sending-email/25	help:hey compose	not by sending again, which only makes another draft.
+sending-email/25	help:hey reply	not by sending again, which only makes another draft.
+sending-email/25	help:hey forward	not by sending again, which only makes another draft.
+managing-todos/1	help:hey todo	Create and manage to-dos
+managing-todos/2	help:hey todo list	List todos
+managing-todos/3	help:hey todo add	Create a new todo
+managing-todos/4	help:hey todo complete	Mark a todo as complete
+managing-todos/5	help:hey todo uncomplete	Mark a todo as incomplete
+managing-todos/6	help:hey todo delete	Delete a todo
+email-boxes/1	help:hey box list	List your HEY boxes
+email-boxes/2	help:hey box view	Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup)
+email-boxes/3	help:hey box view	or a numeric ID
+email-boxes/4	help:hey box view	--page continues from the next_page cursor of an earlier listing of the same box.
+email-boxes/5	help:hey box view	Accepts a box's short name (imbox, feed, papertrail, setaside, replylater, bubbleup), kind (feedbox, trailbox,
+email-boxes/5	help:hey box view	or display name (including one the user gave the box) in any case
+email-boxes/5	help:hey box view	its kind (feedbox, trailbox, asidebox, laterbox, bubblebox)
+email-boxes/6	help:hey box view	hey search --in and hey move --to take the same spellings, but not every box: search narrows only to imbox, feed and papertrail (plus trash) and refuses anything else as a usage error, and move takes a box ID or any box but bubbleup (use hey bubble up).
+email-boxes/7	help:hey box view	An unknown name is not_found here and in move.
+email-boxes/7	help:hey box view	refuses anything else as a usage error
+email-boxes/8	help:hey box view	Trash is not a box: search it with hey search --in trash and move threads there with hey trash.
+email-boxes/9	help:hey box view	--json returns the box itself (id, kind, name, app_url, next_history_url, next_page) with a `postings` array of its email threads.
+email-boxes/10	skill	Each posting in a thread listing has `id`, `topic_id`, `kind` (`bundle` for a bundle row), `name` (subject), `created_at` and `app_url`; a thread row also has `contacts`, `summary` and `visible_entry_count`.
+email-boxes/11	skill	A posting's `seen` is present only when true, so test `.seen != true` for unseen.
+email-boxes/12	help:hey box view	Use topic_id with hey thread read, reply, and forward; use id with seen, unseen, and move.
+email-boxes/12	help:hey share	Accepts the topic_id from hey box view
+email-boxes/12	help:hey attachment list	list <thread-id>
+email-boxes/12	skill	- **Box item ID** (`id`): `hey seen`, `unseen`, `move`, `label add|remove|create`, `trash`, `spam`, `ignore`, `stop-ignoring`, `bubble up|pop`, `set-aside group`, `bulk-reply` and `bundle view`. - **Thread ID** (`topic_id`): `hey thread read|update`, `share`, `unshare`, `attachment list`, `reply`, `forward`,
+email-boxes/13	skill	**Unmatched IDs are not reported**: HEY checks only that *some* box item ID in a call is yours, and changes every one that matches.
+email-boxes/14	skill	`hey trash`, `spam`, `label add|remove|create` and `bubble up|pop` answer `not_found` only when none match; `hey seen`, `unseen`, `move`, `ignore`, `stop-ignoring` and `set-aside group create|add|remove` never check (`group create` with no matching ID leaves an empty group).
+email-boxes/15	skill	So a mixed batch is a partial success reported as a whole one, a typo is silently skipped, and a `topic_id` that happens to equal one of your box item IDs acts on an unrelated thread; likewise a box item ID given to `hey thread read` can read an unrelated thread.
+email-boxes/16	skill	hey box view imbox --json --all --jq '{notice, next_page: .data.next_page, match: [.data.postings[] | select(.id == 12345) | {id, topic_id, seen}]}' ``` for a mark, or read the destination box for a move.
+email-boxes/17	skill	An empty `match` with `next_page` still set means the box is larger than `--all` reads: continue with `--page <next_page>` rather than calling it a non-match.
+email-boxes/18	help:hey box view	It carries a topic_id only while it holds exactly one unseen thread, which hey thread read reads as usual; otherwise it has none
+email-boxes/18	help:hey box view	its name joins their subjects with " • ".
+email-boxes/19	help:hey box view	It carries a topic_id only while it holds exactly one unseen thread, which hey thread read reads as usual
+email-boxes/20	help:hey box view	list them with hey bundle view <id>
+email-boxes/20	help:hey thread read	A bundle row's own id is not a thread: hey thread read on it answers not_found with a hint naming the bundle and hey bundle view.
+email-boxes/21	help:hey bundle view	Returns the unseen threads the bundle groups, each with topic_id for hey thread read. A bundle read through has no unseen threads; every thread with its sender, seen and unseen, is listed by hey contact threads <contact-id>.
+email-boxes/21	help:hey contact threads	The ID comes from hey contact list, a posting's creator, or hey bundle view's contact.
+email-boxes/21	help:hey contact threads	This is also where a bundle's mail lives once it has been read through.
+email-boxes/22	help:hey move	A hey box view row with kind "bundle" is refused: moving one unbundles that sender's mail in the box they are delivered to. Change grouping with hey contact bundle|unbundle <contact-id>.
+email-boxes/23	help:hey box view	--page continues from the next_page cursor of an earlier listing of the same box.
+email-boxes/23	help:hey box view	next_page is the page parameter inside next_history_url, and --page accepts either.
+email-boxes/24	help:hey box view	--all reads up to 101 pages; if next_page is still set, continue with --page.
+email-boxes/25	help:hey box view	--ids-only prints one box item ID (id) per line and --count the number of threads read.
+email-labels/1	help:hey label list	Returns label IDs and names.
+email-labels/2	help:hey label view	List email threads with a label
+email-labels/2	help:hey label view	Fetch all results (override --limit)
+email-labels/3	help:hey label add	Add a label to email threads
+email-labels/3	help:hey label add	Label ID (required)
+email-labels/4	help:hey label create	Create a label and add it to email threads
+email-labels/5	help:hey label remove	Remove labels from email threads
+email-labels/6	help:hey label remove	Label ID, or all to remove every label (required)
+email-labels/7	help:hey label add	add <box-item-id>...
+email-labels/7	help:hey label create	create <name> <box-item-id>...
+email-labels/7	help:hey label remove	remove <box-item-id>...
+email-labels/8	help:hey label list	Use an ID with hey label view and hey label add/remove.
+email-labels/9	help:hey label view	Continue from a next_page cursor
+email-labels/9	help:hey label view	Fetch all results (override --limit)
+email-labels/9	help:hey label view	--json also carries next_page and total_count; pass --page <next_page> to continue or --all to fetch every page.
+email-labels/10	help:hey label create	create <name> <box-item-id>...
+email-labels/10	help:hey label create	HEY refuses a name you already use for a label, in any case, as a validation error; to file threads under an existing label, use hey label add --to <label-id>.
+email-collections/1	help:hey collection list	Returns collection IDs and names.
+email-collections/2	help:hey collection view	List email threads in a collection
+email-collections/2	help:hey collection view	Fetch all results (override --limit)
+email-collections/3	help:hey collection create	Create a collection
+email-collections/3	help:hey collection create	Description shown with the collection
+email-collections/4	help:hey collection update	New collection name
+email-collections/5	help:hey collection add	add <thread-id>...
+email-collections/5	help:hey collection add	Collection ID (required)
+email-collections/6	help:hey collection remove	remove <thread-id>...
+email-collections/6	help:hey collection remove	Collection ID (required)
+email-collections/7	help:hey collection view	The ID comes from hey collection list.
+email-collections/8	help:hey collection view	Returns each thread's id, the box item ID for organization actions such as hey move and hey seen, and its topic_id, the thread ID for hey thread read and for hey collection add and remove.
+email-collections/8	help:hey collection view	--json also carries next_page and total_count, so pass --page <next_page> to continue or --all to fetch every page.
+email-collections/9	help:hey collection add	add <thread-id>...
+email-collections/9	help:hey collection remove	remove <thread-id>...
+email-collections/10	help:hey collection list	Returns collection IDs and names. Use an ID with hey collection view and hey collection add/remove/update.
+email-collections/10	help:hey collection create	Only confirms the creation; the new collection's ID comes from hey collection list.
+email-set-aside-groups/1	help:hey set-aside view	Returns the same threads as hey box view set-aside, with each thread's box_group_id.
+email-set-aside-groups/2	help:hey set-aside group list	Returns group IDs with their thread counts.
+email-set-aside-groups/2	help:hey set-aside group list	Each group carries id and thread_count.
+email-set-aside-groups/3	help:hey set-aside group view	--page continues from the next_page cursor of an earlier listing of the same group.
+email-set-aside-groups/4	help:hey set-aside group create	Accepts box item IDs from hey set-aside view.
+email-set-aside-groups/4	help:hey set-aside group create	Returns the new group's ID.
+email-set-aside-groups/5	help:hey set-aside group add	A thread already in another group is moved to this one.
+email-set-aside-groups/6	help:hey set-aside group remove	The threads stay in Set Aside, outside any group.
+email-set-aside-groups/7	help:hey set-aside group delete	Deleting a group moves its threads to Previously Seen in the Imbox
+email-set-aside-groups/8	help:hey set-aside group list	Groups have no name in HEY; a group is identified by its ID and its threads.
+email-set-aside-groups/9	help:hey set-aside group create	create <box-item-id>...
+email-set-aside-groups/9	help:hey set-aside group add	add <box-item-id>...
+email-set-aside-groups/9	help:hey set-aside group remove	remove <box-item-id>...
+email-set-aside-groups/10	help:hey set-aside group view	Continue from a next_page cursor
+email-set-aside-groups/10	help:hey set-aside group list	HEY's group index answers IDs alone, so this reads each group once for its count: one request per group.
+email-set-aside-groups/10	help:hey set-aside group view	--json carries next_page and total_count.
+email-set-aside-groups/11	help:hey set-aside group delete	HEY removes a group itself once its last thread leaves, so deleting it then answers not_found.
+email-set-aside-groups/12	help:hey set-aside group create	Threads not yet in Set Aside are moved there and marked seen, which also clears a bubble-up.
+email-set-aside-groups/12	help:hey set-aside group add	Threads not yet in Set Aside are moved there and marked seen, which also clears a bubble-up.
+email-set-aside-groups/13	help:hey set-aside group delete	Deleting a group moves its threads to Previously Seen in the Imbox, not back into Set Aside.
+email-set-aside-groups/13	help:hey set-aside group delete	to tidy an overflowing Set Aside without moving threads out of it, gather them with hey set-aside group create or add rather than deleting a group.
+email-workflows-clips-and-snippets/1	help:hey workflow list	Returns workflow IDs, names
+email-workflows-clips-and-snippets/2	help:hey workflow view	Detail returns stage IDs in position order.
+email-workflows-clips-and-snippets/3	help:hey workflow add	add <thread-id>...
+email-workflows-clips-and-snippets/3	help:hey workflow add	Stage ID (required)
+email-workflows-clips-and-snippets/4	help:hey workflow move	Move email threads to another workflow stage
+email-workflows-clips-and-snippets/5	help:hey workflow remove	Remove email threads from a workflow
+email-workflows-clips-and-snippets/6	help:hey workflow create	Create an email workflow
+email-workflows-clips-and-snippets/6	help:hey workflow update	New workflow name (required)
+email-workflows-clips-and-snippets/6	help:hey workflow delete	Delete an email workflow
+email-workflows-clips-and-snippets/7	help:hey workflow stage	Create adds an Untitled stage; use hey workflow view <id> to find its stage ID, then update it with --name.
+email-workflows-clips-and-snippets/8	help:hey workflow stage update	New stage name (required)
+email-workflows-clips-and-snippets/9	help:hey clip create	Save a passage from an email entry.
+email-workflows-clips-and-snippets/10	help:hey clip delete	Delete a saved clip
+email-workflows-clips-and-snippets/11	help:hey snippet create	Create a reusable email snippet
+email-workflows-clips-and-snippets/12	help:hey snippet update	New snippet content as Markdown
+email-workflows-clips-and-snippets/13	help:hey snippet delete	Delete a reusable email snippet
+email-workflows-clips-and-snippets/14	help:hey workflow add	add <thread-id>...
+email-workflows-clips-and-snippets/14	help:hey workflow move	move <thread-id>...
+email-workflows-clips-and-snippets/14	help:hey workflow remove	remove <thread-id>...
+email-workflows-clips-and-snippets/15	help:hey clip create	create <entry-id>
+email-workflows-clips-and-snippets/15	help:hey clip create	The content must be present in the entry's message text
+email-workflows-clips-and-snippets/15	help:hey clip list	List the newest page of passages clipped from email
+email-workflows-clips-and-snippets/15	skill	**Entry ID**: an entry's `id` from `hey thread read`; `hey clip create` takes it, and the passage must appear in that message's text.
+email-search/1	help:hey search	Search email threads and messages
+email-search/2	help:hey search	Sender name or email address
+email-search/2	help:hey search	Date range: last_7_days, last_30_days, last_90_days, or year
+email-search/3	help:hey search	Words in the subject
+email-search/3	help:hey search	Fetch up to 100 results pages from --page onward
+email-search/4	help:hey search filters	List available search refinement values
+email-search/4	help:hey search	Use `hey search filters` to discover box, date, label, and attachment values.
+email-search/5	help:hey search	Words that must all appear
+email-search/5	help:hey search	Words where at least one must appear
+email-search/5	help:hey search	Words that must not appear
+email-search/5	help:hey search	Exact phrase that must appear
+email-search/5	help:hey search	Sender name or email address
+email-search/5	help:hey search	Recipient name or email address
+email-search/5	help:hey search	Words in the subject
+email-search/5	help:hey search	Date range: last_7_days, last_30_days, last_90_days, or year
+email-search/5	help:hey search	Box: imbox, feed, papertrail, or trash
+email-search/5	help:hey search	Label name
+email-search/5	help:hey search	Attachment kind: any, images, pdfs
+email-search/6	help:hey search	Results page
+email-search/6	help:hey search	Fetch up to 100 results pages from --page onward
+email-search/7	help:hey search	--all stops after 100 pages, and the notice then names the --page value to continue from.
+email-search/8	help:hey search filters	Returns the current values accepted by --in, --date, --label, and --attachment.
+email-search/8	help:hey search	Box: imbox, feed, papertrail, or trash (or the kind or name of one of those three boxes)
+email-search/8	help:hey search	Date range: last_7_days, last_30_days, last_90_days, or year
+email-search/8	help:hey search	Attachment kind: any, images, pdfs, calendar_invites, documents, spreadsheets, presentations, media, or zip_files
+email-search/8	help:hey search	An --in spelling other than a short name or a kind, such as a display name, costs one box list read.
+email-search/8	help:hey search	It lists years from 2020 to this one, and the CLI refuses any year but 20xx.
+email-search/9	help:hey search	Attachment kind: any, images, pdfs, calendar_invites, documents, spreadsheets, presentations, media, or zip_files
+email-search/10	help:hey box view	search narrows only to imbox, feed and papertrail (plus trash) and refuses anything else as a usage error
+email-search/10	help:hey search	An unrecognized --in, --date or --attachment is refused as a usage error naming the values it accepts, before any search is sent; for --in that includes Set Aside, Reply Later, Bubble Up and a name no box has, never not_found.
+email-search/10	help:hey search	--label is not checked, so read hey search filters when unsure of a label.
+email-search/11	help:hey search	Returns one result per thread.
+email-search/12	help:hey search	id is the box item ID for organization actions
+email-search/12	help:hey search	topic_id opens the thread, and messages contains the matching message summaries.
+email-search/12	help:hey search	Each result also carries subject and updated_at, and each message its message id, creator, created_at and summary.
+email-search/13	help:hey search	omitted when you have no box item for the thread

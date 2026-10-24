@@ -154,7 +154,7 @@ func newCollectionReaderCommand(use, short, example string) *collectionCommand {
 		Use:   use,
 		Short: short,
 		Annotations: map[string]string{
-			"agent_notes": "The ID comes from hey collection list. Detail returns posting IDs for organization actions and topic_id for reading threads, and answers --json, --styled, --markdown, --ids-only and --count.",
+			"agent_notes": "The ID comes from hey collection list. Returns each thread's id, the box item ID for organization actions such as hey move and hey seen, and its topic_id, the thread ID for hey thread read and for hey collection add and remove. Answers --json, --styled, --markdown, --ids-only and --count; --json also carries next_page and total_count, so pass --page <next_page> to continue or --all to fetch every page.",
 		},
 		Example: example,
 		RunE:    command.run,
@@ -207,6 +207,9 @@ func newCollectionCreateCommand() *collectionCreateCommand {
 	collectionCreateCommand.cmd = &cobra.Command{
 		Use:   "create <name>",
 		Short: "Create a collection",
+		Annotations: map[string]string{
+			"agent_notes": "Only confirms the creation; the new collection's ID comes from hey collection list.",
+		},
 		Example: `  hey collection create "Kitchen remodel"
   hey collection create "Project Apollo" --summary "Messages and decisions for the project"`,
 		RunE: collectionCreateCommand.run,
@@ -307,6 +310,9 @@ func newCollectionAddCommand() *collectionAddCommand {
 	collectionAddCommand.cmd = &cobra.Command{
 		Use:   "add <thread-id>...",
 		Short: "Add email threads to a collection",
+		Annotations: map[string]string{
+			"agent_notes": "Takes thread IDs (topic_id from hey collection view, hey box view or hey search), not box item IDs, and a collection ID from hey collection list.",
+		},
 		Example: `  hey collection add 501 --to 123
   hey collection add 501 502 --to 123`,
 		RunE: collectionAddCommand.run,
@@ -351,6 +357,9 @@ func newCollectionRemoveCommand() *collectionRemoveCommand {
 	collectionRemoveCommand.cmd = &cobra.Command{
 		Use:   "remove <thread-id>...",
 		Short: "Remove email threads from a collection",
+		Annotations: map[string]string{
+			"agent_notes": "Takes thread IDs (topic_id from hey collection view), not box item IDs, and a collection ID from hey collection list.",
+		},
 		Example: `  hey collection remove 501 --from 123
   hey collection remove 501 502 --from 123`,
 		RunE: collectionRemoveCommand.run,

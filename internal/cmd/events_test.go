@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 // eventForm reads the form-encoded body an event write sends. Calendar events take forms
@@ -76,6 +79,36 @@ func TestEventsAddTimedEvent(t *testing.T) {
 	}
 }
 
+// A time-zone flag is a promise to interpret the submitted clocks in that IANA zone. A
+// typo must not be sent to HEY, which otherwise accepts it and silently falls back to the
+// request's zone. Add and whole-event edit use the same preflight as occurrence edits.
+func TestEventsRefuseInvalidExplicitFieldsBeforeReading(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "add time zone", args: []string{"event", "add", "Design review", "--time-zone", "Not/AZone"}, want: "invalid time-zone: Not/AZone"},
+		{name: "edit time zone", args: []string{"event", "edit", "4821", "--time-zone", "Not/AZone"}, want: "invalid time-zone: Not/AZone"},
+		{name: "edit reminder", args: []string{"event", "edit", "4821", "--remind", "soon"}, want: "invalid remind: soon"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requests atomic.Int32
+			_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests.Add(1)
+				http.Error(w, "unexpected request", http.StatusInternalServerError)
+			}), tt.args...)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want usage error containing %q", err, tt.want)
+			}
+			if requests.Load() != 0 {
+				t.Errorf("requests = %d, want none", requests.Load())
+			}
+		})
+	}
+}
+
 // An event nobody named a time for is an all-day event. `hey event add "Sarah's birthday"`
 // is the everyday case, and answering it with a nine-o'clock appointment would be a guess.
 func TestEventsAddWithoutATimeIsAllDay(t *testing.T) {
@@ -105,7 +138,7 @@ func TestEventsAddDefaultsTheEndTime(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"id":4823,"title":"Standup"}`)
-	}), "event", "add", "Standup", "--calendar", "9", "--starts-on", "2026-09-02", "--start-time", "09:15")
+	}), "event", "add", "Standup", "--calendar", "9", "--starts-on", "2026-09-02", "--start-time", "09:15", "--time-zone", "America/Chicago")
 	if err != nil {
 		t.Fatalf("execute events add: %v", err)
 	}
@@ -130,24 +163,31 @@ func TestEventsAddRepeatsAndReminds(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = io.WriteString(w, `{"id":4824,"title":"Standup"}`)
 	}),
-		"event", "add", "Standup", "--calendar", "9", "--start-time", "09:15",
+		"event", "add", "Standup", "--calendar", "9", "--start-time", "09:15", "--time-zone", "America/Chicago",
 		"--repeat", "every_weekday", "--repeat-times", "20", "--remind", "1d", "--remind", "1h")
 	if err != nil {
 		t.Fatalf("execute events add: %v", err)
 	}
 }
 
-// Without --calendar a new event goes on the first calendar it can be filed on. The personal
-// calendar is in the list HEY serves and answers 404 when filed on, which is the trap.
-func TestEventsAddSkipsTheUnfileableCalendars(t *testing.T) {
+// Without --calendar a new event goes where HEY files one when none is named:
+// `owned_calendars.internal.normal.first!`. HEY lists calendars by when they were made, so the
+// personal calendar (which answers 404 when filed on) and then Maybe come before it — Maybe is
+// the trap that is easy to miss, because it is owned and internal and only its kind says no.
+func TestEventsAddFilesOnHEYsDefaultCalendar(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/calendars.json":
-			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":7,"name":"Personal","personal":true,"owned":true}},{"calendar":{"id":8,"name":"Holidays","external":true,"owned":true}},{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
+			_, _ = io.WriteString(w, `{"calendars":[`+
+				`{"calendar":{"id":1101,"name":"","kind":"normal","personal":true}},`+
+				`{"calendar":{"id":1102,"name":"Maybe","kind":"maybe","owned":true}},`+
+				`{"calendar":{"id":1103,"name":"Holidays in Croatia","kind":"normal","external":true,"owned":true}},`+
+				`{"calendar":{"id":1104,"name":"Family","kind":"normal"}},`+
+				`{"calendar":{"id":1105,"name":"General","kind":"normal","owned":true}}]}`)
 		case "/calendar/events.json":
-			if got := eventForm(t, r).Get("calendar_event[calendar_id]"); got != "9" {
-				t.Errorf("calendar_id = %q, want the first fileable calendar", got)
+			if got := eventForm(t, r).Get("calendar_event[calendar_id]"); got != "1105" {
+				t.Errorf("calendar_id = %q, want 1105, the first ordinary calendar the reader owns", got)
 			}
 			w.WriteHeader(http.StatusCreated)
 			_, _ = io.WriteString(w, `{"id":4825,"title":"Design review"}`)
@@ -157,6 +197,27 @@ func TestEventsAddSkipsTheUnfileableCalendars(t *testing.T) {
 	}), "event", "add", "Design review", "--starts-on", "2026-09-02")
 	if err != nil {
 		t.Fatalf("execute events add: %v", err)
+	}
+}
+
+// Maybe takes an event when it is named, but it is never the default, so a reader with no
+// ordinary calendar of their own is asked to name one rather than filed on Maybe.
+func TestEventsAddNeverDefaultsToMaybe(t *testing.T) {
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[`+
+				`{"calendar":{"id":1101,"name":"","kind":"normal","personal":true}},`+
+				`{"calendar":{"id":1102,"name":"Maybe","kind":"maybe","owned":true}}]}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}), "event", "add", "Design review", "--starts-on", "2026-09-02")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "no calendar to file the event on") {
+		t.Fatalf("error = %v, want the no-calendar usage error", err)
 	}
 }
 
@@ -222,6 +283,8 @@ func TestEventsEditAllDayEventOmitsClockTimes(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
 		case r.URL.Path == "/calendars/9/recordings.json":
 			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"Sarah's birthday","all_day":true,"starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T00:00:00Z"}]}`)
 		case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
@@ -239,7 +302,7 @@ func TestEventsEditAllDayEventOmitsClockTimes(t *testing.T) {
 			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
 		}
-	}), "event", "edit", "4821", "2026-09-02", "--calendar", "9", "--title", "Sarah's birthday (edited)")
+	}), "event", "edit", "4821", "2026-09-02", "--title", "Sarah's birthday (edited)")
 	if err != nil {
 		t.Fatalf("execute all-day event edit: %v", err)
 	}
@@ -252,6 +315,8 @@ func TestEventsEditReadsTheDayItIsGiven(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
 		case r.URL.Path == "/calendars/9/recordings.json":
 			if got := r.URL.Query().Get("starts_on"); got != "2026-09-02" {
 				t.Errorf("starts_on = %q", got)
@@ -269,9 +334,249 @@ func TestEventsEditReadsTheDayItIsGiven(t *testing.T) {
 			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
 		}
-	}), "event", "edit", "4821", "2026-09-02", "--calendar", "9", "--location", "Studio, 3rd floor")
+	}), "event", "edit", "4821", "2026-09-02", "--location", "Studio, 3rd floor")
 	if err != nil {
 		t.Fatalf("execute events edit: %v", err)
+	}
+}
+
+// --calendar is where the event moves to, so it is not where the event is looked for: the
+// event is found on the calendar it is on now, and the update names the one it moves to.
+func TestEventsEditMovesTheEventToAnotherCalendar(t *testing.T) {
+	var read []string
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":12,"name":"Nina","owned":true}},{"calendar":{"id":9,"name":"Elena","owned":true}}]}`)
+		case r.URL.Path == "/calendars/9/recordings.json":
+			read = append(read, r.URL.Path)
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"Parent-teacher conference","starts_at":"2026-10-01T15:00:00Z","ends_at":"2026-10-01T15:30:00Z","calendar":{"id":9}}]}`)
+		case r.URL.Path == "/calendars/12/recordings.json":
+			read = append(read, r.URL.Path)
+			_, _ = io.WriteString(w, `{}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
+			form := eventForm(t, r)
+			if got := form.Get("calendar_event[calendar_id]"); got != "12" {
+				t.Errorf("calendar_id = %q, want the calendar it moves to", got)
+			}
+			if got := form.Get("calendar_event[summary]"); got != "Parent-teacher conference" {
+				t.Errorf("summary = %q, want the title kept", got)
+			}
+			_, _ = io.WriteString(w, `{"id":4821,"title":"Parent-teacher conference","calendar":{"id":12}}`)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}), "event", "edit", "4821", "2026-10-01", "--calendar", "12")
+	if err != nil {
+		t.Fatalf("execute event edit: %v", err)
+	}
+	if !response.OK {
+		t.Errorf("response = %+v, want ok", response)
+	}
+	if want := "/calendars/12/recordings.json /calendars/9/recordings.json"; strings.Join(read, " ") != want {
+		t.Errorf("read %v, want the calendar it moves to and then the one it is on", read)
+	}
+}
+
+// HEY does not refuse a move it will not make — an invitation moves only onto a calendar
+// nobody else is on — it answers with the event where it was. That is not an update.
+func TestEventsEditSaysSoWhenHEYKeepsTheEventWhereItWas(t *testing.T) {
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Elena","owned":true}},{"calendar":{"id":12,"name":"Family","owned":true}}]}`)
+		case r.URL.Path == "/calendars/9/recordings.json":
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"Swim meet","starts_at":"2026-10-03T08:00:00Z","ends_at":"2026-10-03T11:00:00Z","calendar":{"id":9}}]}`)
+		case r.URL.Path == "/calendars/12/recordings.json":
+			_, _ = io.WriteString(w, `{}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
+			_, _ = io.WriteString(w, `{"id":4821,"title":"Swim meet","calendar":{"id":9}}`)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}), "event", "edit", "4821", "2026-10-03", "--calendar", "12")
+
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != apierr.CodeForbidden {
+		t.Fatalf("error = %v, want a forbidden refusal", err)
+	}
+	if want := "HEY did not move event 4821 to calendar 12; it is still on calendar 9"; apiErr.Message != want {
+		t.Errorf("message = %q, want %q", apiErr.Message, want)
+	}
+}
+
+// An older HEY redirects after an update rather than answering with the event, so the answer
+// names no calendar; the event is read again on the day it starts to see where it is.
+func TestEventsEditReadsAMoveBackWhenHEYDoesNotSayWhereTheEventIs(t *testing.T) {
+	for _, tt := range []struct {
+		name, onCalendar, wantErr string
+	}{
+		{name: "moved", onCalendar: "12"},
+		{name: "kept where it was", onCalendar: "9", wantErr: "HEY did not move event 4821 to calendar 12; it is still on calendar 9"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			moved := false
+			event := func(calendar string) string {
+				return `{"Calendar::Event":[{"id":4821,"title":"Swim meet","starts_at":"2026-10-03T08:00:00Z","ends_at":"2026-10-03T11:00:00Z","calendar":{"id":` + calendar + `}}]}`
+			}
+			_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/calendars.json":
+					_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Elena","owned":true}},{"calendar":{"id":12,"name":"Nina","owned":true}}]}`)
+				case r.URL.Path == "/calendars/9/recordings.json":
+					if !moved || tt.onCalendar == "9" {
+						_, _ = io.WriteString(w, event("9"))
+						return
+					}
+					_, _ = io.WriteString(w, `{}`)
+				case r.URL.Path == "/calendars/12/recordings.json":
+					if moved && tt.onCalendar == "12" {
+						_, _ = io.WriteString(w, event("12"))
+						return
+					}
+					_, _ = io.WriteString(w, `{}`)
+				case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
+					moved = true
+					_, _ = io.WriteString(w, `{"id":4821}`)
+				default:
+					t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}), "event", "edit", "4821", "2026-10-03", "--calendar", "12")
+
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("execute event edit: %v", err)
+				}
+				return
+			}
+			var apiErr *apierr.Error
+			if !errors.As(err, &apiErr) || apiErr.Code != apierr.CodeForbidden || apiErr.Message != tt.wantErr {
+				t.Fatalf("error = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// The read-back reads UTC days, and HEY may have kept the day the event started on as well
+// as the one it was asked to start on, so it reads from a day before the earlier to a day
+// after the later.
+func TestEventsEditReadsAMoveBackAroundBothDays(t *testing.T) {
+	var window []string
+	moved := false
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Elena","owned":true}},{"calendar":{"id":12,"name":"Nina","owned":true}}]}`)
+		case r.URL.Path == "/calendars/9/recordings.json" && !moved:
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"School trip","all_day":true,"starts_at":"2026-10-03T00:00:00Z","ends_at":"2026-10-03T00:00:00Z","calendar":{"id":9}}]}`)
+		case r.URL.Path == "/calendars/9/recordings.json":
+			window = []string{r.URL.Query().Get("starts_on"), r.URL.Query().Get("ends_on")}
+			_, _ = io.WriteString(w, `{}`)
+		case r.URL.Path == "/calendars/12/recordings.json" && moved:
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"School trip","all_day":true,"starts_at":"2026-10-10T00:00:00Z","ends_at":"2026-10-10T00:00:00Z","calendar":{"id":12}}]}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
+			moved = true
+			_, _ = io.WriteString(w, `{"id":4821}`)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}), "event", "edit", "4821", "2026-10-03", "--calendar", "12", "--starts-on", "2026-10-10", "--ends-on", "2026-10-10")
+	if err != nil {
+		t.Fatalf("execute event edit: %v", err)
+	}
+	if want := []string{"2026-10-02", "2026-10-12"}; strings.Join(window, " ") != strings.Join(want, " ") {
+		t.Errorf("read back %v, want %v", window, want)
+	}
+}
+
+// A read-back that fails after the write went through keeps its own code, so a caller can
+// tell an expired sign-in or a missing calendar from HEY refusing the move.
+func TestEventsEditKeepsTheCodeOfAFailedReadBack(t *testing.T) {
+	moved := false
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Elena","owned":true}}]}`)
+		case r.URL.Path == "/calendars/9/recordings.json" && !moved:
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"Swim meet","all_day":true,"starts_at":"2026-10-03T00:00:00Z","ends_at":"2026-10-03T00:00:00Z","calendar":{"id":9}}]}`)
+		case r.URL.Path == "/calendars/9/recordings.json":
+			http.NotFound(w, r)
+		case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
+			moved = true
+			_, _ = io.WriteString(w, `{"id":4821}`)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}), "event", "edit", "4821", "2026-10-03", "--calendar", "12")
+
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != apierr.CodeNotFound {
+		t.Fatalf("error = %v, want the read-back's own not-found", err)
+	}
+	if want := "HEY saved event 4821 without saying which calendar it is on"; !strings.HasPrefix(apiErr.Message, want) {
+		t.Errorf("message = %q, want it to start %q", apiErr.Message, want)
+	}
+}
+
+// The event is looked for calendar by calendar, so a calendar after the one it is on that
+// cannot be read is never asked.
+func TestEventsEditStopsAtTheCalendarTheEventIsOn(t *testing.T) {
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Elena","owned":true}},{"calendar":{"id":12,"name":"Nina","owned":true}}]}`)
+		case r.URL.Path == "/calendars/9/recordings.json":
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"Swim meet","all_day":true,"starts_at":"2026-10-03T00:00:00Z","ends_at":"2026-10-03T00:00:00Z","calendar":{"id":9}}]}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
+			_, _ = io.WriteString(w, `{"id":4821,"title":"Swim meet (moved)","calendar":{"id":9}}`)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}), "event", "edit", "4821", "2026-10-03", "--title", "Swim meet (moved)")
+	if err != nil {
+		t.Fatalf("execute event edit: %v", err)
+	}
+}
+
+// HEY answers 404 for a calendar it will not file on — the personal calendar, a subscription —
+// and for an event deleted since it was read, so the refusal names the move rather than
+// guessing which.
+func TestEventsEditNamesTheCalendarHEYWillNotFileOn(t *testing.T) {
+	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/calendars.json":
+			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Elena","owned":true}},{"calendar":{"id":14,"name":"US Holidays","owned":true,"external":true}}]}`)
+		case r.URL.Path == "/calendars/9/recordings.json":
+			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"Swim meet","starts_at":"2026-10-03T08:00:00Z","ends_at":"2026-10-03T11:00:00Z","calendar":{"id":9}}]}`)
+		case r.URL.Path == "/calendars/14/recordings.json":
+			_, _ = io.WriteString(w, `{}`)
+		case r.Method == http.MethodPatch && r.URL.Path == "/calendar/events/4821.json":
+			http.NotFound(w, r)
+		default:
+			t.Errorf("unexpected request = %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}), "event", "edit", "4821", "2026-10-03", "--calendar", "14")
+
+	var apiErr *apierr.Error
+	if !errors.As(err, &apiErr) || apiErr.Code != apierr.CodeNotFound {
+		t.Fatalf("error = %v, want a not-found naming the calendar", err)
+	}
+	if want := "HEY answered not found moving event 4821 to calendar 14"; apiErr.Message != want {
+		t.Errorf("message = %q, want %q", apiErr.Message, want)
 	}
 }
 
@@ -299,18 +604,42 @@ func TestEventsEditRefusesAnEventItCannotRead(t *testing.T) {
 	}
 }
 
+// An id alone deletes the whole event. It is read first, only to make sure it is not a day
+// of a series written out on its own; a series, or an id the read does not find, is deleted.
 func TestEventsDeleteCommand(t *testing.T) {
-	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete || r.URL.Path != "/calendar/events/4821.json" {
-			t.Errorf("request = %s %s, want DELETE /calendar/events/4821.json", r.Method, r.URL.Path)
-		}
-		w.WriteHeader(http.StatusNoContent)
-	}), "event", "delete", "4821")
-	if err != nil {
-		t.Fatalf("execute events delete: %v", err)
-	}
-	if response.Summary != "Event deleted" {
-		t.Errorf("summary = %q", response.Summary)
+	for _, tt := range []struct {
+		name, recordings string
+	}{
+		{name: "the series", recordings: `{"Calendar::Event":[{"id":4821,"type":"Calendar::Event","title":"Design review","recurring":true,"starts_at":"2026-09-01T12:00:00Z","ends_at":"2026-09-01T13:00:00Z"}]}`},
+		{name: "not found in the year", recordings: `{}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var deleted atomic.Int32
+			response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/calendars.json":
+					_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
+				case r.Method == http.MethodGet && r.URL.Path == "/calendars/9/recordings.json":
+					_, _ = io.WriteString(w, tt.recordings)
+				case r.Method == http.MethodDelete && r.URL.Path == "/calendar/events/4821.json":
+					deleted.Add(1)
+					w.WriteHeader(http.StatusNoContent)
+				default:
+					t.Errorf("unexpected request = %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			}), "event", "delete", "4821")
+			if err != nil {
+				t.Fatalf("execute events delete: %v", err)
+			}
+			if deleted.Load() != 1 {
+				t.Errorf("deletes = %d, want one", deleted.Load())
+			}
+			if response.Summary != "Event deleted" {
+				t.Errorf("summary = %q", response.Summary)
+			}
+		})
 	}
 }
 

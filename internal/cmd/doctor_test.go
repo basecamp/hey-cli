@@ -3,10 +3,13 @@ package cmd
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/auth"
 )
 
 // doctorChecks runs every check against a machine hey has never seen, so the
@@ -26,6 +29,36 @@ func versionCheck(t *testing.T, checks []map[string]string) map[string]string {
 	}
 	t.Fatalf("no CLI Version check in %v", checks)
 	return nil
+}
+
+func TestDoctorReportsAnUnreadableAuthenticationState(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	configDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(configDir, "credentials.json"), []byte("not-json"), 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	previous := authMgr
+	authMgr = auth.NewManager("https://app.hey.com", http.DefaultClient, configDir)
+	t.Cleanup(func() { authMgr = previous })
+
+	var authentication map[string]string
+	for _, check := range doctorChecks(t) {
+		if check["name"] == "Authentication" {
+			authentication = check
+			break
+		}
+	}
+	if authentication == nil {
+		t.Fatal("no Authentication check")
+	}
+	if authentication["status"] != "error" || !strings.Contains(authentication["message"], "Could not read authentication status") {
+		t.Errorf("Authentication check = %v, want the storage read failure", authentication)
+	}
+	if strings.Contains(authentication["message"], "Not authenticated") {
+		t.Errorf("Authentication check = %v, unreadable state must not be reported as signed out", authentication)
+	}
 }
 
 func TestDoctorVersionWarnsWhenUpdateAvailable(t *testing.T) {

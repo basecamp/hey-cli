@@ -22,6 +22,7 @@ import (
 // draftOutput is what hey draft show answers with: the draft's editable state, its body
 // as Markdown the way every email body leaves this CLI.
 type draftOutput struct {
+	From                string            `json:"from,omitempty"`
 	ID                  int64             `json:"id"`
 	Subject             string            `json:"subject,omitempty"`
 	Body                htmlutil.Markdown `json:"body"`
@@ -35,6 +36,7 @@ type draftOutput struct {
 
 func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 	out := draftOutput{
+		From:    edit.Sender.EmailAddress,
 		ID:      id,
 		Subject: edit.Subject,
 		Body:    htmlutil.ToMarkdown(edit.Content),
@@ -42,6 +44,9 @@ func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 		CC:      addressEmails(edit.Addressed.Copied),
 		BCC:     addressEmails(edit.Addressed.Blindcopied),
 		IsReply: edit.IsReply,
+	}
+	if edit.Sender.Id == 0 {
+		out.From = edit.Creator.EmailAddress
 	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
 		at := edit.ScheduledDeliveryAt
@@ -87,6 +92,10 @@ func draftContentFrom(edit *generated.MessageEditState) hey.DraftContent {
 		// the account default by its first edit or the final send.
 		ActingSenderID: edit.Sender.Id,
 	}
+	if content.ActingSenderID == 0 {
+		// HEY omits sender when the draft is sent as its creator contact.
+		content.ActingSenderID = edit.Creator.Id
+	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
 		// HEY's API reads a schedule's date and hour in UTC (ApiRequest sets
 		// Time.zone to UTC for every JSON request), so the served UTC moment is
@@ -126,7 +135,7 @@ func newDraftShowCommand() *draftShowCommand {
 		Use:   "show <draft-id>",
 		Short: "Read a draft back",
 		Annotations: map[string]string{
-			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown.",
+			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown. The answer includes from, the sender the draft goes out as, and, for a draft scheduled in a HEY app, scheduled_delivery_at in UTC like every HEY timestamp (the styled view shows it in local time).",
 		},
 		Example: `  hey draft show 12345
   hey draft show 12345 --json`,
@@ -157,6 +166,9 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 	if writer.IsStyled() {
 		w := cmd.OutOrStdout()
 		fmt.Fprintf(w, "Draft %d: %s\n", out.ID, terminal.SanitizeLine(out.Subject))
+		if out.From != "" {
+			fmt.Fprintf(w, "From: %s\n", terminal.SanitizeLine(out.From))
+		}
 		for _, kind := range []struct {
 			label  string
 			emails []string
@@ -185,6 +197,7 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 
 type draftEditCommand struct {
 	cmd         *cobra.Command
+	from        string
 	subject     string
 	to          string
 	cc          string
@@ -198,16 +211,21 @@ func newDraftEditCommand() *draftEditCommand {
 	editCommand.cmd = &cobra.Command{
 		Use:   "edit <draft-id>",
 		Short: "Change a draft",
+		Long: `Change a draft.
+
+A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
+or a top-level domain HEY does not know — is refused before anything is sent.`,
 		Annotations: map[string]string{
-			"agent_notes": "Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved.",
+			"agent_notes": "--from chooses a configured sender email or ID within this draft account. It preserves the body verbatim, including existing signatures; use a body flag to replace those. Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved. A draft scheduled between whole UTC hours, which HEY's API cannot express, is refused as a usage error (exit 1) rather than moved — adjust it in a HEY app first. --from saves no default sender.",
 		},
 		Example: `  hey draft edit 12345 --subject "Quarterly planning (v2)"
   hey draft edit 12345 --to maria@example.com --cc finance@example.com
   hey draft edit 12345 -m "Rewritten agenda: budget first, hiring second."
   hey draft edit 12345    # open the body in $EDITOR`,
 		RunE: editCommand.run,
-		Args: usageExactOneArg(),
+		Args: recipientsChecked(usageExactOneArg()),
 	}
+	editCommand.cmd.Flags().StringVar(&editCommand.from, "from", "", "Replace the sender with a configured email or ID in this draft account")
 	editCommand.cmd.Flags().StringVar(&editCommand.subject, "subject", "", "Replace the subject")
 	editCommand.cmd.Flags().StringVar(&editCommand.to, "to", "", "Replace the To recipients (comma separated; empty clears)")
 	editCommand.cmd.Flags().StringVar(&editCommand.cc, "cc", "", "Replace the CC recipients (comma separated; empty clears)")
@@ -241,7 +259,23 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 	content := draftContentFrom(edit)
 
 	flags := cmd.Flags()
-	fieldFlagged := false
+	fieldFlagged := flags.Changed("from")
+	editClient := sdk
+	if flags.Changed("from") {
+		if edit.Id != draftID {
+			return apierr.ErrNotFound("draft", args[0])
+		}
+		accountID, accountErr := draftSenderAccount(edit)
+		if accountErr != nil {
+			return accountErr
+		}
+		client, sender, senderErr := selectedSender(ctx, c.from, accountID)
+		if senderErr != nil {
+			return senderErr
+		}
+		editClient = client
+		content.ActingSenderID = sender.Id
+	}
 	if flags.Changed("subject") {
 		content.Subject = c.subject
 		fieldFlagged = true
@@ -275,7 +309,7 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 		content.Content = htmlutil.FromMarkdown(body)
 	}
 
-	if err := sdk.Messages().UpdateDraft(ctx, draftID, content); err != nil {
+	if err := editClient.Messages().UpdateDraft(ctx, draftID, content); err != nil {
 		return apierr.FromSDK(err)
 	}
 	return writeMutationLine(cmd, fmt.Sprintf("Draft %d updated.", draftID), "Draft updated",
@@ -293,8 +327,24 @@ func newDraftSendCommand() *draftSendCommand {
 	sendCommand.cmd = &cobra.Command{
 		Use:   "send <draft-id>",
 		Short: "Deliver a draft",
+		Long: `Deliver a draft through HEY's undo window.
+
+The answer carries the delivered message's id and the topic_id of its thread, with its
+subject and delayed (true while Undo Send holds it back). The id is the draft's own unless
+HEY breaks the draft out into a thread of its own, and the styled line then names the new
+message too. An answer from HEY that names no entry leaves the draft's id as the id, beside
+whatever HEY did serve, such as delayed.
+
+While Undo Send holds a message back (delayed), HEY leaves it out of its thread:
+hey thread read shows the thread without it, and a thread it started answers not_found,
+until the message goes out. Read the thread again then.
+
+If HEY refuses the send — usually because the account has reached its sending limit —
+the draft stays a draft and the command fails with not_delivered (exit 7). The retry is
+hey draft send on that same draft once the limit allows; composing the message again
+would make a second draft.`,
 		Annotations: map[string]string{
-			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. Scheduling a delivery is done in a HEY app for now; the API cannot yet name an exact instant.",
+			"agent_notes": "Sends the draft as it stands — recipients are required, added with `hey draft edit --to`. Delivery goes through HEY's undo window. The answer carries the delivered message's id and its thread's topic_id, with subject and delayed; when HEY's answer names no entry, the id stays the draft's and only the fields HEY served are added. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. Scheduling a delivery is done in a HEY app for now; the CLI has no flag for it, and HEY's API schedules only to a whole hour. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id> on that same draft once the limit allows — that is the retry, and composing the message again makes a second draft.",
 		},
 		Example: `  hey draft send 12345`,
 		RunE:    sendCommand.run,
@@ -326,11 +376,19 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	content.Schedule = nil
-	if err := sdk.Messages().SendDraft(ctx, draftID, content); err != nil {
+	sent, err := sdk.Messages().SendDraft(ctx, draftID, content)
+	if err != nil {
 		return apierr.FromSDK(err)
 	}
-	return writeMutationLine(cmd, fmt.Sprintf("Draft %d sent.", draftID), "Draft sent",
-		map[string]any{"id": draftID})
+	if err := confirmSent(ctx, sdk, sent); err != nil {
+		return err
+	}
+	return writeMessageSent(cmd, messageSent{
+		line:     fmt.Sprintf("Draft %d sent", draftID),
+		summary:  "Draft sent",
+		lineID:   draftID,
+		reported: map[string]any{"id": draftID},
+	}, sent)
 }
 
 // --- delete ---
@@ -345,7 +403,7 @@ func newDraftDeleteCommand() *draftDeleteCommand {
 		Use:   "delete <draft-id>...",
 		Short: "Trash drafts",
 		Annotations: map[string]string{
-			"agent_notes": "Takes draft IDs from `hey draft list`. Trashes the draft; there is no undo here.",
+			"agent_notes": "Takes draft IDs from `hey draft list`. Trashes the draft; there is no undo here. Trashing a draft scheduled in a HEY app stops its delivery for as long as it stays in Trash.",
 		},
 		Example: `  hey draft delete 12345
   hey draft delete 12345 67890`,

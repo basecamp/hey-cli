@@ -37,7 +37,15 @@ type Calendar struct {
 	// External is a calendar HEY subscribes to rather than owns — haystack's `internal`
 	// scope is `where.missing(:subscription)`, and this is the other side of it.
 	External bool
+	// Owned is whether the reader owns the calendar rather than having it shared with them.
+	Owned bool
+	// Kind is "normal" or "maybe". Every account has a Maybe calendar, made right after the
+	// personal one, so it comes before the ordinary calendar in the order HEY lists them.
+	Kind string
 }
+
+// calendarKindNormal is the kind of every calendar but Maybe.
+const calendarKindNormal = "normal"
 
 // listed is whether the picker offers this calendar at all. The personal calendar is
 // never offered: it holds the reader's own habits and todos, it is on in every client,
@@ -58,6 +66,13 @@ func (c Calendar) listed() bool {
 // `accessible_calendars.internal` for exactly this reason.
 func (c Calendar) fileable() bool {
 	return !c.Personal && !c.External
+}
+
+// defaultForEvents is whether this is where HEY opens a new event when no calendar is named:
+// `owned_calendars.internal.normal.first!`. Maybe is fileable but never the default, and it
+// is listed before the calendar that is, so the first fileable calendar is the wrong answer.
+func (c Calendar) defaultForEvents() bool {
+	return c.fileable() && c.Owned && c.Kind == calendarKindNormal
 }
 
 // CalendarYear is a year as HEY draws one: a grid of days, and the events that span more
@@ -224,9 +239,17 @@ type yearLoadedMsg struct {
 // identityLoadedMsg stays off the request lane: the identity's calendar preferences are
 // read once, alongside the calendars rather than instead of them, so putting it on the
 // lane would cancel the read it was batched with.
+//
+// It carries a count of its own instead: read is which visit's read this answers, so an
+// answer from an earlier visit that lands after a later one's is dropped rather than
+// putting that visit's zone back.
 type identityLoadedMsg struct {
+	read         int
 	firstWeekDay time.Weekday
 	use24Hour    bool
+	// timeZone is the account's zone as the identity serves it, and empty when it has none
+	// or the read failed.
+	timeZone string
 }
 
 // calendarSettingsSavedMsg is the settings form's write landing — or not.
@@ -376,6 +399,16 @@ type calendarView struct {
 	// it, and the settings form writes it back.
 	use24Hour bool
 
+	// accountZone is the zone HEY's web app reads a typed time in, as the identity served it
+	// when this section was last entered, and what a new event's times are written in. It is
+	// read with the rest of the identity rather than kept anywhere longer-lived, so a zone
+	// changed on the web is picked up the next time the calendar is opened, and it is empty
+	// until that read answers.
+	accountZone string
+	// identityRead counts the identity reads started, one a visit, so only the latest is
+	// taken; see identityLoadedMsg.
+	identityRead int
+
 	// now is the clock the calendar anchors on. It is read on every fetch and
 	// every render, so a TUI left open overnight moves to the new day instead of
 	// fetching around the day it started on while the grid highlights today.
@@ -471,6 +504,11 @@ type calendarView struct {
 	// settings is the open calendar settings form, standing over the calendar.
 	settings *calendarSettingsForm
 
+	// detail is the read-only card Enter opens over a selected event — everything the event
+	// carries, laid out to be read. It never stands with the event form: e closes it and
+	// opens the form on the same event.
+	detail *eventDetail
+
 	timeTrack   *timeTrackMenu
 	trackedTime *trackedTimeScreen
 	// trackedTimeForm is the open edit form, standing over the tracked time screen.
@@ -504,6 +542,11 @@ func newCalendarView(vc *viewContext) *calendarView {
 }
 
 func (v *calendarView) Init() tea.Cmd {
+	// The account's zone is this read's answer rather than the last one's, so a zone changed
+	// on the web, or a read that fails, is never covered by what an earlier visit was told. A
+	// form opened before the answer lands opens on Local and takes the zone when it does.
+	v.accountZone = ""
+	v.identityRead++
 	cmds := []tea.Cmd{v.fetchIdentity(), v.requestOngoingTrack(), v.followClock()}
 	if len(v.calendars) == 0 {
 		cmds = append(cmds, v.requestCalendars())
@@ -535,8 +578,19 @@ func (v *calendarView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		return v.animate(), true
 
 	case identityLoadedMsg:
+		if msg.read != v.identityRead {
+			return nil, true
+		}
 		v.firstWeekDay = msg.firstWeekDay
 		v.use24Hour = msg.use24Hour
+		if v.detail != nil {
+			v.detail.use24 = v.use24Hour
+			v.detail.resize(v.vc.width, v.vc.height)
+		}
+		v.accountZone = msg.timeZone
+		if v.eventForm != nil {
+			v.eventForm.adoptAccountZone(msg.timeZone)
+		}
 		v.rebuildView()
 		return nil, true
 
@@ -840,6 +894,11 @@ func (v *calendarView) View() string {
 		frame := modalFrame(v.settings.title(), v.settings.view(), v.vc.width)
 		view = overlayModal(view, frame, v.vc.width, v.vc.height)
 	}
+	// The detail card stands over the grid like the event form does, and never with it: e
+	// closes the card and opens the form on the same event.
+	if v.detail != nil {
+		view = overlayModal(view, v.detail.view(), v.vc.width, v.vc.height)
+	}
 	return view
 }
 
@@ -867,6 +926,9 @@ func (v *calendarView) todosFooterHeight() int {
 }
 
 func (v *calendarView) HelpBindings() []helpBinding {
+	if v.detail != nil {
+		return v.detail.helpBindings()
+	}
 	if v.settings != nil {
 		return v.settings.helpBindings()
 	}
@@ -1034,6 +1096,34 @@ func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		return cmd
 	}
+	// The event detail card takes every key while it is up — it is an inputCapturer, so the
+	// model routes esc here rather than through CancelPendingDetail. esc and q close it, o opens
+	// the link, e trades the card for the form on the same event, and anything else scrolls the
+	// notes or does nothing.
+	if v.detail != nil {
+		switch msg.String() {
+		case "esc", "q":
+			v.detail = nil
+			return nil
+		case "o":
+			return v.openEventLink()
+		case "e":
+			event, ok := v.selectedRecording()
+			if !ok || event.key() != v.detail.event.key() {
+				return notify("This event is no longer available")
+			}
+			cmd := v.startEventForm(eventFormEdit, event)
+			// Only close the card if the form was successfully created; if startEventForm
+			// found no fileable calendars it returns an error notice without setting
+			// v.eventForm, so we keep the card open rather than leaving the user with nothing.
+			if v.eventForm != nil {
+				v.detail = nil
+			}
+			return cmd
+		}
+		return v.detail.update(msg)
+	}
+
 	if v.requests.kind == calendarRequestMutation {
 		return nil
 	}
@@ -1130,6 +1220,9 @@ func (v *calendarView) handleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 // the arrows move between cells, enter steps into one, and only then do ↑ and ↓ belong to that
 // day's events. esc steps back out. Without the two stages ↑ and ↓ would have to be both a
 // week's worth of movement and an event's, and a year of cells has no way to show which.
+//
+// enter opens the selected event's detail card wherever one is picked out — on the day, on the
+// week, and inside a year cell. On the year with no cell open it is the step into the cell.
 func (v *calendarView) handleArrowKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	key := msg.String()
 
@@ -1144,6 +1237,9 @@ func (v *calendarView) handleArrowKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return v.crossTheDay(-1), true
 		case "down":
 			return v.crossTheDay(1), true
+		case "enter":
+			v.openEventDetail()
+			return nil, true
 		}
 	case viewWeek:
 		switch key {
@@ -1155,6 +1251,9 @@ func (v *calendarView) handleArrowKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			return v.moveSelection(-1), true
 		case "down":
 			return v.moveSelection(1), true
+		case "enter":
+			v.openEventDetail()
+			return nil, true
 		}
 	case viewYear:
 		switch key {
@@ -1173,6 +1272,10 @@ func (v *calendarView) handleArrowKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			}
 			return v.moveCursorDay(7), true
 		case "enter":
+			if v.inYearCell {
+				v.openEventDetail()
+				return nil, true
+			}
 			v.enterYearCell()
 			return nil, true
 		}
@@ -1269,13 +1372,59 @@ func (v *calendarView) leaveYearCell() {
 
 // CancelPendingDetail is how esc reaches a year cell. The model reads esc before a view sees a
 // key, and only offers it on through here — so stepping out of a cell is the same seam a mail
-// thread's read is cancelled through, rather than a key the calendar handles itself.
+// thread's read is cancelled through, rather than a key the calendar handles itself. The event
+// card does not come through here: it is an inputCapturer, so the model hands it esc directly.
 func (v *calendarView) CancelPendingDetail() bool {
 	if !v.inYearCell {
 		return false
 	}
 	v.leaveYearCell()
 	return true
+}
+
+// openEventDetail is Enter on the grid: the read-only card over whatever event the arrows have
+// walked to. There is nothing to fetch — the grid read already carries the notes, the link and
+// the guest list — so the card is built straight from the selected recording, and Enter with
+// nothing picked out does nothing.
+func (v *calendarView) openEventDetail() {
+	event, ok := v.selectedRecording()
+	if !ok {
+		return
+	}
+	v.detail = newEventDetail(event, v.calendarName(event.CalendarID), v.use24Hour, v.vc.styles, v.vc.width, v.vc.height)
+}
+
+// openEventLink hands the card's event link to the browser launcher.
+// Only an http/https link is handed over (openableLink),
+// so a shared event's file:// path or application scheme cannot invoke a local handler; a
+// launcher missing from PATH says so in a toast rather than the key seeming dead.
+func (v *calendarView) openEventLink() tea.Cmd {
+	if v.detail == nil {
+		return nil
+	}
+	link, ok := v.detail.openableLink()
+	if !ok {
+		return nil
+	}
+	if v.vc.openURL == nil {
+		return nil
+	}
+	if err := v.vc.openURL(link); err != nil {
+		return notifyError("Could not open the link", err)
+	}
+	return notify("Opening the link…")
+}
+
+// calendarName is the event's calendar by name, for the detail card. The personal calendar and
+// any calendar the reader is not a member of are not in the list, and get no name rather than
+// a wrong one.
+func (v *calendarView) calendarName(id int64) string {
+	for _, calendar := range v.calendars {
+		if calendar.ID == id {
+			return calendar.Name
+		}
+	}
+	return ""
 }
 
 // handleHabitPickerKey gives the open picker every key: managing a habit is what the
@@ -1595,7 +1744,7 @@ func (v *calendarView) Loading() bool {
 }
 func (v *calendarView) CapturingInput() bool {
 	return v.timeTrack != nil || v.trackedTime != nil || v.timeTrackCategories != nil ||
-		v.habitForm != nil || v.eventForm != nil || v.settings != nil ||
+		v.habitForm != nil || v.eventForm != nil || v.settings != nil || v.detail != nil ||
 		v.habitPicker != nil || v.todoPicker != nil || v.calendarPicker != nil
 }
 
@@ -1620,10 +1769,13 @@ func (v *calendarView) refreshLive() (tea.Cmd, bool) {
 }
 
 // Restyle re-renders the day/week/year grid, which caches styled output in its
-// viewport. The recording detail is plain text and needs nothing.
+// viewport, and the event card, which caches its own.
 func (v *calendarView) Restyle() {
 	if v.trackedTime != nil {
 		v.trackedTime.rebuild()
+	}
+	if v.detail != nil {
+		v.detail.restyle(v.vc.styles)
 	}
 	v.rebuildKeepingScroll()
 }
@@ -1655,6 +1807,9 @@ func (v *calendarView) Resize(width, height int) {
 	}
 	if v.settings != nil {
 		v.settings.resize(width, height)
+	}
+	if v.detail != nil {
+		v.detail.resize(width, height)
 	}
 	v.rebuildView()
 }
@@ -2066,7 +2221,7 @@ func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.C
 		return notifyError("Cannot add an event", errNoCalendars)
 	}
 	v.editing = event
-	v.eventForm = newEventForm(mode, event, v.day(), fileable, v.lastCalendarID(), v.vc.styles)
+	v.eventForm = newEventForm(mode, event, v.newEventDay(), fileable, v.newEventCalendarID(fileable), v.accountZone, v.vc.styles)
 
 	// An edit is handed what the event already carries, and this is load-bearing rather than a
 	// courtesy: HEY clears the notes, location, link and attached email on any write that
@@ -2082,6 +2237,18 @@ func (v *calendarView) startEventForm(mode eventFormMode, event Recording) tea.C
 	}
 	v.eventForm.resize(v.vc.width, v.vc.height)
 	return v.eventForm.init()
+}
+
+// newEventDay is the moment a new event is offered from: the day in view, carrying the clock
+// it had when the view was moved there. A pinned view that has become today — `n` to
+// tomorrow at 09:15, the TUI left open until the next afternoon — would offer an hour long
+// gone, so today is read off the clock now instead.
+func (v *calendarView) newEventDay() time.Time {
+	now := v.now()
+	if day := v.day(); !sameDay(day, now) {
+		return day
+	}
+	return now
 }
 
 // saveEvent writes what the form is holding, including which calendar it is on: an update
@@ -2154,10 +2321,30 @@ func (v *calendarView) saveEvent() tea.Cmd {
 	}
 }
 
+// newEventCalendarID is the calendar a new event opens on: the one the reader filed on last
+// while it is still offered, and otherwise the one HEY files on by default. An account with no
+// default answers zero and the form opens on its first calendar — unlike `hey event add`, which
+// refuses, because here the choice is on screen in the Calendar row before anything is saved.
+func (v *calendarView) newEventCalendarID(fileable []Calendar) int64 {
+	if last := v.lastCalendarID(); last != 0 {
+		for _, calendar := range fileable {
+			if calendar.ID == last {
+				return last
+			}
+		}
+	}
+	for _, calendar := range fileable {
+		if calendar.defaultForEvents() {
+			return calendar.ID
+		}
+	}
+	return 0
+}
+
 // lastCalendarID and rememberCalendar are where the calendar a new event opens on comes from and
 // goes. It is a preference rather than data, so it is remembered as soon as the reader saves
-// rather than after HEY answers, and a machine that cannot store it simply keeps offering the
-// first calendar.
+// rather than after HEY answers, and a machine that cannot store it simply keeps offering
+// HEY's default.
 func (v *calendarView) lastCalendarID() int64 {
 	if v.vc.loadLastCalendar == nil {
 		return 0
@@ -2172,16 +2359,22 @@ func (v *calendarView) rememberCalendar(id int64) {
 	_ = v.vc.saveLastCalendar(id)
 }
 
+// editingOccurrence is the day being edited, when HEY has not written it out yet. A day it
+// has written out is a recording of its own, and an update of that id changes the day alone.
 func (v *calendarView) editingOccurrence() (hey.EventOccurrence, bool) {
+	if v.editing.ID != 0 {
+		return hey.EventOccurrence{}, false
+	}
 	return occurrenceOf(v.editing)
 }
 
 // occurrenceOf is the day of a repeating event a recording stands for, and false for an ordinary
-// event. HEY serves such a day with no id of its own, so it is addressed by the series and the
-// date instead — and both the edit and the delete act on that day alone rather than the whole
-// series, which is the narrower of the two things the reader might have meant.
+// event. A day HEY has not written out has no id of its own, so it is addressed by the series and
+// the date instead — and both the edit and the delete act on that day alone rather than the whole
+// series, which is the narrower of the two things the reader might have meant. A day HEY has
+// written out keeps the same occurrence_id beside its own id.
 func occurrenceOf(recording Recording) (hey.EventOccurrence, bool) {
-	if recording.ID != 0 || recording.OccurrenceID == "" {
+	if recording.OccurrenceID == "" {
 		return hey.EventOccurrence{}, false
 	}
 	occurrence, err := hey.ParseOccurrenceID(recording.OccurrenceID)
@@ -2202,7 +2395,9 @@ func (v *calendarView) removeSelectedEvent() tea.Cmd {
 	v.confirmDelete = ""
 
 	// One day of a repeating event is taken off on its own rather than the series with it: HEY
-	// keeps the rest by writing the day into the schedule's exceptions.
+	// keeps the rest by writing the day into the schedule's exceptions. That goes for a day HEY
+	// has written out too — deleting its own id removes only that copy, and the series draws
+	// the day again.
 	occurrence, isOccurrence := occurrenceOf(event)
 	requestID, ctx := v.requests.begin(v.vc.ctx, calendarRequestMutation)
 	return func() tea.Msg {
@@ -2327,6 +2522,7 @@ func sdkCalendarToModel(c generated.Calendar) Calendar {
 	return Calendar{
 		ID: c.Id, Name: c.Name, OwnerEmail: c.OwnerEmailAddress,
 		Color: c.Color, Personal: c.Personal, External: c.External,
+		Owned: c.Owned, Kind: c.Kind,
 	}
 }
 
@@ -2364,21 +2560,24 @@ func sdkRecordingToModel(r generated.Recording) Recording {
 // --- Fetch commands ---
 
 func (v *calendarView) fetchIdentity() tea.Cmd {
+	read := v.identityRead
 	return func() tea.Msg {
 		if v.vc.sdk == nil || v.vc.ctx == nil {
-			return identityLoadedMsg{firstWeekDay: time.Monday}
+			return identityLoadedMsg{read: read, firstWeekDay: time.Monday}
 		}
 		identity, err := v.vc.sdk.Identity().GetIdentity(v.vc.ctx)
 		if err != nil || identity == nil {
-			return identityLoadedMsg{firstWeekDay: time.Monday}
+			return identityLoadedMsg{read: read, firstWeekDay: time.Monday}
 		}
 		wd := identity.FirstWeekDay
 		if wd < 0 || wd > 6 {
 			wd = 1 // default to Monday
 		}
 		return identityLoadedMsg{
+			read:         read,
 			firstWeekDay: time.Weekday(wd),
 			use24Hour:    identity.TimeFormat == string(hey.TimeFormatTwentyFourHour),
+			timeZone:     identity.TimeZone,
 		}
 	}
 }

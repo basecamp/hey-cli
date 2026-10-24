@@ -1,0 +1,145 @@
+events/1	help:hey event list	Without --starts-on the window is the 30 days from today
+events/1	help:hey event list	Calendar ID to read (defaults to every calendar)
+events/2	help:hey event list	Calendar ID to read (defaults to every calendar)
+events/2	help:hey event list	Start date (YYYY-MM-DD)
+events/2	help:hey event list	End date (YYYY-MM-DD)
+events/3	help:hey event day	Without a date the day is today in your HEY account's time zone
+events/3	help:hey event day	every event that falls on it, occurrences of a repeating series included
+events/4	help:hey event day	List the events of one day, as HEY draws it
+events/5	help:hey event week	List the events of the week a date falls in
+events/6	help:hey event add	Create an event
+events/6	help:hey event add	Start time (HH:MM)
+events/6	help:hey event add	End time (HH:MM, defaults to an hour after the start)
+events/7	help:hey event add	An event with no --start-time is an all-day event.
+events/8	help:hey event add	Calendar ID to file the event on
+events/8	help:hey event add	Repeat: every_day, every_weekday
+events/8	help:hey event add	Notice before the event, e.g. 10m, 1h, 1d (repeatable)
+events/9	help:hey event edit	Change an event. Only the flags you name change
+events/9	help:hey event edit	Event title
+events/10	help:hey event edit	How much of the series an --occurrence edit reaches: current (that day alone) or future (that day and every one after it)
+events/11	help:hey event edit	'future' starts a new series and requires --repeat to state its complete schedule: combine a preset with --repeat-times or --repeat-until for a finite series
+events/11	help:hey event edit	Let an --occurrence edit send notes it is not changing back as plain text, losing their formatting
+events/12	help:hey event delete	An id alone deletes the whole event, a repeating series included
+events/13	help:hey event delete	'current' deletes that day alone
+events/14	help:hey event list	Calendar ID to read (defaults to every calendar)
+events/14	help:hey event add	Without --calendar the event goes where HEY puts one by default: the first ordinary calendar you own that is not a subscription — never Maybe or the personal calendar.
+events/15	help:hey event add	Calendar ID to file the event on
+events/16	help:hey event list	plus a row for each day HEY has written out on its own (its own id, the series in parent_id).
+events/17	help:hey event day	occurrences of a repeating series included, each with that day's own starts_at and ends_at and an occurrence_id
+events/18	help:hey event day	A virtual occurrence carries the series in id and parent_id.
+events/18	help:hey event day	keeps its own event id in id and recording_id, while parent_id remains the series
+events/19	help:hey event day	The own id is what 'hey event edit' acts on for that day alone.
+events/19	help:hey event day	the delete is the one way to delete one day, written out or not
+events/20	help:hey event day	When the day holds occurrences, the styled table adds Series ID, Occurrence ID and Recording ID columns beside ID.
+events/20	help:hey event week	When the week holds occurrences, the styled table adds Series ID, Occurrence ID and Recording ID columns beside ID.
+events/21	help:hey event day	The day covers the calendars switched on in HEY, the same set the app draws, so there is no --calendar to narrow it.
+events/21	help:hey event week	The week covers the calendars switched on in HEY, the same set the app draws, so there is no --calendar to narrow it.
+events/21	help:hey event day	Fetch all results (override --limit)
+events/22	help:hey event	list, day and week answer a flat array of events in data.
+events/23	help:hey event	Each event has id, title, starts_at, ends_at and calendar; all_day and recurring appear only when true, starts_at_time_zone and ends_at_time_zone only on a zoned timed event, and description (the notes, as plain text), location, url, attached_entry and reminders only when set.
+events/24	help:hey event day	keeps its own event id in id and recording_id, while parent_id remains the series
+events/24	help:hey event day	Either way occurrence_id is what 'hey event edit --occurrence' and 'hey event delete --occurrence' take
+events/24	help:hey event week	keeps its own event id in id and recording_id, while parent_id remains the series
+events/25	help:hey event day	appears on its event as countdown in JSON, a label with starts_at and ends_at
+events/26	help:hey event day	A later day of a recurring event may carry no countdown when HEY leaves it out of that period.
+events/27	help:hey event list	list carries no countdowns; day and week do.
+events/28	help:hey event list	Output only the count of results
+events/28	help:hey event list	Output only IDs, one per line
+events/29	help:hey event edit	Only the flags you name change; the rest of the event is read and sent back, because HEY clears whatever a write leaves out.
+events/29	help:hey event	it resends the notes, location, link, attached email, reminders and time zones the event already carries
+events/30	help:hey event edit	Notes are served back as plain text, so saving flattens their formatting. A countdown is a recording of its own that this edit does not read back, so an edit removes one unless --countdown names it again.
+events/31	help:hey event edit	Without [date] it is looked for within a year either side of today, and an event not found there is refused as not_found rather than written blind.
+events/32	help:hey event edit	not your personal calendar and not a subscription, for which HEY answers not_found.
+events/33	help:hey event edit	the edit fails with forbidden rather than reporting it updated.
+events/34	help:hey event edit	An id alone changes the whole event, a repeating series included. One day of a series is changed with --occurrence, which takes the occurrence_id 'hey event day' and 'hey event week' serve (<series id>_<YYYY-MM-DD>, and the series must be the id given), and --apply-to, which is required with it: 'current' changes that day alone and 'future' changes it and every day after it, the two choices HEY's own form offers.
+events/35	help:hey event edit	Those flags with 'current', --apply-to without --occurrence, an --apply-to other than current or future, and an occurrence_id that is malformed or names another series are usage errors, refused before anything is read.
+events/36	help:hey event edit	The day is read on its own date, so [date] can be left out or must name it.
+events/37	help:hey event edit	combine a preset with --repeat-times or --repeat-until for a finite series, both naming what remains from the edited day; use a preset alone for one that continues forever; or use --repeat custom, which takes neither limit, to copy an existing opaque schedule.
+events/38	help:hey event edit	A custom count-based rule can restart its full count on the replacement.
+events/39	help:hey event edit	its last day cannot precede its first day, and a --repeat-until before it is a usage error.
+events/40	help:hey event edit	A virtual day of an opaque custom schedule takes its exact time from HEY's Day view and is refused if that view no longer serves it.
+events/41	help:hey event edit	A realized day of a custom schedule cannot be split safely, because HEY does not serve the rule's occurrence boundary; use a virtual occurrence, edit that day alone, or edit the whole series.
+events/42	help:hey event edit	A realized preset occurrence moved away from its series time must be moved back with a current-only edit before it can be split safely.
+events/43	help:hey event edit	HEY cancels the written-out days from the moved day's actual start but truncates the series at its occurrence date, so a split from a moved day can take an earlier edited day with it or leave a later one behind.
+events/44	help:hey event edit	use a preset alone for one that continues forever
+events/45	help:hey event edit	The days from this one on get a new series id, but the answer is still the day edited, so read 'hey event day' or 'hey event week' again before editing the new series further.
+events/46	help:hey event edit	An occurrence edit keeps everything it is not told to change — that day's own schedule, zones, notes, location, link, attached email, reminders, circle and countdown, taken from the day itself where HEY has already written it out
+events/47	help:hey event edit	A countdown owned by the day is read back and sent again; an inherited series countdown is left inherited on a current-only edit and copied to the replacement series on a future edit.
+events/48	help:hey event edit	It survives unless --countdown 0 removes it — and one day of a series with a countdown cannot lose it alone, since HEY shows a day the series' countdown whenever it has none of its own, so that is refused.
+events/49	help:hey event edit	Notes are still only served as plain text, so an occurrence edit that would send formatted notes back as text refuses unless --allow-plain-notes accepts that or --notes replaces them.
+events/50	help:hey event edit	A 'future' edit builds the new series from the series' own guest list and sends invitations
+events/51	help:hey event edit	The day is read over every calendar, so here --calendar is only where the day is moved to; a day already moved elsewhere stays there.
+events/52	help:hey event day	keeps its own event id in id and recording_id, while parent_id remains the series. The own id is what 'hey event edit' acts on for that day alone.
+events/53	help:hey event edit	(<series id>_<YYYY-MM-DD>, and the series must be the id given)
+events/54	help:hey event delete	An id alone deletes the whole event, a repeating series included
+events/55	help:hey event delete	One day of a series is delete <series id> --occurrence <occurrence_id from day/week> --apply-to current|future: current deletes that day alone; future deletes it and every day after, and from the series' first day that is the whole series.
+events/56	help:hey event delete	The refusal is a usage error naming the command that deletes the day.
+events/57	help:hey event delete	the event is read first, over every calendar and a year either side of today; an id that read does not find is deleted as given.
+events/58	help:hey event delete	future is refused from a written-out day moved off its series time or on an opaque custom schedule.
+events/59	help:hey event edit	an attached email you cannot read is not served, so it is detached by any edit, whole event or one day.
+events/60	help:hey event edit	HEY answers not_found alike for a date that is not a day of the series and for a series you cannot edit.
+events/61	help:hey event edit	An occurrence edit answers with the summary "Occurrence updated" ('current') or "Occurrence and the following updated" ('future'), and data holding the recording HEY answered.
+events/62	help:hey event add	unless --ends-on names a later day, when it ends on that day at the start's clock time plus an hour
+events/63	help:hey event add	Clock times are read in your HEY account's time zone, the one HEY's web app uses, and so is today when --starts-on is left out
+events/63	help:hey event add	IANA zone the times are written in, such as America/New_York
+events/64	help:hey event add	If one of those needs the account's zone and the account has none, the command refuses and asks for --time-zone
+events/65	help:hey event edit	An all-day event given a time takes the account's zone, starts at 09:00 unless --start-time says otherwise, and runs the default hour.
+todos/1	help:hey todo list	Without dates the window is 4 years before today to 1 year after it.
+todos/2	help:hey todo add	Create a new todo
+todos/3	help:hey todo add	Due date (YYYY-MM-DD, defaults to today)
+todos/4	help:hey todo complete	Mark a todo as complete
+todos/5	help:hey todo uncomplete	Mark a todo as incomplete
+todos/6	help:hey todo delete	Delete a todo
+todos/7	help:hey todo	Todo IDs must be positive; 0 or a negative ID is a usage error rather than a request.
+todos/8	help:hey todo add	A --date that is not YYYY-MM-DD is a usage error, refused before the request.
+habits/1	help:hey habit list	List habits
+habits/2	help:hey habit list	Any day in the week to read (YYYY-MM-DD, defaults to today)
+habits/3	help:hey habit create	Without --icon, --color or --days a habit gets the weights icon, the color blue, and every day of the week.
+habits/4	help:hey habit create	Habit icon. Accepted values:
+habits/4	help:hey habit create	Habit color. Accepted values: blue, red, gold, green
+habits/4	help:hey habit create	Weekdays (names or 0-6, comma-separated)
+habits/5	help:hey habit edit	omitted fields remain unchanged.
+habits/6	help:hey habit edit	New weekdays (names or 0-6, comma-separated)
+habits/6	help:hey habit	Days accept weekday names or 0 (Sunday) through 6 (Saturday).
+habits/7	help:hey habit delete	Delete a habit and its history
+habits/8	help:hey habit complete	Mark a habit as complete for a date
+habits/8	help:hey habit complete	Without --date the day is today in your HEY account's time zone
+habits/9	help:hey habit complete	Date (YYYY-MM-DD, default: today)
+habits/10	help:hey habit uncomplete	Remove a habit completion for a date
+habits/10	help:hey habit uncomplete	Without --date the day is today in your HEY account's time zone
+habits/11	help:hey habit list	A habit is read from the week a date falls in.
+habits/11	help:hey habit	Use list --ids-only to pipe IDs to the rest.
+habits/12	help:hey habit list	A week lists each habit once, whatever weekday it runs on; a week that has not started yet lists none.
+habits/13	help:hey habit	A name may be written in full or as a common abbreviation (mon, tue, wed, thu, fri, sat, sun).
+time-tracking/1	help:hey timetrack start	Start time tracking
+time-tracking/2	help:hey timetrack stop	Stop time tracking
+time-tracking/3	help:hey timetrack stop	Category title to file the stopped track under, created if HEY has none by that title
+time-tracking/4	help:hey timetrack current	Show current time tracking status
+time-tracking/5	help:hey timetrack list	One page arrives by default; --limit reads on until it has that many, and --all reads the lot.
+time-tracking/5	help:hey timetrack list	Reads HEY's tracked time index, newest-ended first.
+time-tracking/6	help:hey timetrack list	Only tracks filed under this category ID
+time-tracking/7	help:hey timetrack edit	New start, as YYYY-MM-DDTHH:MM in your time zone
+time-tracking/7	help:hey timetrack edit	New end, as YYYY-MM-DDTHH:MM in your time zone
+time-tracking/8	help:hey timetrack edit	Category title to file the track under, created if HEY has none by that title
+time-tracking/8	help:hey timetrack edit	New notes
+time-tracking/9	help:hey timetrack delete	Delete a time track
+time-tracking/10	help:hey timetrack export	Export every completed time track as CSV
+time-tracking/10	help:hey timetrack export	Without --output the CSV goes straight to stdout, so redirecting it to a file is the whole recipe.
+time-tracking/11	help:hey timetrack export	Save CSV to this file instead of stdout
+time-tracking/11	help:hey timetrack export	With --output, --json, --quiet and --markdown format the file's metadata
+time-tracking/11	help:hey timetrack export	Replace an existing output file
+time-tracking/12	help:hey timetrack categories	List time track categories
+time-tracking/13	help:hey timetrack category create	Create a time track category
+time-tracking/14	help:hey timetrack category rename	Rename a time track category
+time-tracking/15	help:hey timetrack category delete	Delete a time track category
+time-tracking/16	help:hey timetrack list	The track that is running is not here — read that with hey timetrack current.
+time-tracking/17	help:hey timetrack edit	Only the fields whose flags are given change.
+time-tracking/17	help:hey timetrack edit	Timestamps are YYYY-MM-DDTHH:MM in your own time zone, or a full RFC 3339 instant when the zone matters.
+time-tracking/17	help:hey timetrack edit	Editing a track completes it, so this is for tracks that have already finished.
+time-tracking/18	help:hey timetrack edit	--category files the track under a category title, which HEY creates if it has none by that title
+time-tracking/19	help:hey timetrack edit	A blank title is refused with a usage error, since a filed track can only be moved to another category.
+time-tracking/19	help:hey timetrack stop	a blank title is refused with a usage error, since a filed track can only be moved to another category.
+time-tracking/20	help:hey timetrack export	Without --output the CSV goes straight to stdout, so redirecting it to a file is the whole recipe.
+time-tracking/21	help:hey timetrack export	The refusal without --output is a usage error.
+time-tracking/22	help:hey timetrack export	--html is never accepted.
+time-tracking/23	help:hey timetrack export	existing paths are preserved unless --force is set.

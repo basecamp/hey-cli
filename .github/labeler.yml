@@ -20,7 +20,9 @@ skills:
 
 plugin:
   - changed-files:
-      - any-glob-to-any-file: ".claude-plugin/**"
+      - any-glob-to-any-file:
+          - ".claude-plugin/**"
+          - "hooks/**"
 
 tests:
   - changed-files:

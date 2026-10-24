@@ -43,6 +43,9 @@ func newDraftsCommand() *draftsCommand {
 	draftsCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List draft emails",
+		Annotations: map[string]string{
+			"agent_notes": "A draft scheduled in a HEY app stays in this list until it goes out; hey draft show reports when.",
+		},
 		Example: `  hey draft list
   hey draft list --limit 10
   hey draft list --all --json`,

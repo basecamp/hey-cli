@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -31,8 +32,12 @@ type eventsPeriodCommand struct {
 	read func(ctx context.Context, date string) (*generated.CalendarPeriod, error)
 
 	// describe names the span read, in words that follow "No events" and sit inside the
-	// summary's parentheses: "on 2026-09-02", "in the week of 2026-09-02".
-	describe func(date string) string
+	// summary's parentheses: "on 2026-09-02", "in the week of 2026-09-02". today says the
+	// date was not given.
+	describe func(date string, today bool) string
+
+	// todayHint is how a refusal to name today says to name the date instead.
+	todayHint string
 }
 
 func newEventsDayCommand() *eventsPeriodCommand {
@@ -40,12 +45,13 @@ func newEventsDayCommand() *eventsPeriodCommand {
 		read: func(ctx context.Context, date string) (*generated.CalendarPeriod, error) {
 			return sdk.CalendarPeriods().Day(ctx, date)
 		},
-		describe: func(date string) string {
-			if date == periodNow {
-				return "today"
+		describe: func(date string, today bool) string {
+			if today {
+				return "today, " + date
 			}
 			return "on " + date
 		},
+		todayHint: "name the day, for example hey event day 2026-10-14",
 	}
 	eventsDayCommand.cmd = &cobra.Command{
 		Use:   "day [date]",
@@ -54,12 +60,24 @@ func newEventsDayCommand() *eventsPeriodCommand {
 
 A calendar stores a repeating event once, so 'hey event list' answers a standing Monday
 standup on the day the series began and on no other. A day is HEY's own expansion: every
-event that falls on it, occurrences of a repeating series included, and nothing from
-outside it.
+event that falls on it, occurrences of a repeating series included, each with that day's
+own starts_at and ends_at and an occurrence_id, and nothing from outside it.
+
+Without a date the day is today in your HEY account's time zone, whatever this machine's
+is. An account with no time zone set reads this machine's today, and says so on stderr.
 
 The day covers the calendars switched on in HEY, the same set the app draws, so there is
-no --calendar to narrow it. The ID of an occurrence is its series, which is what 'hey
-event edit' and 'hey event delete' take.`,
+no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
+A day HEY has written out on its own — after an edit of that day alone, or a reminder —
+keeps its own event id in id and recording_id, while parent_id remains the series. The own
+id is what 'hey event edit' acts on for that day alone. Either way occurrence_id is what
+'hey event edit --occurrence' and 'hey event delete --occurrence' take, with the series id
+before it — and the delete is the one way to delete one day, written out or not.
+A countdown recording HEY includes in the day appears on its event as countdown in JSON,
+a label with starts_at and ends_at, and as a label in the styled table. A later day of a
+recurring event may carry no countdown when HEY leaves it out of that period. When the day
+holds occurrences, the styled table adds Series ID, Occurrence ID and Recording ID columns
+beside ID.`,
 		Example: `  hey event day
   hey event day 2026-09-02
   hey event day --json`,
@@ -76,22 +94,37 @@ func newEventsWeekCommand() *eventsPeriodCommand {
 		read: func(ctx context.Context, date string) (*generated.CalendarPeriod, error) {
 			return sdk.CalendarPeriods().Week(ctx, date)
 		},
-		describe: func(date string) string {
-			if date == periodNow {
-				return "this week"
+		describe: func(date string, today bool) string {
+			if today {
+				return "this week, the week of " + date
 			}
 			return "in the week of " + date
 		},
+		todayHint: "name a day in the week, for example hey event week 2026-10-14",
 	}
 	eventsWeekCommand.cmd = &cobra.Command{
 		Use:   "week [date]",
 		Short: "List the events of one week, as HEY draws it",
 		Long: `List the events of the week a date falls in, as HEY's Week View draws it: every event
-inside the week, occurrences of a repeating series included. Any day names its week.
+inside the week, occurrences of a repeating series included, each with that day's own
+starts_at and ends_at and an occurrence_id. Any day names its week.
+
+Without a date the week is the one today falls in, today in your HEY account's time zone,
+whatever this machine's is. An account with no time zone set reads this machine's today,
+and says so on stderr.
 
 The week covers the calendars switched on in HEY, the same set the app draws, so there is
-no --calendar to narrow it. The ID of an occurrence is its series, which is what 'hey
-event edit' and 'hey event delete' take.`,
+no --calendar to narrow it. A virtual occurrence carries the series in id and parent_id.
+A day HEY has written out on its own — after an edit of that day alone, or a reminder —
+keeps its own event id in id and recording_id, while parent_id remains the series. The own
+id is what 'hey event edit' acts on for that day alone. Either way occurrence_id is what
+'hey event edit --occurrence' and 'hey event delete --occurrence' take, with the series id
+before it — and the delete is the one way to delete one day, written out or not.
+A countdown recording HEY includes in the week appears on its event as countdown in JSON,
+a label with starts_at and ends_at, and as a label in the styled table. A later day of a
+recurring event may carry no countdown when HEY leaves it out of that period. When the week
+holds occurrences, the styled table adds Series ID, Occurrence ID and Recording ID columns
+beside ID.`,
 		Example: `  hey event week
   hey event week 2026-09-02
   hey event week --json`,
@@ -113,17 +146,12 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// With no date the read asks for "now" and HEY resolves today in the account's own
-	// time zone, so a host in another zone does not fetch yesterday's schedule at midnight.
-	date := periodNow
-	if len(args) > 0 {
-		if _, err := parseDateArg("date", args[0]); err != nil {
-			return err
-		}
-		date = args[0]
+	ctx := cmd.Context()
+	date, described, err := c.date(ctx, cmd, args)
+	if err != nil {
+		return err
 	}
 
-	ctx := cmd.Context()
 	period, err := c.read(ctx, date)
 	if err != nil {
 		return apierr.FromSDK(err)
@@ -134,28 +162,122 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 		events = filterRecordingsByType(&period.Recordings, recordingTypeEvent)
 	}
 	sortEventsByStart(events)
-	resolveOccurrenceSeries(events)
-
-	total := len(events)
-	if c.limit > 0 && !c.all && len(events) > c.limit {
-		events = events[:c.limit]
+	rows := occurrenceEventRows(events)
+	if period != nil {
+		attachEventCountdowns(rows, filterRecordingsByType(&period.Recordings, recordingTypeCountdown))
 	}
-	notice := output.TruncationNotice(len(events), total)
 
-	return writeEventRows(cmd, events, c.describe(date), notice)
+	total := len(rows)
+	if c.limit > 0 && !c.all && len(rows) > c.limit {
+		rows = rows[:c.limit]
+	}
+	notice := output.TruncationNotice(len(rows), total)
+
+	return writeEventRows(cmd, rows, described, notice)
 }
 
-// periodNow is the date the period reads accept for today: HEY resolves it in the
-// account's own time zone, which the CLI process's clock cannot.
-const periodNow = "now"
+// date is the day the period is read around, and the words that name it. With no date given
+// it is today in the account's zone, sent as a date: HEY resolves "now" in UTC on a JSON
+// request, which in New York after 20:00 is tomorrow.
+func (c *eventsPeriodCommand) date(ctx context.Context, cmd *cobra.Command, args []string) (string, string, error) {
+	if len(args) > 0 {
+		if _, err := parseDateArg("date", args[0]); err != nil {
+			return "", "", err
+		}
+		return args[0], c.describe(args[0], false), nil
+	}
 
-// resolveOccurrenceSeries gives each row the ID the event verbs take. HEY serves a day of a
-// repeating series as a virtual occurrence — no id of its own, the series in parent_id — but
-// 'hey event edit' and 'hey event delete' take the series, so the row carries it.
-func resolveOccurrenceSeries(events []generated.Recording) {
-	for i := range events {
-		if events[i].Id == 0 && events[i].ParentId != 0 {
-			events[i].Id = events[i].ParentId
+	var account accountZone
+	today, err := account.todayToRead(ctx, cmd.ErrOrStderr(), c.todayHint)
+	if err != nil {
+		return "", "", err
+	}
+	date := today.Format(dateLayout)
+	return date, c.describe(date, true), nil
+}
+
+// eventRow is the event shape the CLI publishes. A virtual occurrence's id names its
+// series; a realized day's id and RecordingID both name its own event.
+type eventRow struct {
+	generated.Recording
+	RecordingID int64           `json:"recording_id,omitempty"`
+	Countdown   *eventCountdown `json:"countdown,omitempty"`
+}
+
+// A countdown is a separate HEY recording. Publish only the parts that describe
+// the countdown, not its own unrelated recording fields as another event.
+type eventCountdown struct {
+	Label    string    `json:"label"`
+	StartsAt time.Time `json:"starts_at"`
+	EndsAt   time.Time `json:"ends_at"`
+}
+
+func eventRows(events []generated.Recording) []eventRow {
+	rows := make([]eventRow, len(events))
+	for i, event := range events {
+		rows[i] = eventRow{Recording: event}
+	}
+	return rows
+}
+
+// occurrenceEventRows keeps a realized occurrence's established id: an update of it changes
+// that recording alone. A delete of it does not delete the day — the series draws the day
+// again — which is why 'hey event delete' refuses it for --occurrence. A virtual occurrence
+// has no id of its own, so its id is the series id. recording_id makes the distinction
+// explicit without changing the old id.
+func occurrenceEventRows(events []generated.Recording) []eventRow {
+	rows := eventRows(events)
+	for i := range rows {
+		if rows[i].ParentId == 0 {
+			continue
+		}
+		if rows[i].Id != 0 {
+			rows[i].RecordingID = rows[i].Id
+			continue
+		}
+		rows[i].Id = rows[i].ParentId
+	}
+	return rows
+}
+
+// attachEventCountdowns joins the countdowns HEY included in this period to its
+// events. HEY serves countdown ends at the event's start in some reads and as
+// the midnight stamp of its UTC date in period reads. Both identify the same
+// event date in HEY's UTC JSON. A week can carry several occurrences of one
+// series and only one countdown record, so the parent ID and date must agree.
+func attachEventCountdowns(rows []eventRow, countdowns []generated.Recording) {
+	type key struct {
+		parentID int64
+		date     string
+	}
+	byParentAndDate := make(map[key][]int, len(rows))
+	for i, row := range rows {
+		if row.Id == 0 || row.StartsAt.IsZero() {
+			continue
+		}
+		date := row.StartsAt.UTC().Format(dateLayout)
+		byParentAndDate[key{row.Id, date}] = append(byParentAndDate[key{row.Id, date}], i)
+		if row.ParentId != 0 && row.ParentId != row.Id {
+			parent := key{row.ParentId, date}
+			byParentAndDate[parent] = append(byParentAndDate[parent], i)
+		}
+	}
+
+	for _, countdown := range countdowns {
+		if countdown.ParentId == 0 || countdown.Label == "" || countdown.StartsAt.IsZero() || countdown.EndsAt.IsZero() {
+			continue
+		}
+		candidates := byParentAndDate[key{countdown.ParentId, countdown.EndsAt.UTC().Format(dateLayout)}]
+		if len(candidates) == 0 {
+			continue
+		}
+		// A realized day's own countdown wins over an inherited series one,
+		// regardless of the order HEY served the two recordings.
+		row := &rows[candidates[0]]
+		if row.Countdown == nil || row.RecordingID == countdown.ParentId {
+			row.Countdown = &eventCountdown{
+				Label: countdown.Label, StartsAt: countdown.StartsAt, EndsAt: countdown.EndsAt,
+			}
 		}
 	}
 }
@@ -193,22 +315,62 @@ func eventDay(event generated.Recording) string {
 // writeEventRows renders one listing of events: the table when styled, the JSON envelope
 // with the add/edit/delete breadcrumbs otherwise. described names the span read, in
 // whatever words the command reads it — a window, a day, a week.
-func writeEventRows(cmd *cobra.Command, events []generated.Recording, described, notice string) error {
+func writeEventRows(cmd *cobra.Command, events []eventRow, described, notice string) error {
 	if writer.IsStyled() {
 		if len(events) == 0 {
 			fmt.Fprintf(cmd.OutOrStdout(), "No events %s.\n", described)
 			return nil
 		}
 
-		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"ID", "Title", "Starts", "Ends", "Calendar"})
+		showsOccurrenceIDs := false
 		for _, event := range events {
-			table.addRow([]string{
-				fmt.Sprintf("%d", event.Id), event.Title,
+			if event.OccurrenceId != "" || event.RecordingID != 0 {
+				showsOccurrenceIDs = true
+				break
+			}
+		}
+
+		table := newTable(cmd.OutOrStdout())
+		header := []string{"ID"}
+		if showsOccurrenceIDs {
+			header = append(header, "Series ID", "Occurrence ID", "Recording ID")
+		}
+		showsCountdown := false
+		for _, event := range events {
+			if event.Countdown != nil {
+				showsCountdown = true
+				break
+			}
+		}
+		columns := append(header, "Title", "Starts", "Ends", "Calendar")
+		if showsCountdown {
+			columns = append(columns, "Countdown")
+		}
+		table.addRow(columns)
+		for _, event := range events {
+			row := []string{fmt.Sprintf("%d", event.Id)}
+			if showsOccurrenceIDs {
+				seriesID, recordingID := "", ""
+				if event.ParentId != 0 {
+					seriesID = fmt.Sprintf("%d", event.ParentId)
+				}
+				if event.RecordingID != 0 {
+					recordingID = fmt.Sprintf("%d", event.RecordingID)
+				}
+				row = append(row, seriesID, event.OccurrenceId, recordingID)
+			}
+			row = append(row, event.Title,
 				eventBoundary(event.StartsAt, event.AllDay),
 				eventBoundary(event.EndsAt, event.AllDay),
-				event.Calendar.Name,
-			})
+				event.Calendar.Name)
+			if showsCountdown {
+				label := ""
+				if event.Countdown != nil {
+					label = event.Countdown.Label
+				}
+				row = append(row, label)
+			}
+			table.addRow(row)
 		}
 		table.print()
 		if notice != "" {

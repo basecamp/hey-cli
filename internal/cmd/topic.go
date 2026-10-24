@@ -9,8 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
@@ -19,29 +22,51 @@ import (
 
 const threadEntrySeparatorWidth = 60
 
-// threadContact is whoever wrote an entry.
+// threadContact is somebody an entry names: whoever wrote it, or an address it was sent to.
 type threadContact struct {
 	ID           int64  `json:"id,omitempty"`
 	Name         string `json:"name"`
 	EmailAddress string `json:"email_address"`
 }
 
+// threadRecipients is who a message was sent to, as HEY recorded its To, Cc and Bcc
+// lines. The three lists are present even when empty once the message itself was read.
+type threadRecipients struct {
+	To  []threadContact `json:"to"`
+	CC  []threadContact `json:"cc"`
+	BCC []threadContact `json:"bcc"`
+}
+
+// threadReceivedVia is one exact account address HEY recorded an inbound message
+// arriving through, optionally resolved to a contact. The address is kept losslessly
+// for JSON; unlike the ordinary recipients, it can carry an envelope alias or plus tag.
+type threadReceivedVia struct {
+	EmailAddress string         `json:"email_address"`
+	Contact      *threadContact `json:"contact,omitempty"`
+}
+
 // threadEntry is one message in a thread. Body is Markdown, converted once here from
 // HEY's Trix HTML; BodyHTML keeps that HTML for --html. BodyState says what became of
 // the body: hydrated, bodyless (HEY served none), over_limit or failed (it was not
-// read), or not_requested (the format did not need it).
+// read), or not_requested (the format did not need it). Recipients and received-via
+// records come from the message like the body does, so they are absent exactly when the
+// message was not read; received_via is also absent when HEY served none for a sent or
+// generated message. The entry index carries neither kind of message metadata.
 type threadEntry struct {
-	ID                    int64             `json:"id"`
-	CreatedAt             string            `json:"created_at"`
-	UpdatedAt             string            `json:"updated_at"`
-	Creator               threadContact     `json:"creator"`
-	AlternativeSenderName string            `json:"alternative_sender_name"`
-	Summary               string            `json:"summary"`
-	Kind                  string            `json:"kind"`
-	AppURL                string            `json:"app_url"`
-	Body                  htmlutil.Markdown `json:"body,omitzero"`
-	BodyState             string            `json:"body_state,omitempty"`
-	BodyHTML              string            `json:"-"`
+	ID                    int64               `json:"id"`
+	CreatedAt             string              `json:"created_at"`
+	UpdatedAt             string              `json:"updated_at"`
+	Creator               threadContact       `json:"creator"`
+	Sender                *threadContact      `json:"sender,omitempty"`
+	AlternativeSenderName string              `json:"alternative_sender_name"`
+	Summary               string              `json:"summary"`
+	Kind                  string              `json:"kind"`
+	AppURL                string              `json:"app_url"`
+	Recipients            *threadRecipients   `json:"recipients,omitempty"`
+	ReceivedVia           []threadReceivedVia `json:"received_via,omitempty"`
+	Body                  htmlutil.Markdown   `json:"body,omitzero"`
+	BodyState             string              `json:"body_state,omitempty"`
+	BodyHTML              string              `json:"-"`
 }
 
 type topicCommand struct {
@@ -52,12 +77,13 @@ type topicCommand struct {
 func newThreadCommand() *cobra.Command {
 	thread := &cobra.Command{
 		Use:   "thread",
-		Short: "Read and annotate email threads",
+		Short: "Read, rename and annotate email threads",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: read, comment. Thread IDs come from hey box view. Use the same ID with hey reply or hey forward. hey thread comment posts a private internal note, not a mailed reply.",
+			"agent_notes": "Subcommands: read, update, comment. Thread IDs come from hey box view. Use the same ID with hey reply or hey forward. hey thread comment posts a private internal note, not a mailed reply.",
 		},
 	}
 	thread.AddCommand(newThreadsCommand().cmd)
+	thread.AddCommand(newThreadUpdateCommand().cmd)
 	thread.AddCommand(newThreadCommentCommand().cmd)
 	return thread
 }
@@ -67,8 +93,14 @@ func newThreadsCommand() *topicCommand {
 	threadsCommand.cmd = &cobra.Command{
 		Use:   "read <thread-id>",
 		Short: "Read a thread",
+		Long: "Read every entry in a thread, oldest first. JSON entries keep the " +
+			"creator as the entry's author (the external sender for inbound mail) and, when you sent " +
+			"from another address, include that address as sender. Entries also include To/CC/BCC recipients " +
+			"and, for inbound mail, received_via with the exact account delivery addresses HEY recorded. " +
+			"An entry's kind is message for mail; a note (comment) or share notice (access_notice) is " +
+			"internal to the thread and never emailed, and the text formats label it so.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown; --html writes an HTML document instead, one <article> per entry (data-entry-id, data-created-at, data-body-state) holding HEY's original HTML. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
+			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown, converted from HEY's Trix HTML so headings, lists, quotes, tables and code survive and links keep their URLs (read a body as structure, not flattened text); the creator is the entry's author (the external sender for inbound mail, your own contact for mail you sent), while a non-default send-as address you sent from is the optional sender on a hydrated entry; take the From address from sender.email_address when sender is present and from creator.email_address otherwise. Each entry whose message was read carries recipients as to, cc and bcc contact lists. A known-empty line is []; an entry whose message was not read omits recipients. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact; received_via is omitted for sent and generated messages and for an entry whose message was not read. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. It is refused (usage error) when stdout is a terminal, so redirect it to a file or a pipe. A bundle row's own id is not a thread: hey thread read on it answers not_found with a hint naming the bundle and hey bundle view. Each entry's kind says what it is: message for mail, while comment (a note) and access_notice (a share notice) are internal — visible to everyone with access to the thread, never emailed — and --markdown, styled and --html output head them as a note or share notice rather than with a From line. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey thread read 12345
   hey thread read 12345 --json
@@ -95,10 +127,20 @@ func (c *topicCommand) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// A count or a list of IDs needs the index and nothing else; every other format
-	// shows bodies, so it reads them.
+	// shows bodies, so it reads them. JSON-shaped output retains recipients and inbound
+	// delivery records. HTML retains only the recipients it renders. Styled and Markdown
+	// output show neither, so that metadata must not consume their body budget.
 	format := writer.EffectiveFormat()
 	hydrate := format != output.FormatCount && format != output.FormatIDs
-	thread, err := loadThread(cmd.Context(), threadID, hydrate)
+	load := loadThread
+	switch format {
+	case output.FormatJSON, output.FormatQuiet:
+		load = loadThreadWithJSONMetadata
+	case output.FormatHTML:
+		load = loadThreadWithRecipients
+	case output.FormatAuto, output.FormatStyled, output.FormatIDs, output.FormatCount, output.FormatMarkdown:
+	}
+	thread, err := load(cmd.Context(), threadID, hydrate)
 	if err != nil {
 		return err
 	}
@@ -156,7 +198,12 @@ func printThreadStyled(w io.Writer, entries []threadEntry, notice string) {
 		if i > 0 {
 			fmt.Fprintln(w, strings.Repeat("─", threadEntrySeparatorWidth))
 		}
-		fmt.Fprintf(w, "From: %s  [%s]  #%d\n", terminal.SanitizeLine(threadEntrySender(e)), e.CreatedAt, e.ID)
+		author := terminal.SanitizeLine(threadEntrySender(e))
+		if heading, tag, internal := mail.InternalEntryLabel(e.Kind, author); internal {
+			fmt.Fprintf(w, "%s  [%s]  #%d  (%s)\n", heading, e.CreatedAt, e.ID, tag)
+		} else {
+			fmt.Fprintf(w, "From: %s  [%s]  #%d\n", author, e.CreatedAt, e.ID)
+		}
 		fmt.Fprintln(w)
 		switch {
 		case !e.Body.IsEmpty():
@@ -199,7 +246,12 @@ func writeThreadMarkdown(w io.Writer, threadID int64, entries []threadEntry, not
 	for _, e := range entries {
 		var b strings.Builder
 		b.WriteString("\n")
-		fmt.Fprintf(&b, "## From: %s — %s (#%d)\n\n", markdownSafeText(threadEntrySender(e)), e.CreatedAt, e.ID)
+		author := markdownSafeText(threadEntrySender(e))
+		if heading, tag, internal := mail.InternalEntryLabel(e.Kind, author); internal {
+			fmt.Fprintf(&b, "## %s — %s (#%d)\n\n*(%s)*\n\n", heading, e.CreatedAt, e.ID, tag)
+		} else {
+			fmt.Fprintf(&b, "## From: %s — %s (#%d)\n\n", author, e.CreatedAt, e.ID)
+		}
 		if err := write(b.String()); err != nil {
 			return err
 		}
@@ -232,9 +284,10 @@ func writeThreadMarkdown(w io.Writer, threadID int64, entries []threadEntry, not
 // writeThreadHTML is what --html writes for a thread: one HTML5 document, parseable by
 // anything that reads HTML, titled after the thread and declaring its charset, with one
 // <article> per entry, oldest first. The article carries the entry's ID, date and body
-// state as data attributes, opens with a <header> naming the sender and the date, and
-// then holds the entry's original HTML exactly as HEY served it — the whole point of the
-// format. An entry without a body holds nothing after its header; data-body-state says
+// state as data attributes, opens with a <header> naming the sender, date and non-empty
+// recipient lines, and then holds the entry's original HTML exactly as HEY served it —
+// the whole point of the format. An entry without a body holds nothing after its header;
+// data-body-state says
 // whether HEY served none (bodyless), the load left it unread (over_limit, failed) or it
 // was read and was empty (hydrated). A thread read in part, which --allow-partial lets
 // through as it does for every other format, ends with the notice in a comment before
@@ -246,9 +299,9 @@ func writeThreadMarkdown(w io.Writer, threadID int64, entries []threadEntry, not
 // body is what gets pasted into something else. --stats is refused with --html like every
 // other selector: there is no envelope here to carry stats.
 //
-// The sender is whatever the entry says it is, so it is sanitized and HTML-escaped before
-// it is written as text or as an attribute; the date and state are this program's own
-// and are escaped all the same. A write that fails is the command's error: a document
+// The sender and recipients are whatever the entry says they are, so they are sanitized
+// and HTML-escaped before they are written; the date and state are this program's own and
+// are escaped all the same. A write that fails is the command's error: a document
 // cut short by a full disk must not exit 0.
 //
 // The body itself is written as HEY served it, which is the point of --html, so nothing
@@ -271,9 +324,18 @@ func writeThreadHTML(w io.Writer, threadID int64, entries []threadEntry, notice 
 	for _, e := range entries {
 		sender := html.EscapeString(terminal.SanitizeLine(threadEntrySender(e)))
 		createdAt := html.EscapeString(e.CreatedAt)
-		opening := fmt.Sprintf("<article id=\"entry-%d\" data-entry-id=\"%d\" data-created-at=\"%s\" data-body-state=\"%s\">\n<header>From: %s — %s</header>\n",
-			e.ID, e.ID, createdAt, html.EscapeString(e.BodyState), sender, createdAt)
-		if err := write(opening); err != nil {
+		byline := "From: " + sender + " — " + createdAt
+		if heading, tag, internal := mail.InternalEntryLabel(e.Kind, sender); internal {
+			byline = heading + " — " + createdAt + " (" + tag + ")"
+		}
+		var header strings.Builder
+		fmt.Fprintf(&header, "<article id=\"entry-%d\" data-entry-id=\"%d\" data-kind=\"%s\" data-created-at=\"%s\" data-body-state=\"%s\">\n<header>\n<div>%s</div>\n",
+			e.ID, e.ID, html.EscapeString(e.Kind), createdAt, html.EscapeString(e.BodyState), byline)
+		if e.Recipients != nil {
+			writeThreadRecipientRows(&header, e.Recipients)
+		}
+		header.WriteString("</header>\n")
+		if err := write(header.String()); err != nil {
 			return err
 		}
 		// The body is written straight from the entry, not through the closure, so the
@@ -296,12 +358,50 @@ func writeThreadHTML(w io.Writer, threadID int64, entries []threadEntry, notice 
 	return write("</body>\n</html>\n")
 }
 
+func writeThreadRecipientRows(header *strings.Builder, recipients *threadRecipients) {
+	for _, row := range []struct {
+		label    string
+		contacts []threadContact
+	}{
+		{label: "To", contacts: recipients.To},
+		{label: "CC", contacts: recipients.CC},
+		{label: "BCC", contacts: recipients.BCC},
+	} {
+		if formatted := formatThreadContactsHTML(row.contacts); formatted != "" {
+			fmt.Fprintf(header, "<div>%s: %s</div>\n", row.label, formatted)
+		}
+	}
+}
+
+func formatThreadContactsHTML(contacts []threadContact) string {
+	formatted := make([]string, 0, len(contacts))
+	for _, contact := range contacts {
+		name := html.EscapeString(terminal.SanitizeLine(contact.Name))
+		email := html.EscapeString(terminal.SanitizeLine(contact.EmailAddress))
+		switch {
+		case name != "" && email != "":
+			formatted = append(formatted, fmt.Sprintf("%s &lt;%s&gt;", name, email))
+		case email != "":
+			formatted = append(formatted, email)
+		case name != "":
+			formatted = append(formatted, name)
+		}
+	}
+	return strings.Join(formatted, ", ")
+}
+
 // htmlCommentSafe keeps a value from ending the comment it is written into.
 func htmlCommentSafe(value string) string {
 	return strings.ReplaceAll(terminal.SanitizeLine(value), "--", "- -")
 }
 
 func threadEntrySender(entry threadEntry) string {
+	if entry.Sender != nil && entry.Sender.EmailAddress != "" {
+		if entry.Sender.Name != "" {
+			return fmt.Sprintf("%s <%s>", terminal.SanitizeLine(entry.Sender.Name), terminal.SanitizeLine(entry.Sender.EmailAddress))
+		}
+		return entry.Sender.EmailAddress
+	}
 	switch {
 	case entry.AlternativeSenderName != "":
 		return entry.AlternativeSenderName
@@ -333,6 +433,9 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 	appURL := entry.AppUrl
 	var body htmlutil.Markdown
 	bodyHTML := ""
+	var recipients *threadRecipients
+	var receivedVia []threadReceivedVia
+	var sender *threadContact
 
 	if message := loaded.Message; message != nil {
 		if creator.Id == 0 {
@@ -355,6 +458,12 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 		} else {
 			body = htmlutil.ToMarkdown(message.Content)
 		}
+		recipients = newThreadRecipients(message.Addressed)
+		receivedVia = newThreadReceivedVia(message.ReceivedVia)
+		if message.Sender.EmailAddress != "" {
+			contact := newThreadContact(message.Sender)
+			sender = &contact
+		}
 		// The loaded thread's copy is released as it is converted.
 		loaded.Message = nil
 	}
@@ -367,13 +476,51 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 		Summary:               summary,
 		Kind:                  entry.Kind,
 		AppURL:                appURL,
+		Recipients:            recipients,
+		ReceivedVia:           receivedVia,
 		Body:                  body,
 		BodyState:             string(loaded.State),
 		BodyHTML:              bodyHTML,
-		Creator: threadContact{
-			ID:           creator.Id,
-			Name:         creator.Name,
-			EmailAddress: creator.EmailAddress,
-		},
+		Creator:               newThreadContact(creator),
+		Sender:                sender,
 	}
+}
+
+func newThreadContact(contact generated.Contact) threadContact {
+	return threadContact{
+		ID:           contact.Id,
+		Name:         contact.Name,
+		EmailAddress: contact.EmailAddress,
+	}
+}
+
+// newThreadRecipients is a message's recipients in the CLI's shape. Each line is a list
+// even when empty, so a reader ranging over `to` never has to ask whether it is there:
+// a message HEY served is a message whose recipients are known.
+func newThreadRecipients(addressed generated.Addressed) *threadRecipients {
+	return &threadRecipients{
+		To:  threadContacts(addressed.Directly),
+		CC:  threadContacts(addressed.Copied),
+		BCC: threadContacts(addressed.Blindcopied),
+	}
+}
+
+func newThreadReceivedVia(deliveries []generated.MessageReceivedVia) []threadReceivedVia {
+	receivedVia := make([]threadReceivedVia, len(deliveries))
+	for i, delivery := range deliveries {
+		receivedVia[i].EmailAddress = delivery.EmailAddress
+		if delivery.Contact != nil {
+			contact := newThreadContact(*delivery.Contact)
+			receivedVia[i].Contact = &contact
+		}
+	}
+	return receivedVia
+}
+
+func threadContacts(contacts []generated.Contact) []threadContact {
+	described := make([]threadContact, len(contacts))
+	for i, contact := range contacts {
+		described[i] = newThreadContact(contact)
+	}
+	return described
 }

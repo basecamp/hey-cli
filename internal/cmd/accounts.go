@@ -38,6 +38,7 @@ func newAccountsCommand() *accountsCommand {
 		},
 	}
 	accountsCommand.cmd.AddCommand(newAccountsListCommand())
+	accountsCommand.cmd.AddCommand(newAccountSendersCommand())
 	accountsCommand.cmd.AddCommand(newAccountsUseCommand())
 	return accountsCommand
 }

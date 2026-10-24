@@ -13,18 +13,41 @@ import (
 // threadLimits is what the CLI reads a thread within. A variable so tests can lower it.
 var threadLimits = threadload.DefaultLimits
 
-// loadThread reads a thread within threadLimits, with or without bodies.
+// loadThread reads a thread within threadLimits, with or without bodies. It does not
+// retain recipients or delivery records for consumers, such as attachments, that only
+// need the body.
 func loadThread(ctx context.Context, threadID int64, hydrate bool) (*threadload.Thread, error) {
+	return loadThreadRetainingMessageMetadata(ctx, threadID, hydrate, false, false)
+}
+
+// loadThreadWithRecipients keeps the To, Cc and Bcc identities used by the HTML
+// representation, without retaining JSON-only delivery records.
+func loadThreadWithRecipients(ctx context.Context, threadID int64, hydrate bool) (*threadload.Thread, error) {
+	return loadThreadRetainingMessageMetadata(ctx, threadID, hydrate, true, false)
+}
+
+// loadThreadWithJSONMetadata keeps both ordinary recipients and HEY's records of the
+// exact account addresses an inbound message arrived through.
+func loadThreadWithJSONMetadata(ctx context.Context, threadID int64, hydrate bool) (*threadload.Thread, error) {
+	return loadThreadRetainingMessageMetadata(ctx, threadID, hydrate, true, true)
+}
+
+func loadThreadRetainingMessageMetadata(ctx context.Context, threadID int64, hydrate, retainRecipients, retainReceivedVia bool) (*threadload.Thread, error) {
 	thread, err := threadload.Load(ctx, threadload.NewSDKSource(sdk), threadload.Request{
-		TopicID: threadID,
-		Hydrate: hydrate,
-		Limits:  threadLimits,
+		TopicID:           threadID,
+		Hydrate:           hydrate,
+		RetainRecipients:  retainRecipients,
+		RetainReceivedVia: retainReceivedVia,
+		Limits:            threadLimits,
 	})
 	if err != nil {
 		return nil, describeBundleMisread(ctx, threadID, err)
 	}
+	// HEY leaves a message out of its thread while Undo Send holds it back, so a thread
+	// whose only message was sent moments ago reads as empty until it goes out.
 	if len(thread.Entries) == 0 {
-		return nil, apierr.ErrNotFound("entries for thread", fmt.Sprint(threadID))
+		return nil, apierr.ErrNotFoundHint("entries for thread", fmt.Sprint(threadID),
+			"If you sent this message moments ago, Undo Send may still be holding it back; read the thread again once it goes out")
 	}
 	return thread, nil
 }

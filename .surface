@@ -15,6 +15,7 @@ hey --verbose
 hey --version
 hey account
 hey account list
+hey account senders
 hey account use
 hey attachment
 hey attachment list
@@ -102,6 +103,7 @@ hey compose --attach
 hey compose --bcc
 hey compose --cc
 hey compose --draft
+hey compose --from
 hey compose --message
 hey compose --message-html
 hey compose --no-name-tag
@@ -121,6 +123,8 @@ hey contact add --alias
 hey contact add --email
 hey contact add --name
 hey contact bundle
+hey contact deliver
+hey contact deliver --to
 hey contact hide
 hey contact list
 hey contact list --all
@@ -131,6 +135,9 @@ hey contact note set
 hey contact note set --note
 hey contact note set --note-html
 hey contact note show
+hey contact photo
+hey contact photo remove
+hey contact photo set
 hey contact show
 hey contact show-again
 hey contact threads
@@ -148,6 +155,7 @@ hey draft delete
 hey draft edit
 hey draft edit --bcc
 hey draft edit --cc
+hey draft edit --from
 hey draft edit --message
 hey draft edit --message-html
 hey draft edit --subject
@@ -183,8 +191,12 @@ hey event day
 hey event day --all
 hey event day --limit
 hey event delete
+hey event delete --apply-to
+hey event delete --occurrence
 hey event edit
 hey event edit --all-day
+hey event edit --allow-plain-notes
+hey event edit --apply-to
 hey event edit --calendar
 hey event edit --circle
 hey event edit --countdown
@@ -195,6 +207,7 @@ hey event edit --invite
 hey event edit --link
 hey event edit --location
 hey event edit --notes
+hey event edit --occurrence
 hey event edit --remind
 hey event edit --repeat
 hey event edit --repeat-times
@@ -278,9 +291,14 @@ hey move
 hey move --to
 hey reply
 hey reply --attach
+hey reply --bcc
+hey reply --cc
 hey reply --draft
+hey reply --dry-run
 hey reply --message
 hey reply --message-html
+hey reply --replace-recipients
+hey reply --to
 hey screener
 hey screener approve
 hey screener approve --box
@@ -363,6 +381,8 @@ hey thread comment
 hey thread comment --message
 hey thread read
 hey thread read --allow-partial
+hey thread update
+hey thread update --name
 hey timetrack
 hey timetrack categories
 hey timetrack category

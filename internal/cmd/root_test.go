@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -285,6 +287,7 @@ func TestRequireAuthPromptsOnlyWhenInteractiveAndStyled(t *testing.T) {
 	isolateAgents(t)
 	server := quietServer(t)
 	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("CODEX_SANDBOX", "")
 	t.Setenv("HEY_NO_KEYRING", "1")
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -347,6 +350,52 @@ func TestRequireAuthPromptsOnlyWhenInteractiveAndStyled(t *testing.T) {
 		}
 		if *asked != 0 {
 			t.Errorf("prompt shown %d times for machine output", *asked)
+		}
+	})
+
+	t.Run("inside Codex's sandbox the hint names the sandbox", func(t *testing.T) {
+		t.Setenv("CODEX_SANDBOX", "seatbelt")
+		stubInteractive(t, false)
+		prev := writer
+		writer = output.New(output.Options{Format: output.FormatJSON, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		t.Cleanup(func() { writer = prev })
+
+		err := requireAuth()
+		var cliErr *apierr.Error
+		if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeAuth {
+			t.Fatalf("error = %v, want auth", err)
+		}
+		if !strings.Contains(cliErr.Hint, "Codex's sandbox hides the system keyring") {
+			t.Errorf("hint = %q", cliErr.Hint)
+		}
+	})
+
+	t.Run("storage failure is not signed out", func(t *testing.T) {
+		credentialsPath := filepath.Join(home, "hey-cli", "credentials.json")
+		if err := os.MkdirAll(filepath.Dir(credentialsPath), 0700); err != nil {
+			t.Fatalf("MkdirAll: %v", err)
+		}
+		if err := os.WriteFile(credentialsPath, []byte("not-json"), 0600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Remove(credentialsPath) })
+
+		stubInteractive(t, true)
+		asked := stubAskToSignIn(t, false)
+		prev := writer
+		writer = output.New(output.Options{Format: output.FormatStyled, Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
+		t.Cleanup(func() { writer = prev })
+
+		err := requireAuth()
+		if err == nil || !strings.Contains(err.Error(), "invalid character") {
+			t.Fatalf("error = %v, want the credential storage failure", err)
+		}
+		var cliErr *apierr.Error
+		if errors.As(err, &cliErr) && cliErr.Code == apierr.CodeAuth {
+			t.Fatalf("error = %v, unavailable storage is not signed out", err)
+		}
+		if *asked != 0 {
+			t.Errorf("prompt shown %d times for unavailable storage", *asked)
 		}
 	})
 

@@ -1,11 +1,18 @@
-.PHONY: build test test-unit test-e2e test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
+.PHONY: build test test-unit test-e2e test-sync-skills test-smoke preview-callback coverage fmt fmt-check vet lint tidy tidy-check \
 	race-test vuln gosec secrets replace-check check-toolchain check security \
 	release-check release test-release bench bench-save bench-compare \
-	check-surface update-surface check-surface-compat check-size check-lint-lockstep \
+	check-surface update-surface check-surface-compat check-size check-size-release check-lint-lockstep \
 	check-release-lockstep update-nix-hash tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
 GOSEC_VERSION := v2.29.0
+# gosec v2.29.0 reads packages through golang.org/x/tools v0.49.0, which cannot
+# decode the export data Go 1.27.2 writes ("export data version 5 is greater than
+# maximum supported version 4"). It analyzes source, so running it on Go 1.27.1
+# finds the same things while the release still builds with go.mod's toolchain.
+# Drop this, and GOTOOLCHAIN in security.yml's gosec step, with the first gosec
+# release past v2.29.0 (securego/gosec 7b1b5ce moved to x/tools v0.51.0).
+GOSEC_GOTOOLCHAIN := go1.27.1
 COVERAGE_FLOOR ?= 70.8
 COVERAGE_PROFILE ?= coverage.out
 COVERAGE_FUNCTIONS ?= coverage.func.txt
@@ -25,6 +32,7 @@ help:
 	@echo "  make test-unit       Run unit tests"
 	@echo "  make test            Alias for test-unit"
 	@echo "  make test-e2e        Run the bats suite (installer and script contracts)"
+	@echo "  make test-sync-skills Run the skills sync as two CLIs against a throwaway target"
 	@echo "  make test-smoke      Run smoke tests against a live server"
 	@echo "  make preview-callback Preview the OAuth callback screens in a browser"
 	@echo "  make coverage        Run cross-package coverage and enforce the 70.8% floor"
@@ -43,9 +51,9 @@ help:
 	@echo "  make secrets         Run gitleaks secret scan"
 	@echo "  make replace-check   Guard against replace directives in go.mod"
 	@echo ""
-	@echo "  make check           fmt-check + vet + lint + test-unit + tidy-check"
+	@echo "  make check           fmt-check + vet + lint + test-unit + test-sync-skills + tidy-check"
 	@echo "  make security        lint + vuln + gosec + secrets"
-	@echo "  make release-check   check + replace-check + vuln + gosec + race-test"
+	@echo "  make release-check   check + replace-check + vuln + gosec + race-test + check-size-release"
 	@echo "  make release         Run release preflight and tag (VERSION=v1.2.3 [DRY_RUN=1])"
 	@echo "  make test-release    Dry-run the goreleaser pipeline (snapshot, no publish/sign)"
 	@echo ""
@@ -58,6 +66,7 @@ help:
 	@echo "  make update-mcp-model     Refresh the vendored hey-sdk model snapshot for hey mcp (SDK=path)"
 	@echo "  make check-surface-compat Compare .surface against the previous release tag"
 	@echo "  make check-size           Check the built binary against .size-budget"
+	@echo "  make check-size-release   Build every release target and check each against .size-budget"
 	@echo "  make check-release-lockstep  Verify release tool pins and script references agree"
 	@echo "  make update-nix-hash      Recompute the Nix vendorHash via Docker ([VERSION=v1.2.3] bumps the version)"
 	@echo "  make tools                Install dev tools"
@@ -103,6 +112,10 @@ preview-callback: check-toolchain
 test-e2e:
 	@./tests/e2e/run.sh
 
+# Run the skills sync against a throwaway basecamp/skills, as two CLIs publishing in turn
+test-sync-skills:
+	EXPECTED_SOURCE=hey-cli scripts/test-sync-skills.sh
+
 # Run smoke tests against a live HEY server.
 # Requires: a running server (default http://app.hey.localhost:3003) and Chrome.
 # Override defaults: make test-smoke HEY_SMOKE_BASE_URL=... HEY_SMOKE_EMAIL=... HEY_SMOKE_PASSWORD=...
@@ -147,7 +160,7 @@ vuln:
 
 # Run the same pinned gosec version as the security workflow.
 gosec:
-	GOWORK=off go run github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION) ./...
+	GOWORK=off GOTOOLCHAIN=$(GOSEC_GOTOOLCHAIN) go run github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION) ./...
 
 # Run gitleaks secret scan. The scan is part of the security gate, so a missing
 # binary or config fails it rather than passing it by skipping.
@@ -171,7 +184,7 @@ replace-check:
 	fi
 
 # Local CI gate
-check: fmt-check vet lint test-unit tidy-check check-surface check-release-lockstep
+check: fmt-check vet lint test-unit test-sync-skills tidy-check check-surface check-release-lockstep
 
 # Verify every workflow lints with the same golangci-lint version
 check-lint-lockstep:
@@ -210,6 +223,18 @@ check-surface-compat:
 check-size: build
 	@scripts/check-size-budget.sh $(BINARY)
 
+# Build every release target through goreleaser, whose build hook runs the size
+# gate on each binary exactly as the release does, charging the signatures a
+# snapshot does not attach. check-size above measures only this machine's
+# binary, which is how a dry run passed v1.7.0 while the macOS build it never
+# made was over the budget; this fails the preflight instead, before a tag that
+# can never be reused exists. Signing env is blanked as in test-release.
+check-size-release:
+	@command -v goreleaser >/dev/null || { echo "goreleaser not found: run mise install (the version is pinned in .mise.toml)" >&2; exit 1; }
+	MACOS_SIGN_P12= MACOS_SIGN_PASSWORD= MACOS_NOTARY_KEY= MACOS_NOTARY_KEY_ID= MACOS_NOTARY_ISSUER_ID= \
+	SM_API_KEY= SM_CLIENT_CERT_FILE= SM_CLIENT_CERT_PASSWORD= \
+	goreleaser build --snapshot --clean
+
 # Verify release tool pins and script references agree (wraps check-lint-lockstep)
 check-release-lockstep:
 	@scripts/check-release-lockstep.sh
@@ -230,7 +255,7 @@ update-nix-hash:
 security: lint vuln gosec secrets
 
 # Release preflight
-release-check: check replace-check vuln gosec race-test check-surface-compat check-size
+release-check: check replace-check vuln gosec race-test check-surface-compat check-size check-size-release
 
 # Release (delegates to script)
 release:
@@ -271,7 +296,7 @@ bench-compare:
 # so local and CI findings agree. govulncheck stays @latest on purpose: pinning
 # it only delays new advisories and Go version support.
 tools:
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	@echo "For gitleaks, install via: brew install gitleaks (or see https://github.com/gitleaks/gitleaks)"
 	@echo "For benchstat: go install golang.org/x/perf/cmd/benchstat@latest"

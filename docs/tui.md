@@ -24,7 +24,8 @@ manually launched TUIs.
 
 The app has four sections: Mail, Contacts, Calendar and Journal. The context-sensitive
 shortcut bar is visible by default; press `?` to hide or restore it, and the choice is
-remembered across restarts.
+remembered across restarts. While it is hidden, `? help` at the left of the top bar says
+how to bring it back.
 
 Mail navigation includes HEY's boxes plus separate Labels and Collections tabs: Shift+L
 opens Labels directly and Shift+K opens Collections. Previously Seen has its own tab after
@@ -32,6 +33,13 @@ the boxes on `9`, the web app's shortcut, showing the Imbox's already-read threa
 newest-seen first with the usual thread actions available; Escape returns to the box you
 were in. Every list keeps going: scroll towards the bottom of a box, label, collection or
 search and the next threads are read in behind you, so there are no pages to step through.
+PgUp and PgDn move a screen at a time through any list — a box, a search, a bundle, The
+Screener or your contacts — keeping the cursor on the same row of the screen.
+
+Bundle rows have a small square (`▪`) before the subject, separate from the unread dot
+(`●`) and selection check (`✓`). The square stays visible for read and selected bundles,
+and in lists that hide read state. It uses the same standard Unicode support as the rest
+of the TUI; no special icon font is required.
 
 The thread actions use HEY's web shortcuts, in either letter case except `l`, whose
 uppercase belongs to Labels:
@@ -44,22 +52,37 @@ uppercase belongs to Labels:
 | `v` | move |
 | `b` | manage labels |
 | `n` | add to or remove from a collection |
-| `e` / `u` | mark seen / unseen |
+| `e` / `u` | mark seen / unseen — every selected thread when any are selected (Imbox only, as in HEY's web app), otherwise the one under the cursor |
 | `i` | move to the Imbox |
 | `l` | move to Reply Later |
 | `a` | move to Set Aside |
 | `d` | move to The Feed |
 | `p` | move to Paper Trail |
-| `t` | trash |
+| `t` | trash — every selected thread when any are selected, otherwise the one under the cursor. Not offered when it would target a bundle |
 | `!` | mark as spam |
 | `-` / `+` | ignore / stop ignoring |
-| Space | select the thread for a bulk action |
+| Space | select the thread for a bulk action (`e`, `u`, `t` or Ctrl+B) |
+| Escape | clear the selection |
 | Ctrl+B | preview every bulk-reply recipient, then write one reply to every selected thread |
 | Ctrl+U | recall a delayed bulk reply while HEY's undo window is open |
 | Ctrl+S | open The Screener |
 | Ctrl+R | re-read the list |
 | Ctrl+A | switch linked account |
 | Ctrl+V | choose an Imbox cover |
+
+`r` and `f` answer the thread's latest emailed message, as HEY's web app does: a note or
+share notice posted after it is internal — visible to everyone with access to the thread,
+never emailed — and is skipped, and a thread holding nothing else is refused. In the thread
+view a note is headed "Note by …" and a share notice "… shared this thread", each marked not
+emailed, instead of with the sender's name.
+
+A thread opens on its latest message; `k` steps back through the ones before it and `j` forward again.
+
+Sending a reply or a forward from a thread closes the thread and returns you to the list you opened it from — the Imbox, a search, a bundle. A send that fails keeps the form open — except one HEY refused and kept as a draft (usually the account's sending limit): that closes the form, since sending again would only make another draft, and says "Not sent" with the draft it was saved as. An address HEY would not deliver to keeps the form open too: the form names it (`Not a valid email address: a`) rather than sending a message HEY would quietly keep as a draft, or send without that recipient.
+
+While reading a thread, the From header shows the actual send-as address when HEY records one separately from the account user.
+
+While reading a thread, links can be selected without a mouse. Tab selects the next link in document order and Shift+Tab selects the previous one; both wrap at the ends. A fixed row above the shortcut bar shows the selected destination without moving the thread. A destination too long for one row wraps onto as many rows as it needs, so you always see all of it. Press Enter to open it; opening stays unavailable until the terminal is tall enough to show the whole destination. Press Escape once to clear the selection, and Escape again to leave the thread. A thread with no selectable links keeps the normal global Tab focus behavior. Existing OSC 8 mouse links remain available.
 
 Most of those keep working while you are reading a thread, the way the web app's topic
 toolbar stays live: `r`, `f`, `v`, `b`, `u`, `i`, `l`, `a`, `d`, `p` and `t` all act on
@@ -71,10 +94,64 @@ every thread carries the box it is in and files out of that one rather than out 
 list you found it through. Filing takes the row out of the list you were reading. Only a
 thread opened by its id has no row behind it, and says so instead.
 
+While any threads are selected, the help bar counts them and offers only what acts on
+all of them: `e`, `u`, `t` and Ctrl+B. The other thread actions — moving, filing, labels,
+collections, spam, ignoring, reply and forward — work on one thread at a time, so they
+are refused with a notice rather than quietly acting on the thread under the cursor;
+press Escape to clear the selection first. Escape still closes an open form (asking first
+when it holds a message you have written), cancels a
+thread that is loading and leaves an open thread before it clears a selection, and on
+Previously Seen the first Escape clears the selection and the next one leaves. A bulk
+action lets go of the threads it acted on once HEY has answered, and keeps them selected if
+the request fails, so it can be tried again; a thread you select while it is on its way stays
+selected.
+
+`e` and `u` act on a selection when HEY's web app would offer its bulk Seen and Unseen
+buttons, and the help bar shows them only then. Every selected thread has to be in the
+Imbox — each one's own box counts, so a label or a collection that mixes boxes does not
+qualify — and none of them may be one you are ignoring. `e` also needs a thread that is not
+seen yet, and `u` one that is; a bubbled-up thread is not a seen one. When they act, they
+send every selected thread, and otherwise a notice says why nothing happened. `e` on a
+selected bundle marks every unseen thread in it seen, as it does on the row itself.
+
+If every selected thread leaves the list while you are looking at it — filed away from
+another device, or covered when the cover comes down — the next thread action is refused
+with a notice rather than falling back on the thread under the cursor, which you never chose.
+Moving the cursor, or pressing Escape, means you are aiming again.
+
+A bundle row cannot be trashed, and `t` leaves the help bar whenever the rows it would
+act on include one. A bundle stands for one sender's whole stream rather than for a thread,
+and HEY trashes a thread — so the server quietly does nothing with it while the list would
+report it gone. HEY's own web app hides Trash on a bundle for the same reason. Deselect the
+bundle to trash the rest of the selection; `hey contact unbundle` is what stops a sender
+being grouped.
+
 While writing a new message, reply or forward, Ctrl+T opens the searchable Snippets
 picker. HEY never chooses a default: Enter inserts the selected snippet at the body
 cursor, Escape returns without changing the draft, and the picker can be reopened to
 insert another.
+
+Typing in To, Cc or Bcc — in a new message, a reply or a forward — opens a short list of
+people under the field, from the same list HEY's web composer suggests: the people you
+wrote to most recently first, then your contacts by name, then "Everyone at" your
+company and your contact groups. It narrows as you type, matching a name or an address,
+and leaves out anyone already on that line. ↑ and ↓ (or Ctrl+P and Ctrl+N) move through
+it; Tab or Enter adds the highlighted person as `Name <address>, ` in place of what you
+were typing, ready for the next one; a group adds every address in it. Backspace right
+after a recipient written `Name <address>` takes the whole recipient and its comma in one
+press, the way HEY's composer removes a recipient; a bare address you typed still deletes
+a letter at a time. Escape closes the
+list and nothing else, and moving the cursor closes it too. With the list closed, Tab and
+Enter move between fields as they always have. The list is read in the background when
+the form opens, so typing never waits on it, and an address typed in full works whether
+it arrives or not.
+
+Escape on a message you have written something in asks before it goes: `s` (or Enter)
+keeps it in HEY's drafts, where the web app and your phone can pick it up, `d` discards
+it, and Escape takes you back to it. A form holding only what it opened with — an empty
+new message, or a reply with just HEY's prefilled recipients — closes without asking. A
+draft with an address HEY would not deliver to is refused the way a send is, so the
+draft never comes back without that recipient.
 
 ## Live updates
 
@@ -102,7 +179,14 @@ Press Ctrl+S from the mail list to open The Screener. When senders are waiting, 
 list says so above the threads. In The Screener, `y` screens the selected sender in and `n`
 screens them out, Tab moves to Screener History and back, `X` clears the whole Screener
 after a confirmation, and Escape or `q` returns to mail. Both lists keep going as you
-scroll, the same way the mail list does.
+scroll, the same way the mail list does. Once you've dealt with everyone waiting — the
+last sender screened in or out, or the whole Screener cleared — it closes on its own and
+takes you to the Imbox, as the web app does.
+
+Space opens a bigger preview of the selected sender's most recent email: the whole message,
+not just the first line the list has room for. Arrow keys and PgUp/PgDn scroll it, `y` and
+`n` answer for that sender straight from it, and Space or Escape closes it again. Opening a
+preview only reads the email; it doesn't screen the sender or tell them anything.
 
 ## Imbox cover art
 
@@ -123,14 +207,39 @@ the iOS and Android apps each keep their own local choice too, and this is the s
 
 ## Attachments
 
-Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and `o` to download and open it in an external application. Attachments never open automatically. Kitty and Ghostty can show inline images. Foot and other terminals use visible text markers.
+Thread attachments always appear with their filename, media type, and size. Use `[` and `]` to select an attachment, `s` to save it without replacing an existing file, and Enter to download and open it in an external application — once Tab has selected a link, Enter opens the link instead, and Escape clears it. Enter only opens documents, images, audio and video (on Linux, only when the file's contents are one too, since the system picks the application from them; a zip-based document the system cannot tell from an archive still opens, in an archive manager at worst); anything that could run a program, such as a script, a shortcut or a Terminal profile, has to be saved with `s` and opened by hand. Attachments never open automatically. On macOS and Windows every saved attachment is marked as downloaded from the internet, so the system warns before running one: always on macOS, and on Windows wherever the drive can hold the mark (a FAT drive cannot). Linux keeps no such mark. Kitty and Ghostty can show inline images. In the message itself, a file is marked by its kind: 📷 an image, 🎬 a video, 🎵 audio, 📄 a PDF or document, 📎 anything else. An image shows by name rather than by its URL, unless its name looks like a URL, when the real destination is shown beside it; an image on the web is a link you can select with Tab, and the row above the shortcut bar shows its whole destination.
 
 ## Contacts
 
-Press Shift+O to open Contacts. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.
+Press `o` (or Shift+O) to open Contacts — the letter underlined in its tab. Use Enter to view a contact, `a` to add, `e` to edit, `n` to edit the private note, `x` twice to delete a note, `h` to hide, and `u` to show the most recently hidden contact again. Escape or `q` goes back.
+
+The private note is shown formatted and edited as Markdown, the way `hey contact note set` takes it, so a note written in HEY keeps its bold, italics, lists, links and headings when you edit it here. Press ctrl+s to save it. A note holding an attachment or other formatting Markdown cannot preserve is shown but refused by the editor rather than losing that content; edit it in HEY or use `hey contact note set --note-html`.
 
 ## Calendar
 
-Press Shift+C to open Calendar, then `c` to manage time track categories. Create a category with `n`, rename the selected category with Enter or `r`, and press `x` twice to delete it. Time tracks in a deleted category become uncategorized.
+Press Shift+C to open Calendar. `1`, `2` and `3` switch between the day, week and year spans, `p` and `n` step back and forward, and `t` returns to today. The arrows walk what the span is made of — events on the day, days then events on the week, cells then a cell's events on the year (Enter steps into a cell, Escape steps back out).
 
-In Calendar, press `a` to create a habit. Habits visible in the current calendar range can be selected with `[` and `]`, edited with `e`, and deleted by pressing `x` twice. Habit forms use Tab to move between fields and Ctrl+S to save.
+With an event picked out, Enter opens a read-only card showing what it carries — when and where it is, the link to join it, the guest list and the notes. From the card, `o` opens an http or https link in your browser, `e` switches to the edit form on the same event, and Escape or `q` closes it. The arrows and Page Up/Down scroll long notes. `a` creates an event, `e` edits the selected one, and `x` twice deletes it.
+
+Press `l` to open time tracking, then choose Categories to manage time track categories. Create a category with `n`, rename the selected category with Enter or `r`, and press `x` twice to delete it. Time tracks in a deleted category become uncategorized.
+
+A new event's times are written in your HEY account's time zone, the one HEY's web app and
+`hey event add` use: the Starts and Ends rows name it, and the event is saved in it. The
+Calendar reads the zone each time it opens; if the account has none or it cannot be read,
+the form opens on `Local` instead, and a form opened before the read answers takes the zone
+when it does, unless you have already edited a date or a time, chosen a zone, switched
+All day, or pressed Ctrl+S — any save, even one that was refused or failed, keeps the form
+as you saw it. The zone list still offers `Local` (your machine's clock) and the zones in
+your machine's zone database, or a shortlist of common zones where that database cannot be
+listed. An event with both ends on `Local` is saved without a zone; a `Local` end beside one
+in a named zone is written in that zone, at the same moment, since HEY keeps a zone for both
+ends or neither. An edit keeps the
+event's own zone, and an event saved without one stays on `Local`; an all-day event given a
+time takes the account's zone. Times are read as HEY reads them, on `Local` too: a time the
+clocks skip moves on to one that exists. A time you leave showing what it opened with keeps
+the moment it had, even if you typed at it and took it back. Saving refuses one HEY would put
+somewhere else — at the second of two moments as the clocks go back, or with seconds — rather
+than moving the event: choose another time, or press Ctrl+S again to save it where HEY reads it.
+The tracked-time form keeps an unchanged time the same way.
+
+In Calendar, press `b` to manage habits. In the habit picker, the arrows select a habit, `a` creates one, `e` edits it, and `x` twice deletes it. Habit forms use Tab to move between fields and Ctrl+S to save.

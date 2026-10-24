@@ -54,6 +54,18 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		return gateway.ErrorResult("internal error: action %q not in domain %q", op.Action, dom.Name()), nil
 	}
 
+	// Draft-first (drafts.go): a sending operation is forced to a draft, and
+	// a request to send, schedule or triage is refused here, before HEY is
+	// contacted.
+	draft := draftFirst[full.ID]
+	if draft {
+		forced, err := draftOnly(full.Action, params)
+		if err != nil {
+			return gateway.ErrorResult("%v", err), nil
+		}
+		params = forced
+	}
+
 	path, body, err := buildRequest(full, params)
 	if err != nil {
 		return gateway.ErrorResult("%v", err), nil
@@ -61,7 +73,20 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 
 	resp, err := d.call(ctx, full.Method, path, body)
 	if err != nil {
+		if draft && !refusedByHEY(err) {
+			return gateway.ErrorResult("%s", unsettledDraft(full.Action, err)), nil
+		}
 		return gateway.ErrorResult("%v", err), nil
+	}
+	if draft {
+		if !savedAsDraft(resp) {
+			return gateway.ErrorResult("%s", unconfirmedDraft(full.Action, resp)), nil
+		}
+		return gateway.JSONResult(draftResult(resp))
+	}
+	if want, ok := acknowledgedBy[full.ID]; ok && resp.StatusCode != want {
+		return gateway.ErrorResult("%s was not acknowledged: HEY answered HTTP %d, not %d, so nothing was changed",
+			full.Action, resp.StatusCode, want), nil
 	}
 	if len(bytes.TrimSpace(resp.Data)) == 0 {
 		result := map[string]any{"status": resp.StatusCode}
@@ -84,6 +109,17 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		}
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(resp.Data)}}}, nil
+}
+
+// acknowledgedBy names the mutations whose success is one exact status, because a
+// redirect would otherwise pass for it: net/http follows a PATCH's 302 as a GET, and
+// the read that answers is a 200 the dispatcher would hand back as a result. HEY
+// redirects a topic merged into another before updating it (TopicsController's
+// redirect_merged_topic, the only such redirect in haystack), so a rename of a merged
+// thread changes nothing — the typed Topics().Rename refuses anything but its 204 for
+// the same reason.
+var acknowledgedBy = map[string]int{
+	"RenameTopic": http.StatusNoContent,
 }
 
 // nextCursorFields extracts the next-read cursor from a geared_pagination Link

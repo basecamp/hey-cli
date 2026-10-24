@@ -98,13 +98,25 @@ func runDoctorChecks(ctx context.Context, root *cobra.Command) []map[string]stri
 	}
 
 	// Authentication
-	if os.Getenv("HEY_TOKEN") != "" {
+	var authenticated bool
+	var authenticationErr error
+	if authMgr != nil {
+		authenticated, authenticationErr = authMgr.AuthenticationStatus()
+	}
+	switch {
+	case os.Getenv("HEY_TOKEN") != "":
 		checks = append(checks, map[string]string{
 			"name":    "Authentication",
 			"status":  "ok",
 			"message": "Authenticated via HEY_TOKEN env var",
 		})
-	} else if authMgr != nil && authMgr.IsAuthenticated() {
+	case authenticationErr != nil:
+		checks = append(checks, map[string]string{
+			"name":    "Authentication",
+			"status":  "error",
+			"message": fmt.Sprintf("Could not read authentication status: %v", authenticationErr),
+		})
+	case authenticated:
 		store := authMgr.GetStore()
 		creds, err := store.Load(authMgr.CredentialKey())
 		if err == nil && creds.ExpiresAt > 0 {
@@ -129,7 +141,7 @@ func runDoctorChecks(ctx context.Context, root *cobra.Command) []map[string]stri
 				"message": "Authenticated",
 			})
 		}
-	} else {
+	default:
 		checks = append(checks, map[string]string{
 			"name":    "Authentication",
 			"status":  "error",

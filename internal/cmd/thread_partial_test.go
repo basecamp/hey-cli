@@ -55,7 +55,10 @@ func partialThreadServer(t *testing.T, pages [][]int64, missing ...int64) (*http
 				http.Error(w, `{"error":"gone"}`, http.StatusNotFound)
 				return
 			}
-			payload, _ := json.Marshal(map[string]any{"id": id, "content": fmt.Sprintf("<p>body %d</p>", id)})
+			payload, _ := json.Marshal(map[string]any{
+				"id": id, "content": fmt.Sprintf("<p>body %d</p>", id),
+				"received_via": []map[string]any{{"email_address": fmt.Sprintf("alias+%d@example.com", id)}},
+			})
 			_, _ = w.Write(payload)
 		default:
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.RequestURI())
@@ -96,11 +99,35 @@ func decodeThread(t *testing.T, stdout string) threadResponse {
 	return response
 }
 
-// --json carries a body only for an entry that has one: a body that was not read is
-// omitted rather than written as "", which is the contract a decoder reading the key's
-// presence depends on. decodedEntry cannot tell the two apart, so this reads the raw
-// objects.
-func TestThreadsJSONOmitsABodyItDidNotRead(t *testing.T) {
+func assertThreadEntryOmitsMessageMetadata(t *testing.T, stdout string, id int64) {
+	t.Helper()
+	var response struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+		t.Fatalf("decode %q: %v", stdout, err)
+	}
+	for _, entry := range response.Data {
+		if entry["id"] == float64(id) {
+			if recipients, present := entry["recipients"]; present {
+				t.Errorf("entry %d carries recipients %#v, want the key omitted", id, recipients)
+			}
+			if receivedVia, present := entry["received_via"]; present {
+				t.Errorf("entry %d carries received_via %#v, want the key omitted", id, receivedVia)
+			}
+			if sender, present := entry["sender"]; present {
+				t.Errorf("entry %d carries sender %#v without a message", id, sender)
+			}
+			return
+		}
+	}
+	t.Errorf("response has no entry %d", id)
+}
+
+// --json carries a body, recipients and received-via records only for an entry whose
+// message was read. An unread message omits them rather than claiming empty metadata.
+// decodedEntry cannot tell key absence from an empty value, so this reads raw objects.
+func TestThreadsJSONOmitsMessageDataItDidNotRead(t *testing.T) {
 	server, _ := partialThreadServer(t, [][]int64{{13, 12, 11}}, 12)
 	stdoutTerminal(t, false)
 
@@ -118,15 +145,18 @@ func TestThreadsJSONOmitsABodyItDidNotRead(t *testing.T) {
 		t.Fatalf("got %d entries, want 3", len(response.Data))
 	}
 	for _, entry := range response.Data {
-		body, present := entry["body"]
+		body, hasBody := entry["body"]
+		_, hasRecipients := entry["recipients"]
+		_, hasReceivedVia := entry["received_via"]
+		_, hasSender := entry["sender"]
 		switch entry["id"] {
 		case float64(12):
-			if present {
-				t.Errorf("entry 12 carries body %#v, want the key omitted for a body that was not read", body)
+			if hasBody || hasRecipients || hasReceivedVia || hasSender {
+				t.Errorf("entry 12 carries body %#v, recipients %v, received_via %v or sender %v; want message data omitted", body, hasRecipients, hasReceivedVia, hasSender)
 			}
 		default:
-			if text, ok := body.(string); !ok || text == "" {
-				t.Errorf("entry %v carries body %#v, want a Markdown string", entry["id"], body)
+			if text, ok := body.(string); !ok || text == "" || !hasRecipients || !hasReceivedVia {
+				t.Errorf("entry %v carries body %#v, recipients %v and received_via %v; want all", entry["id"], body, hasRecipients, hasReceivedVia)
 			}
 		}
 	}
@@ -277,6 +307,7 @@ func TestThreadsMarksEntriesOverTheRequestLimit(t *testing.T) {
 	if response.Data[0].ID != 11 || response.Data[0].BodyState != "over_limit" {
 		t.Errorf("oldest entry = %+v, want over_limit", response.Data[0])
 	}
+	assertThreadEntryOmitsMessageMetadata(t, stdout, 11)
 	if _, messages := reads.counts(); messages != 2 {
 		t.Errorf("read %d messages, want 2", messages)
 	}
@@ -406,6 +437,7 @@ func TestThreadsMarkAnOversizedMessageOverLimit(t *testing.T) {
 	if response.Data[1].ID != 12 || response.Data[1].BodyState != "over_limit" || response.Data[0].BodyState != "hydrated" {
 		t.Errorf("response = %+v", response.Data)
 	}
+	assertThreadEntryOmitsMessageMetadata(t, stdout, 12)
 	if _, messages := reads.counts(); messages != 1 {
 		t.Errorf("read the oversized message %d times, want once", messages)
 	}

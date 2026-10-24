@@ -141,6 +141,26 @@ func TestModelShowsAndClearsATemporaryDisconnectAcrossSections(t *testing.T) {
 	}
 }
 
+func TestModelStopsRetryingWhenAnEstablishedMailWatchReportsAuthenticationFailure(t *testing.T) {
+	m := newModel()
+	m.width, m.height = 80, 30
+	m.vc.width = 80
+	m.mailWatchEvents = make(chan MailWatchEvent)
+
+	refused := apierr.ErrAuth("HEY's cable server turned these credentials down")
+	updated, cmd := m.Update(mailWatchEventMsg{event: MailWatchEvent{Err: refused}})
+	m = updated.(model)
+	if cmd != nil {
+		t.Error("an authentication failure should not enter a reconnect loop")
+	}
+	if m.mailWatchEvents != nil {
+		t.Error("the failed stream should be let go of")
+	}
+	if notice := m.mailWatchNotice(); !strings.Contains(notice, "credentials") {
+		t.Errorf("notice = %q, want the authentication failure", notice)
+	}
+}
+
 func TestModelReportsAWatcherThatNeverStarted(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 80, 30
@@ -710,8 +730,8 @@ func mailWithBoxServer(t *testing.T, postingsJSON string) (*mailView, *recordedR
 // --- The calendar's streams ---
 
 func TestWaitForCalendarChangeReportsTheRingAndTheClose(t *testing.T) {
-	changes := make(chan struct{}, 1)
-	changes <- struct{}{}
+	changes := make(chan CalendarWatchEvent, 1)
+	changes <- CalendarWatchEvent{}
 
 	if rung := waitForCalendarChangeCmd(3, changes)().(calendarChangedMsg); rung.closed || rung.attempt != 3 {
 		t.Errorf("rung = %+v, want an open stream on attempt 3", rung)
@@ -728,15 +748,15 @@ func TestWaitForCalendarChangeReportsTheRingAndTheClose(t *testing.T) {
 }
 
 func TestStartCalendarWatchCarriesTheStreamAttemptOrReason(t *testing.T) {
-	changes := make(chan struct{})
-	opened := startCalendarWatchCmd(context.Background(), context.Background(), func(_, _ context.Context) (<-chan struct{}, error) {
+	changes := make(chan CalendarWatchEvent)
+	opened := startCalendarWatchCmd(context.Background(), context.Background(), func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
 		return changes, nil
 	}, 4)().(calendarWatchStartedMsg)
 	if opened.changes == nil || opened.err != nil || opened.attempt != 4 {
 		t.Errorf("opened = %+v, want attempt 4 and its stream", opened)
 	}
 
-	refused := startCalendarWatchCmd(context.Background(), context.Background(), func(_, _ context.Context) (<-chan struct{}, error) {
+	refused := startCalendarWatchCmd(context.Background(), context.Background(), func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
 		return nil, errors.New("cable server said no")
 	}, 5)().(calendarWatchStartedMsg)
 	if refused.err == nil || refused.attempt != 5 {
@@ -750,7 +770,9 @@ func TestStartCalendarWatchCarriesTheStreamAttemptOrReason(t *testing.T) {
 
 func TestModelFollowsTheCalendarOnlyWhileItIsOnScreen(t *testing.T) {
 	m := newModel()
-	m.watchCalendar = func(_, _ context.Context) (<-chan struct{}, error) { return make(chan struct{}), nil }
+	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
+		return make(chan CalendarWatchEvent), nil
+	}
 
 	updated, cmd := m.switchSection(sectionCalendar)
 	m = updated.(model)
@@ -759,7 +781,7 @@ func TestModelFollowsTheCalendarOnlyWhileItIsOnScreen(t *testing.T) {
 	}
 	attempt := m.calendarWatchAttempt
 
-	changes := make(chan struct{}, 1)
+	changes := make(chan CalendarWatchEvent, 1)
 	updated, _ = m.Update(calendarWatchStartedMsg{attempt: attempt, changes: changes})
 	m = updated.(model)
 	if m.calendarChanges == nil {
@@ -781,11 +803,13 @@ func TestModelFollowsTheCalendarOnlyWhileItIsOnScreen(t *testing.T) {
 
 func TestModelIgnoresAStaleCalendarStream(t *testing.T) {
 	m := newModel()
-	m.watchCalendar = func(_, _ context.Context) (<-chan struct{}, error) { return make(chan struct{}), nil }
+	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
+		return make(chan CalendarWatchEvent), nil
+	}
 	updated, _ := m.switchSection(sectionCalendar)
 	m = updated.(model)
 
-	stale := make(chan struct{}, 1)
+	stale := make(chan CalendarWatchEvent, 1)
 	updated, cmd := m.Update(calendarWatchStartedMsg{attempt: m.calendarWatchAttempt - 1, changes: stale})
 	m = updated.(model)
 	if m.calendarChanges != nil || cmd != nil {
@@ -798,7 +822,7 @@ func TestModelArmsOneCalendarReReadPerRing(t *testing.T) {
 	m.section = sectionCalendar
 	m.activeView = m.calendarView
 	m.calendarWatchAttempt = 2
-	m.calendarChanges = make(chan struct{})
+	m.calendarChanges = make(chan CalendarWatchEvent)
 
 	updated, cmd := m.Update(calendarChangedMsg{attempt: 2})
 	m = updated.(model)
@@ -815,7 +839,9 @@ func TestModelArmsOneCalendarReReadPerRing(t *testing.T) {
 
 func TestModelRetriesAClosedCalendarStreamWhileWatching(t *testing.T) {
 	m := newModel()
-	m.watchCalendar = func(_, _ context.Context) (<-chan struct{}, error) { return make(chan struct{}), nil }
+	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
+		return make(chan CalendarWatchEvent), nil
+	}
 	updated, _ := m.switchSection(sectionCalendar)
 	m = updated.(model)
 	attempt := m.calendarWatchAttempt
@@ -833,9 +859,60 @@ func TestModelRetriesAClosedCalendarStreamWhileWatching(t *testing.T) {
 	}
 }
 
+func TestModelRetriesACalendarWatchAfterRateLimit(t *testing.T) {
+	m := newModel()
+	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
+		return make(chan CalendarWatchEvent), nil
+	}
+	updated, _ := m.switchSection(sectionCalendar)
+	m = updated.(model)
+
+	limited := apierr.ErrRateLimit(30)
+	updated, cmd := m.Update(calendarWatchStartedMsg{attempt: m.calendarWatchAttempt, err: limited})
+	m = updated.(model)
+	if cmd == nil || m.stopCalendarWatch != nil || m.calendarWatchFailures != 1 {
+		t.Errorf("failures = %d, want the rate-limited watch dropped and a retry armed", m.calendarWatchFailures)
+	}
+}
+
+func TestModelRetriesACalendarWatchAfterCredentialStorageFailure(t *testing.T) {
+	m := newModel()
+	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
+		return make(chan CalendarWatchEvent), nil
+	}
+	updated, _ := m.switchSection(sectionCalendar)
+	m = updated.(model)
+
+	unavailable := errors.New("could not read stored credentials: keyring is locked")
+	updated, cmd := m.Update(calendarWatchStartedMsg{attempt: m.calendarWatchAttempt, err: unavailable})
+	m = updated.(model)
+	if cmd == nil || m.stopCalendarWatch != nil || m.calendarWatchFailures != 1 {
+		t.Errorf("failures = %d, want the storage failure to schedule a retry", m.calendarWatchFailures)
+	}
+}
+
+func TestModelDoesNotRetryACalendarWatchAfterAuthenticationFailure(t *testing.T) {
+	m := newModel()
+	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
+		return make(chan CalendarWatchEvent), nil
+	}
+	updated, _ := m.switchSection(sectionCalendar)
+	m = updated.(model)
+	attempt := m.calendarWatchAttempt
+
+	refused := apierr.ErrAuth("HEY's cable server turned these credentials down")
+	updated, cmd := m.Update(calendarChangedMsg{attempt: attempt, event: CalendarWatchEvent{Err: refused}})
+	m = updated.(model)
+	if cmd != nil || m.stopCalendarWatch != nil || m.calendarWatchFailures != 0 {
+		t.Errorf("failures = %d, want the failed watch dropped without a retry", m.calendarWatchFailures)
+	}
+}
+
 func TestModelDropsACalendarRetryAfterLeaving(t *testing.T) {
 	m := newModel()
-	m.watchCalendar = func(_, _ context.Context) (<-chan struct{}, error) { return make(chan struct{}), nil }
+	m.watchCalendar = func(_, _ context.Context) (<-chan CalendarWatchEvent, error) {
+		return make(chan CalendarWatchEvent), nil
+	}
 	updated, _ := m.switchSection(sectionCalendar)
 	m = updated.(model)
 	attempt := m.calendarWatchAttempt

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -175,6 +177,11 @@ type attachmentSavedMsg struct {
 	err          error
 }
 
+type linkOpenedMsg struct {
+	topicID int64
+	err     error
+}
+
 type attachmentOpenedMsg struct {
 	topicID      int64
 	attachmentID string
@@ -198,11 +205,22 @@ type postingActionDoneMsg struct {
 	boxID           int64
 	sourceKind      mail.Kind
 	postingID       int64
+	postingIDs      []int64 // every posting a bulk action took, empty for a single-row action
+	fromSelection   bool    // the action took the Space selection, which goes once HEY has answered
 	effect          postingActionEffect
 	destinationKind string // the box kind a move filed into, empty for every other action
 	filingSeq       uint64 // which open-thread filing dispatched the move, zero for a list row's
 	seen            bool   // the action was taken on the Previously Seen screen
 	err             error
+}
+
+// postings is every posting the action took: the bulk selection when there was one,
+// otherwise the single row.
+func (msg postingActionDoneMsg) postings() []int64 {
+	if len(msg.postingIDs) > 0 {
+		return msg.postingIDs
+	}
+	return []int64{msg.postingID}
 }
 
 // postingSeenMsg reports the mark-seen that opening a thread triggers on its
@@ -245,6 +263,21 @@ type collectionActionDoneMsg struct {
 
 // --- Mail section view ---
 
+type mailLink struct {
+	destination string
+	startLine   int
+	endLine     int
+	body        int
+	occurrence  int
+	key         string
+}
+
+type mailLinkBody struct {
+	entry int
+	start int
+	lines []string
+}
+
 type mailView struct {
 	vc *viewContext
 
@@ -255,6 +288,7 @@ type mailView struct {
 	postingList      contentList
 	topicViewport    viewport.Model
 	topicContent     string
+	topicLines       []string
 	topicID          int64
 	threadPosting    mail.Posting // snapshot of the posting the open thread was opened from, zero when it has none
 	threadBoxKind    string       // the box kind the open thread files out of, following it as filings move it
@@ -265,12 +299,18 @@ type mailView struct {
 	attachmentCursor int
 	imageContent     string
 	entryOffsets     []int // line where each message starts in the thread content
+	links            []mailLink
+	linkBodies       []mailLinkBody
+	selectedLink     int
+	selectedLinkKey  string
 	inThread         bool
 	threadNotice     string // what the open thread's read did not get; stays until the thread is left
 	contentHeight    int    // the rows the section has, which the thread's notices and viewport share
 
-	modal                  modal       // the form or picker over the list, and the only one there can be
-	cover                  coverPreset // the session's cover; HEY does not serve one to read
+	modal                  modal                 // the form or picker over the list, and the only one there can be
+	recipients             []recipientSuggestion // HEY's list of who can be written to, read when a composer opens
+	recipientsLoading      bool                  // a read of that list is on its way
+	cover                  coverPreset           // the session's cover; HEY does not serve one to read
 	searchList             contentList
 	searchActive           bool
 	searchQuery            string
@@ -291,6 +331,8 @@ type mailView struct {
 	lastBulkReplyID        int64  // delayed delivery currently available for undo
 	pendingMutations       int    // writes that must finish before changing the account context
 	notice                 string // one-shot confirmation shown above the posting list
+	selectionNotice        string // the refusal notice describing the selection, while it is up
+	selectionNoticeKey     string // what selectionNotice refused: "e" or "u", or "" for any other key
 	requests               requestLane[mailRequestKind]
 	sourceRequestID        uint64
 	folderDiscoveryErr     string
@@ -311,6 +353,7 @@ func newMailView(vc *viewContext) *mailView {
 		searchList:    contentList{hideSeenState: true},
 		bundleList:    contentList{hideSeenState: true},
 		seenList:      contentList{hideSeenState: true},
+		selectedLink:  -1,
 	}
 	if vc.loadCover != nil {
 		view.cover = parseCoverPreset(vc.loadCover())
@@ -416,6 +459,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.postingList.refreshHead(msg.postings, v.postingPaging.headIDs)
 		v.postingPaging.refreshed(postingIDs(msg.postings), msg.nextPage)
+		v.settleSelectionNotice()
 		return nil, true
 
 	case searchResultsLoadedMsg:
@@ -534,6 +578,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.attachments = msg.attachments
 		v.attachmentCursor = 0
 		v.threadNotice = msg.notice
+		v.selectedLink = -1
+		v.selectedLinkKey = ""
 		v.fitThreadViewport()
 		var imageContent strings.Builder
 		var uploadCmds []tea.Cmd
@@ -549,7 +595,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		v.imageContent = imageContent.String()
 		v.rebuildTopicContent()
-		v.topicViewport.GotoTop()
+		v.showLatestEntry()
 		// A thread read only in part is not marked seen by being opened: the reader has
 		// not had all of it, and seen would slide it under the Imbox's cover. The seen
 		// key is there for a thread they are done with anyway.
@@ -565,9 +611,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
 			return cmd, true
 		}
-		form := newReplyForm(msg, v.vc.styles)
-		v.openModal(form)
-		return form.init(), true
+		return v.openComposeForm(newReplyForm(msg, v.vc.styles)), true
 
 	case forwardContextLoadedMsg:
 		if msg.boxID != v.currentBoxID() {
@@ -576,9 +620,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
 			return cmd, true
 		}
-		form := newForwardForm(msg, v.vc.styles)
-		v.openModal(form)
-		return form.init(), true
+		return v.openComposeForm(newForwardForm(msg, v.vc.styles)), true
 
 	case bulkReplyDraftLoadedMsg:
 		if !v.requests.accepts(newRequestResult(msg.requestID, msg.err)) || msg.boxID != v.currentBoxID() || msg.seen != v.seenActive {
@@ -662,10 +704,39 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return nil, true
 
+	case recipientsLoadedMsg:
+		v.settleRecipients(msg)
+		return nil, true
+
+	case draftSavedMsg:
+		form := modalOf[*composeForm](v)
+		if form == nil || form != msg.form {
+			return nil, true
+		}
+		if msg.err != nil {
+			form.sending = false
+			form.setStatus(errorNotice("Could not save the draft", msg.err), true)
+			return nil, true
+		}
+		v.modal = nil
+		return notify("Draft saved"), true
+
 	case composeSentMsg:
 		form := modalOf[*composeForm](v)
 		if form == nil {
 			return nil, true
+		}
+		// HEY kept the message as a draft instead of sending it: the composer closes, as
+		// it would have — sending it again from here would only make another draft. The
+		// toast, half the screen wide, says it was not sent and which draft holds it —
+		// the notice row can be crowded off a short thread's screen — and the notice row
+		// adds why.
+		var refused *mail.NotDeliveredError
+		if errors.As(msg.err, &refused) {
+			v.modal = nil
+			v.noteFailure("Not sent", refused)
+			toast := fmt.Sprintf("Not sent — saved as draft %d", refused.DraftID)
+			return func() tea.Msg { return notifyMsg{text: toast, kind: toastError} }, true
 		}
 		if msg.err != nil {
 			form.sending = false
@@ -673,6 +744,12 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		v.modal = nil
+		// A reply or a forward finishes with the thread it was written from, the way
+		// the web app sends you back to the box: the reader lands on the list they
+		// opened the thread from — the Imbox, a search, a bundle — ready for the next.
+		if v.inThread && form.topicID != 0 && form.topicID == v.topicID {
+			v.ExitThread()
+		}
 		return notify(msg.label), true
 
 	case attachmentSavedMsg:
@@ -688,6 +765,17 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return notify("Saved attachment to " + msg.path), true
+
+	case linkOpenedMsg:
+		if msg.topicID != v.topicID || !v.inThread {
+			return nil, true
+		}
+		if msg.err != nil {
+			v.notice = terminal.SanitizeLine("Could not open link: " + msg.err.Error())
+			v.fitThreadViewport()
+			v.revealLink()
+		}
+		return nil, true
 
 	case attachmentOpenedMsg:
 		if !v.currentAttachmentAction(msg.topicID, msg.attachmentID) {
@@ -718,24 +806,30 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return func() tea.Msg { return errMsg{msg.err} }, true
 		}
 		done := notify(msg.action)
-		idx := v.postingIndex(msg.postingID)
-		if idx >= 0 {
-			switch msg.effect {
-			case postingActionNone:
-			case postingActionRemove:
-				v.removePostingAt(idx)
-			case postingActionSeen:
-				v.postingList.markSeen(idx)
-			case postingActionUnseen:
-				v.postingList.markUnseen(idx)
-			case postingActionIgnore:
-				v.postingList.postings[idx].Muted = true
-			case postingActionStopIgnoring:
-				v.postingList.postings[idx].Muted = false
+		for _, postingID := range msg.postings() {
+			idx := v.postingIndex(postingID)
+			if idx >= 0 {
+				switch msg.effect {
+				case postingActionNone:
+				case postingActionRemove:
+					v.removePostingAt(idx)
+				case postingActionSeen:
+					v.postingList.markSeen(idx)
+				case postingActionUnseen:
+					v.postingList.markUnseen(idx)
+				case postingActionIgnore:
+					v.postingList.postings[idx].Muted = true
+				case postingActionStopIgnoring:
+					v.postingList.postings[idx].Muted = false
+				}
+			}
+			if msg.effect == postingActionRemove {
+				v.removeFromOverlaidLists(postingID)
 			}
 		}
-		if msg.effect == postingActionRemove {
-			v.removeFromOverlaidLists(msg.postingID)
+		if msg.fromSelection {
+			v.postingList.deselect(msg.postings())
+			v.settleSelectionNotice()
 		}
 		// The open thread can file back into the box on screen — out and back while
 		// it stays open — and its row was removed when it first filed away, so the
@@ -981,6 +1075,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 				helpBinding{"t", "trash"},
 			)
 		}
+		if v.ClaimsLinkNavigation() {
+			bindings = append(bindings, helpBinding{"tab/shift+tab", "next/previous link"})
+		}
 		if len(v.entries) > 1 {
 			bindings = append(bindings, helpBinding{"j/k", "next/previous message"})
 		}
@@ -989,8 +1086,11 @@ func (v *mailView) HelpBindings() []helpBinding {
 				helpBinding{"[", "previous attachment"},
 				helpBinding{"]", "next attachment"},
 				helpBinding{"s", "save attachment"},
-				helpBinding{"o", "open attachment"},
 			)
+			// A selected link has Enter, and the footer above says so.
+			if !v.LinkSelectionActive() {
+				bindings = append(bindings, helpBinding{"enter", "open attachment"})
+			}
 		}
 		return bindings
 	}
@@ -999,6 +1099,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 	}
 	if v.bundleActive {
 		return []helpBinding{{"enter", "open"}, {"esc", "back"}}
+	}
+	if selected := len(v.actionList().selectedIDs()); selected > 0 {
+		return v.selectionHelpBindings(selected)
 	}
 	if v.seenActive {
 		ignoreBinding := helpBinding{"-", "ignore"}
@@ -1019,10 +1122,11 @@ func (v *mailView) HelpBindings() []helpBinding {
 			{"a", "set aside"},
 			{"d", "feed"},
 			{"p", "paper trail"},
-			{"t", "trash"},
-			{"!", "spam"},
-			ignoreBinding,
 		}
+		if v.trashOffered() {
+			bindings = append(bindings, helpBinding{"t", "trash"})
+		}
+		bindings = append(bindings, helpBinding{"!", "spam"}, ignoreBinding)
 		if v.lastBulkReplyID != 0 {
 			bindings = append(bindings, helpBinding{"ctrl+u", "undo bulk reply"})
 		}
@@ -1058,9 +1162,11 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"a", "set aside"},
 		{"d", "feed"},
 	}
+	bindings = append(bindings, helpBinding{"p", "paper trail"})
+	if v.trashOffered() {
+		bindings = append(bindings, helpBinding{"t", "trash"})
+	}
 	bindings = append(bindings,
-		helpBinding{"p", "paper trail"},
-		helpBinding{"t", "trash"},
 		helpBinding{"!", "spam"},
 		ignoreBinding,
 		helpBinding{"ctrl+r", "reload"},
@@ -1278,6 +1384,15 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	if v.inThread {
+		if cmd, handled := v.handleLinkKey(msg); handled {
+			return cmd
+		}
+		// Enter opens what is selected: a link once Tab has picked one, which
+		// handleLinkKey has already answered, and otherwise the attachment.
+		if msg.Key().Code == tea.KeyEnter && len(v.attachments) > 0 {
+			return v.openSelectedAttachment()
+		}
+
 		switch msg.String() {
 		case "r", "R":
 			if v.topicID != 0 {
@@ -1299,8 +1414,6 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return nil
 		case "s":
 			return v.saveSelectedAttachment()
-		case "o":
-			return v.openSelectedAttachment()
 		case "j":
 			if len(v.entryOffsets) > 1 {
 				v.jumpEntry(1)
@@ -1323,6 +1436,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			v.searchList.moveUp()
 		case tea.KeyDown:
 			v.searchList.moveDown()
+			return v.loadMoreSearchResults()
+		case tea.KeyPgUp:
+			v.searchList.pageUp()
+		case tea.KeyPgDown:
+			v.searchList.pageDown()
 			return v.loadMoreSearchResults()
 		case tea.KeyEnter:
 			return v.openSelected()
@@ -1347,6 +1465,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case tea.KeyDown:
 			v.bundleList.moveDown()
 			return v.loadMoreBundlePostings()
+		case tea.KeyPgUp:
+			v.bundleList.pageUp()
+		case tea.KeyPgDown:
+			v.bundleList.pageDown()
+			return v.loadMoreBundlePostings()
 		case tea.KeyEnter:
 			return v.openSelected()
 		default:
@@ -1368,6 +1491,11 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case tea.KeyDown:
 			v.seenList.moveDown()
 			return v.loadMoreSeenPostings()
+		case tea.KeyPgUp:
+			v.seenList.pageUp()
+		case tea.KeyPgDown:
+			v.seenList.pageDown()
+			return v.loadMoreSeenPostings()
 		case tea.KeyEnter:
 			return v.openSelected()
 		default:
@@ -1385,11 +1513,19 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			case "ctrl+u":
 				return v.undoBulkReply()
 			case "v", "V":
-				v.startMove()
+				if !v.refuseForSelection() {
+					v.startMove()
+				}
 				return nil
 			case "b", "B":
+				if v.refuseForSelection() {
+					return nil
+				}
 				return v.startFolderPicker()
 			case "n", "N":
+				if v.refuseForSelection() {
+					return nil
+				}
 				return v.startCollectionPicker()
 			default:
 				return v.handlePostingAction(msg.String())
@@ -1403,6 +1539,12 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		v.postingList.moveUp()
 	case tea.KeyDown:
 		v.postingList.moveDown()
+		return v.loadMorePostings()
+	case tea.KeyPgUp:
+		v.postingList.pageUp()
+		return nil
+	case tea.KeyPgDown:
+		v.postingList.pageDown()
 		return v.loadMorePostings()
 	case tea.KeyEnter:
 		return v.openSelected()
@@ -1425,11 +1567,19 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "ctrl+u":
 			return v.undoBulkReply()
 		case "v", "V":
-			v.startMove()
+			if !v.refuseForSelection() {
+				v.startMove()
+			}
 			return nil
 		case "b", "B":
+			if v.refuseForSelection() {
+				return nil
+			}
 			return v.startFolderPicker()
 		case "n", "N":
+			if v.refuseForSelection() {
+				return nil
+			}
 			return v.startCollectionPicker()
 		case "x":
 			v.postingList.toggleCoverPeek()
@@ -1449,7 +1599,25 @@ func (v *mailView) InThread() bool {
 	return v.inThread || v.searchActive || v.bundleActive || v.seenActive
 }
 
+func (v *mailView) ClaimsLinkNavigation() bool {
+	return v.inThread && v.modal == nil && len(v.links) > 0
+}
+
+func (v *mailView) LinkSelectionActive() bool {
+	return v.ClaimsLinkNavigation() && v.selectedLink >= 0 && v.selectedLink < len(v.links)
+}
+
 func (v *mailView) ExitDetail(key string) {
+	if v.inThread && key != "q" && v.selectedLink >= 0 {
+		v.clearLinkSelection()
+		return
+	}
+	// Previously Seen is a list the model treats as a detail screen, so Escape reaches its
+	// selection here rather than through ClearSelection's own call: the selection goes
+	// first, and the next Escape leaves the screen.
+	if key != "q" && v.ClearSelection() {
+		return
+	}
 	if key == "q" && (v.searchActive || v.bundleActive || v.seenActive) && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
 		v.requests.cancel()
 		v.clearSearch()
@@ -1470,6 +1638,8 @@ func (v *mailView) ExitThread() {
 		v.threadNotice = ""
 		v.threadPosting = mail.Posting{}
 		v.threadBoxKind = ""
+		v.clearLinkSelection()
+		v.links = nil
 		v.modal = nil
 		v.requests.cancel()
 		return
@@ -1532,7 +1702,11 @@ func (v *mailView) applySeenPostingAction(msg postingActionDoneMsg) tea.Cmd {
 	if msg.err != nil {
 		return func() tea.Msg { return errMsg{msg.err} }
 	}
-	if idx := postingIndexIn(v.seenList.postings, msg.postingID); idx >= 0 {
+	for _, postingID := range msg.postings() {
+		idx := postingIndexIn(v.seenList.postings, postingID)
+		if idx < 0 {
+			continue
+		}
 		switch msg.effect {
 		case postingActionNone:
 		case postingActionRemove, postingActionUnseen:
@@ -1544,6 +1718,10 @@ func (v *mailView) applySeenPostingAction(msg postingActionDoneMsg) tea.Cmd {
 		case postingActionStopIgnoring:
 			v.seenList.postings[idx].Muted = false
 		}
+	}
+	if msg.fromSelection {
+		v.seenList.deselect(msg.postings())
+		v.settleSelectionNotice()
 	}
 	return tea.Batch(notify(msg.action), v.loadMoreSeenPostings())
 }
@@ -1566,6 +1744,8 @@ func (v *mailView) Restyle() {
 		offset := v.topicViewport.YOffset()
 		v.rebuildTopicContent()
 		v.topicViewport.SetYOffset(offset)
+		v.fitThreadViewport()
+		v.revealLink()
 	}
 	if v.modal != nil {
 		v.modal.restyle(v.vc.styles)
@@ -1580,16 +1760,19 @@ func (v *mailView) Resize(width, height int) {
 	v.searchList.setSize(width, height)
 	v.bundleList.setSize(width, height)
 	v.seenList.setSize(width, height)
+	oldWidth := v.topicViewport.Width()
 	v.topicViewport.SetWidth(width)
 	v.contentHeight = height
+	if v.inThread && oldWidth != width {
+		v.rebuildTopicContent()
+	}
 	v.fitThreadViewport()
+	v.revealLink()
 }
 
 // threadNotices is what is shown above an open thread's viewport: the partial-read
-// notice for as long as the thread is open, and the one-shot notice while it is up. Each
-// is one row, truncated to the width, so the rows they take can be counted, and the
-// thread itself keeps at least one: in a section too short for both, a notice gives
-// way rather than pushing the viewport out.
+// notice for as long as the thread is open, and the one-shot notice while it is up.
+// Each stays on one truncated row, and the thread itself keeps at least one row.
 func (v *mailView) threadNotices() []string {
 	var notices []string
 	for _, notice := range []string{v.threadNotice, v.notice} {
@@ -1601,6 +1784,48 @@ func (v *mailView) threadNotices() []string {
 		notices = notices[:room]
 	}
 	return notices
+}
+
+// LinkFooter reserves one footer row for a thread with selectable links. Its text
+// stays blank until a link is selected, and a destination that fits keeps to that
+// row, so moving between such links never changes the viewport's height. A longer
+// one wraps onto the rows it needs to be shown in full.
+func (v *mailView) LinkFooter() (text string, visible bool) {
+	if !v.inThread || v.modal != nil || len(v.links) == 0 {
+		return "", false
+	}
+	text, _ = v.linkDestinationFooter()
+	return text, true
+}
+
+func (v *mailView) linkDestinationFooter() (string, bool) {
+	if !v.LinkSelectionActive() {
+		return "", false
+	}
+	width := v.vc.width
+	if width <= 0 {
+		return "", false
+	}
+	destination := terminal.SanitizeLine(v.links[v.selectedLink].destination)
+	const suffix = " (press Enter to visit)"
+	footer := "Open: " + destination + suffix
+	if lipgloss.Width(footer) <= width {
+		return footer, true
+	}
+	// A destination too long for one row wraps onto as many as it needs, so the
+	// reader sees all of it before it opens. The model decides whether they fit.
+	lines := strings.Split(ansi.Hardwrap("Open: "+destination, width, true), "\n")
+	if last := len(lines) - 1; lipgloss.Width(lines[last]+suffix) <= width {
+		lines[last] += suffix
+	} else {
+		lines = append(lines, truncateToWidth(strings.TrimSpace(suffix), width))
+	}
+	return strings.Join(lines, "\n"), true
+}
+
+func (v *mailView) linkDestinationReviewable() bool {
+	_, reviewable := v.linkDestinationFooter()
+	return reviewable
 }
 
 // fitThreadViewport gives the thread's viewport the rows its notices leave, so the
@@ -1640,26 +1865,40 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 		return nil
 	}
 	if index == v.boxIndex {
-		// The box under the seen screen: its number or tab closes the screen the
-		// way esc does, landing on the list that is already there.
-		if v.seenActive {
-			v.clearSeen()
+		// The box already under a thread, a search, a bundle or the seen screen: its
+		// number closes whatever is open over it and lands on the list that is already
+		// there. Answering with nothing would let the key fall through to the thread,
+		// which swallows it, so 1 from a thread opened in the Imbox did nothing at all.
+		if !v.inThread && !v.searchActive && !v.bundleActive && !v.seenActive {
+			return nil
+		}
+		v.closeOverlays()
+		if v.requests.kind != mailRequestPostings {
 			v.requests.cancel()
 		}
-		return nil
+		v.notice = ""
+		return func() tea.Msg { return nil }
 	}
-	v.inThread = false
-	v.threadNotice = ""
-	v.threadPosting = mail.Posting{}
-	v.threadBoxKind = ""
-	v.clearSearch()
-	v.clearBundle()
-	v.clearSeen()
+	v.closeOverlays()
 	v.requests.cancel()
 	v.notice = ""
 	v.postingList.setPostings(nil)
 	v.boxIndex = index
 	return v.requestPostings(v.boxes[index])
+}
+
+// closeOverlays puts away everything a box's list can have open over it — a thread, a
+// search, a bundle, the Previously Seen screen — leaving the list itself.
+func (v *mailView) closeOverlays() {
+	v.inThread = false
+	v.threadNotice = ""
+	v.threadPosting = mail.Posting{}
+	v.threadBoxKind = ""
+	v.clearLinkSelection()
+	v.links = nil
+	v.clearSearch()
+	v.clearBundle()
+	v.clearSeen()
 }
 
 // openPreviouslySeen jumps to the Imbox's Previously Seen threads on their own screen,
@@ -1669,12 +1908,18 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 // Imbox hides.
 func (v *mailView) openPreviouslySeen() tea.Cmd {
 	if v.seenActive {
-		return nil
+		if !v.inThread {
+			return nil
+		}
+		v.ExitThread()
+		return func() tea.Msg { return nil }
 	}
 	v.inThread = false
 	v.threadNotice = ""
 	v.threadPosting = mail.Posting{}
 	v.threadBoxKind = ""
+	v.clearLinkSelection()
+	v.links = nil
 	v.clearSearch()
 	v.clearBundle()
 	v.notice = ""
@@ -2007,6 +2252,12 @@ func (v *mailView) openSelectedAttachment() tea.Cmd {
 		return nil
 	}
 	topicID := v.topicID
+	if !attachmentfiles.OpensInViewer(attachment.Filename) {
+		err := apierr.ErrUsageHint("it could run a program", "press s to save it")
+		return func() tea.Msg {
+			return attachmentOpenedMsg{topicID: topicID, attachmentID: attachment.ID, filename: attachment.Filename, err: err}
+		}
+	}
 	return func() tea.Msg {
 		directory, err := v.vc.newAttachmentTempDir()
 		if err != nil {
@@ -2045,6 +2296,18 @@ func (v *mailView) currentAttachmentAction(topicID int64, attachmentID string) b
 	return false
 }
 
+// showLatestEntry opens a thread on its newest message, which is where whatever
+// brought the reader here arrived; k walks back through what came before it. The
+// viewport stops at the end of the content, so a short last message shows the tail
+// of the one above it too.
+func (v *mailView) showLatestEntry() {
+	if len(v.entryOffsets) == 0 {
+		v.topicViewport.GotoTop()
+		return
+	}
+	v.topicViewport.SetYOffset(v.entryOffsets[len(v.entryOffsets)-1])
+}
+
 // jumpEntry scrolls the thread to the next or previous message header.
 func (v *mailView) jumpEntry(delta int) {
 	if len(v.entryOffsets) == 0 {
@@ -2069,11 +2332,131 @@ func (v *mailView) jumpEntry(delta int) {
 	v.topicViewport.GotoTop()
 }
 
+func (v *mailView) clearLinkSelection() {
+	if v.selectedLink < 0 && v.selectedLinkKey == "" {
+		return
+	}
+	v.restoreLinkBody(v.selectedLink)
+	v.selectedLink = -1
+	v.selectedLinkKey = ""
+}
+
+func (v *mailView) handleLinkKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if !v.inThread || len(v.links) == 0 {
+		return nil, false
+	}
+	if msg.Key().Code == tea.KeyTab {
+		delta := 1
+		if msg.Key().Mod.Contains(tea.ModShift) {
+			delta = -1
+		}
+		previous := v.selectedLink
+		if v.selectedLink < 0 {
+			v.selectedLink = 0
+			if delta < 0 {
+				v.selectedLink = len(v.links) - 1
+			}
+		} else {
+			v.selectedLink = (v.selectedLink + delta + len(v.links)) % len(v.links)
+		}
+		v.selectedLinkKey = v.links[v.selectedLink].key
+		v.updateLinkSelection(previous, v.selectedLink)
+		v.revealLink()
+		return nil, true
+	}
+	if msg.Key().Code == tea.KeyEnter && v.selectedLink >= 0 {
+		if !v.linkDestinationReviewable() {
+			return nil, true
+		}
+		link := v.links[v.selectedLink]
+		if v.vc.openURL == nil {
+			return nil, true
+		}
+		topicID, destination := v.topicID, link.destination
+		return func() tea.Msg {
+			return linkOpenedMsg{topicID: topicID, err: v.vc.openURL(destination)}
+		}, true
+	}
+	return nil, false
+}
+
+func (v *mailView) revealLink() {
+	if v.selectedLink < 0 || v.selectedLink >= len(v.links) {
+		return
+	}
+	link := v.links[v.selectedLink]
+	height := max(v.topicViewport.Height(), 1)
+	if link.startLine < v.topicViewport.YOffset() {
+		v.topicViewport.SetYOffset(link.startLine)
+	}
+	if link.endLine >= v.topicViewport.YOffset()+height {
+		v.topicViewport.SetYOffset(link.endLine - height + 1)
+	}
+}
+
 func (v *mailView) rebuildTopicContent() {
-	rendered, offsets := v.renderEntries(v.entries)
+	key := v.selectedLinkKey
+	rendered, offsets, links, bodies := v.renderEntriesWithLinks(v.entries)
 	v.topicContent = rendered + v.imageContent
+	v.topicLines = strings.Split(v.topicContent, "\n")
 	v.entryOffsets = offsets
-	v.topicViewport.SetContent(v.topicContent)
+	v.links = links
+	v.linkBodies = bodies
+	v.selectedLink = -1
+	for i := range links {
+		if links[i].key == key && key != "" {
+			v.selectedLink = i
+			break
+		}
+	}
+	if v.selectedLink < 0 {
+		v.selectedLinkKey = ""
+	} else {
+		v.selectLinkBody(v.selectedLink)
+	}
+	v.topicViewport.SetContentLines(v.topicLines)
+}
+
+func (v *mailView) updateLinkSelection(previous, selected int) {
+	if previous >= 0 && v.links[previous].body != v.links[selected].body {
+		v.restoreLinkBody(previous)
+	}
+	v.selectLinkBody(selected)
+}
+
+func (v *mailView) restoreLinkBody(linkIndex int) {
+	if linkIndex < 0 || linkIndex >= len(v.links) {
+		return
+	}
+	bodyIndex := v.links[linkIndex].body
+	if bodyIndex < 0 || bodyIndex >= len(v.linkBodies) {
+		return
+	}
+	body := v.linkBodies[bodyIndex]
+	if body.start < 0 || body.start+len(body.lines) > len(v.topicLines) {
+		return
+	}
+	copy(v.topicLines[body.start:body.start+len(body.lines)], body.lines)
+}
+
+func (v *mailView) selectLinkBody(linkIndex int) {
+	if linkIndex < 0 || linkIndex >= len(v.links) {
+		return
+	}
+	link := v.links[linkIndex]
+	if link.body < 0 || link.body >= len(v.linkBodies) {
+		return
+	}
+	body := v.linkBodies[link.body]
+	if body.entry < 0 || body.entry >= len(v.entries) || body.start < 0 || body.start+len(body.lines) > len(v.topicLines) {
+		return
+	}
+	selected := markdown.RenderLinked(v.entries[body.entry].Body, max(v.vc.width-4, 40), link.occurrence)
+	lines := strings.Split(v.vc.styles.entryBody.Render(selected.Text), "\n")
+	if len(lines) != len(body.lines) {
+		return
+	}
+	copy(v.topicLines[body.start:body.start+len(lines)], lines)
 }
 
 func (v *mailView) openSelected() tea.Cmd {
@@ -2350,12 +2733,21 @@ func (v *mailView) actionSource() *mail.Source {
 }
 
 func (v *mailView) imboxSource() *mail.Source {
-	for i := range v.boxes {
-		if v.boxes[i].Kind == mail.KindBox && v.boxes[i].BoxKind == hey.BoxKindImbox {
-			return &v.boxes[i]
-		}
+	if index := v.imboxIndex(); index >= 0 {
+		return &v.boxes[index]
 	}
 	return nil
+}
+
+// imboxIndex is where the Imbox sits among the sources, by the kind HEY serves rather
+// than its name, which the user can change; -1 before the sources are read.
+func (v *mailView) imboxIndex() int {
+	for i := range v.boxes {
+		if v.boxes[i].Kind == mail.KindBox && v.boxes[i].BoxKind == hey.BoxKindImbox {
+			return i
+		}
+	}
+	return -1
 }
 
 const unfileableThreadNotice = "Can't file this thread from here"
@@ -2428,11 +2820,348 @@ func (v *mailView) fileablePosting() *mail.Posting {
 }
 
 func (v *mailView) handlePostingAction(key string) tea.Cmd {
+	if !isPostingActionKey(key) {
+		return nil
+	}
+	if v.refuseForLostSelection() {
+		return nil
+	}
+	if key == "t" || key == "T" {
+		return v.trash()
+	}
+	if selection := v.actionList().selectedPostings(); len(selection) > 0 {
+		switch key {
+		case "e", "E":
+			return v.markSelectionSeen(selection)
+		case "u", "U":
+			return v.markSelectionUnseen(selection)
+		}
+		v.refuseForSelection()
+		return nil
+	}
 	selected := v.actionList().selectedPosting()
 	if selected == nil {
 		return nil
 	}
 	return v.postingAction(key, *selected, v.postingBoxKind(*selected))
+}
+
+// isPostingActionKey reports whether postingAction does anything with key, so a key that
+// means nothing to a thread is not answered with a refusal about the selection.
+func isPostingActionKey(key string) bool {
+	switch key {
+	case "l", "a", "A", "e", "E", "u", "U", "i", "I", "d", "D", "p", "P", "t", "T", "!", "-", "+", "r", "R", "f", "F":
+		return true
+	}
+	return false
+}
+
+// trashTargets is what t acts on: every selected row when there is a selection, the row
+// under the cursor otherwise. The selection wins even when it is a single row, since the
+// cursor moves away from what was selected.
+func (v *mailView) trashTargets() []mail.Posting {
+	list := v.actionList()
+	if selected := list.selectedPostings(); len(selected) > 0 {
+		return selected
+	}
+	if cursor := list.selectedPosting(); cursor != nil {
+		return []mail.Posting{*cursor}
+	}
+	return nil
+}
+
+// trash files what t acts on into the Trash, in one request whatever the count, the way
+// the web app's toolbar acts on a selection rather than on the row under the cursor. The
+// rows leave the list when HEY answers and take their selection with them; a failure
+// leaves the selection standing for another try.
+func (v *mailView) trash() tea.Cmd {
+	targets := v.trashTargets()
+	if len(targets) == 0 {
+		return nil
+	}
+	if bundles := bundlesIn(targets); bundles > 0 {
+		v.notice = bundleTrashNotice(bundles, len(targets))
+		return nil
+	}
+	ids := postingIDsOf(targets)
+	label := "Thread moved to Trash"
+	if len(ids) > 1 {
+		label = fmt.Sprintf("%d threads moved to Trash", len(ids))
+	}
+	fromSelection := len(v.actionList().selectedIDs()) > 0
+	return v.bulkPostingAction(label, postingActionRemove, ids, fromSelection, func() error {
+		return v.vc.sdk.Postings().MoveToTrash(v.vc.ctx, ids...)
+	})
+}
+
+// markSelectionSeen marks every selected thread seen in one request, the way t trashes
+// them, when HEY's web app would: selectionSeenRefusal says when it would not. The rows
+// stay where HEY files them, so the selection is let go of when HEY answers rather than
+// leaving with the rows; a failure keeps it for another try.
+func (v *mailView) markSelectionSeen(selection []mail.Posting) tea.Cmd {
+	if v.refuseSelectionSeen(selection, true) {
+		return nil
+	}
+	ids := postingIDsOf(selection)
+	label := "Thread marked as seen"
+	if len(ids) > 1 {
+		label = fmt.Sprintf("%d threads marked as seen", len(ids))
+	}
+	return v.bulkPostingAction(label, postingActionSeen, ids, true, func() error {
+		return v.vc.sdk.Postings().MarkSeen(v.vc.ctx, ids)
+	})
+}
+
+// markSelectionUnseen is markSelectionSeen the other way. Like the web app it sends every
+// selected thread, the ones already unseen included, rather than picking some out.
+func (v *mailView) markSelectionUnseen(selection []mail.Posting) tea.Cmd {
+	if v.refuseSelectionSeen(selection, false) {
+		return nil
+	}
+	ids := postingIDsOf(selection)
+	label := "Thread marked as unseen"
+	if len(ids) > 1 {
+		label = fmt.Sprintf("%d threads marked as unseen", len(ids))
+	}
+	return v.bulkPostingAction(label, postingActionUnseen, ids, true, func() error {
+		return v.vc.sdk.Postings().MarkUnseen(v.vc.ctx, ids)
+	})
+}
+
+// refuseSelectionSeen puts up why e (seen) or u (not seen) will not act on the selection,
+// and reports whether it refused. The notice describes the selection, so it is settled
+// with it like the refusal of every other key.
+func (v *mailView) refuseSelectionSeen(selection []mail.Posting, seen bool) bool {
+	refusal := v.selectionSeenRefusal(selection, seen)
+	if refusal == "" {
+		return false
+	}
+	v.notice = refusal
+	v.selectionNotice = refusal
+	v.selectionNoticeKey = "u"
+	if seen {
+		v.selectionNoticeKey = "e"
+	}
+	return true
+}
+
+// selectionSeenRefusal answers the rules HEY's web app enables its bulk Seen and Unseen
+// buttons by (haystack's bulk_actions_controller.js), empty when e (seen) or u (not seen)
+// may act. Both want every selected thread in the Imbox, by each row's own box rather
+// than the list's, since a label or a collection mixes boxes; a row whose box is not
+// known counts as outside it. Both are off while an ignored thread is selected. Seen is
+// off when every thread is seen already, and unseen when none is — a bubbled-up thread is
+// not a seen one, as HEY's seen? has it.
+func (v *mailView) selectionSeenRefusal(selection []mail.Posting, seen bool) string {
+	selected, ignored, seenCount := len(selection), 0, 0
+	for i := range selection {
+		if v.boxKindOf(selection[i].BoxID) != hey.BoxKindImbox {
+			return "Seen and unseen work on a selection only in the Imbox"
+		}
+		if selection[i].Muted {
+			ignored++
+		}
+		if selection[i].Seen {
+			seenCount++
+		}
+	}
+	key := "unseen"
+	if seen {
+		key = "seen"
+	}
+	switch {
+	case ignored > 0 && selected == 1:
+		return "Stop ignoring this thread to mark it " + key
+	case ignored == selected:
+		return "Stop ignoring these threads to mark them " + key
+	case ignored == 1:
+		return "A selected thread is ignored — stop ignoring it to mark threads " + key
+	case ignored > 0:
+		return fmt.Sprintf("%d selected threads are ignored — stop ignoring them to mark threads %s", ignored, key)
+	case seen && seenCount == selected && selected == 1:
+		return "Thread is already seen"
+	case seen && seenCount == selected:
+		return "Selected threads are already seen"
+	case !seen && seenCount == 0 && selected == 1:
+		return "Thread is already unseen"
+	case !seen && seenCount == 0:
+		return "Selected threads are already unseen"
+	}
+	return ""
+}
+
+// bulkPostingAction runs fn over ids in one request and reports every one of them when
+// HEY answers, so the list lands the effect on each row and, when the ids were the
+// selection, lets go of them.
+func (v *mailView) bulkPostingAction(label string, effect postingActionEffect, ids []int64, fromSelection bool, fn func() error) tea.Cmd {
+	action := v.doPostingAction(label, effect, v.currentBoxID(), ids[0], fn)
+	return func() tea.Msg {
+		done, ok := action().(postingActionDoneMsg)
+		if !ok {
+			return nil
+		}
+		done.postingIDs = ids
+		done.fromSelection = fromSelection
+		return done
+	}
+}
+
+// selectionHelpBindings is the help bar while a Space selection stands: the count, and
+// only the keys that act on it. Every other thread action is refused until Escape
+// clears the selection, so offering them would advertise keys that do nothing. e and u
+// are shown only when they would act, the way HEY's web app hides its bulk Seen and
+// Unseen buttons — which is also what keeps e off Previously Seen, whose threads are seen.
+func (v *mailView) selectionHelpBindings(selected int) []helpBinding {
+	count := v.vc.styles.helpDesc.Render(fmt.Sprintf("%d selected", selected))
+	bindings := []helpBinding{{key: count}}
+	selection := v.actionList().selectedPostings()
+	if v.selectionSeenRefusal(selection, true) == "" {
+		bindings = append(bindings, helpBinding{"e", "seen"})
+	}
+	if v.selectionSeenRefusal(selection, false) == "" {
+		bindings = append(bindings, helpBinding{"u", "unseen"})
+	}
+	if v.trashOffered() {
+		bindings = append(bindings, helpBinding{"t", "trash"})
+	}
+	bindings = append(bindings,
+		helpBinding{"space", "toggle"},
+		helpBinding{"esc", "clear"},
+		helpBinding{"ctrl+b", "bulk reply"},
+	)
+	if v.lastBulkReplyID != 0 {
+		bindings = append(bindings, helpBinding{"ctrl+u", "undo bulk reply"})
+	}
+	return modifiersLast(bindings)
+}
+
+// refuseForSelection keeps the one-thread actions off a list with a Space selection
+// standing. The reader who selected rows means those rows, and running a move, a reply
+// or a label on whatever the cursor happens to rest on would act on the wrong thread.
+// Only t, e, u and Ctrl+B act on a selection so far; the rest have their own
+// confirmation needs and come later. It reports whether it refused.
+func (v *mailView) refuseForSelection() bool {
+	if v.refuseForLostSelection() {
+		return true
+	}
+	selected := len(v.actionList().selectedIDs())
+	if selected == 0 {
+		return false
+	}
+	v.notice = selectionRefusal(selected)
+	v.selectionNotice = v.notice
+	v.selectionNoticeKey = ""
+	return true
+}
+
+func selectionRefusal(selected int) string {
+	return fmt.Sprintf("%d %s selected — choose a bulk action or press Esc to clear", selected, threadNoun(selected))
+}
+
+// refuseForLostSelection holds back the one key that follows a selection going out from
+// under the reader. Their threads left the list or went under the cover, and without the
+// refusal e, u or t would act on the row under the cursor — a thread they never chose.
+// It refuses once: by the next key the reader has seen the notice and means the cursor.
+func (v *mailView) refuseForLostSelection() bool {
+	list := v.actionList()
+	if !list.selectionLost {
+		return false
+	}
+	list.selectionLost = false
+	v.notice = "The selected threads left the list — nothing was changed"
+	v.selectionNotice = ""
+	return true
+}
+
+// settleSelectionNotice keeps the refusal honest when the selection changes without a
+// key going through HandleContentKey, which would have cleared it: Escape, a live re-read,
+// an action landing. A count that no longer matches is replaced, a refusal of e or u is
+// asked again of the selection as it now is, and a selection that is gone takes its
+// refusal with it. Any other notice is left alone.
+func (v *mailView) settleSelectionNotice() {
+	if v.selectionNotice == "" {
+		return
+	}
+	if v.notice != v.selectionNotice {
+		v.selectionNotice = ""
+		return
+	}
+	list := v.actionList()
+	notice := ""
+	switch selected := len(list.selectedIDs()); {
+	case selected == 0:
+	case v.selectionNoticeKey == "e" || v.selectionNoticeKey == "u":
+		notice = v.selectionSeenRefusal(list.selectedPostings(), v.selectionNoticeKey == "e")
+	default:
+		notice = selectionRefusal(selected)
+	}
+	v.notice = notice
+	v.selectionNotice = notice
+}
+
+// ClearSelection is the last thing Escape does on a mail list: once nothing ahead of it
+// — a modal, an open thread, a read the reader is waiting on — has claimed the key, it
+// lets go of the Space selection. It reports whether there was one to let go of.
+func (v *mailView) ClearSelection() bool {
+	if v.inThread || v.searchActive || v.bundleActive || v.requests.loading {
+		return false
+	}
+	list := v.actionList()
+	if len(list.selectedIDs()) == 0 && !list.selectionLost {
+		return false
+	}
+	list.clearSelected()
+	v.settleSelectionNotice()
+	return true
+}
+
+func postingIDsOf(postings []mail.Posting) []int64 {
+	ids := make([]int64, len(postings))
+	for i := range postings {
+		ids[i] = postings[i].ID
+	}
+	return ids
+}
+
+func threadNoun(count int) string {
+	if count == 1 {
+		return "thread"
+	}
+	return "threads"
+}
+
+// trashOffered reports whether the help bar shows t. A bundle row stands for one
+// contact's stream rather than a thread, and HEY trashes through the thread — HEY's
+// `remove_via_topic` skips a posting that has none — so trashing a bundle quietly does
+// nothing while the list reports it gone. HEY's own web app never lets that happen: the
+// Trash button is hidden the moment a bundle is in the selection. The bar drops the key
+// for the same reason. An empty list keeps it, as it always has: there is nothing to
+// refuse yet.
+func (v *mailView) trashOffered() bool {
+	return bundlesIn(v.trashTargets()) == 0
+}
+
+func bundlesIn(postings []mail.Posting) int {
+	bundles := 0
+	for i := range postings {
+		if postings[i].IsBundle {
+			bundles++
+		}
+	}
+	return bundles
+}
+
+// bundleTrashNotice says why t did nothing, and what to do about it when the rest of the
+// selection could still go.
+func bundleTrashNotice(bundles, targets int) string {
+	subject := "A bundle cannot be trashed"
+	if bundles > 1 {
+		subject = fmt.Sprintf("%d bundles cannot be trashed", bundles)
+	}
+	if bundles == targets {
+		return subject
+	}
+	return subject + " — deselect the bundle to trash the rest"
 }
 
 // actionBoxKind is the box kind a list row files out of, empty over a source that
@@ -2950,9 +3679,20 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 // renderEntries renders the thread's messages and returns the content along
 // with the line each message header starts on, for j/k jumps.
 func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
+	rendered, offsets, _, _ := v.renderEntriesWithLinks(entries)
+	return rendered, offsets
+}
+
+func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, []mailLink, []mailLinkBody) {
 	var b strings.Builder
 	offsets := make([]int, 0, len(entries))
 	lineCount := 0
+	links := []mailLink{}
+	bodies := []mailLinkBody{}
+	write := func(s string) {
+		b.WriteString(s)
+		lineCount += strings.Count(s, "\n")
+	}
 	sepWidth := max(v.vc.width-4, 40)
 	sep := v.vc.styles.separator.Render(strings.Repeat("─", sepWidth))
 
@@ -2961,17 +3701,14 @@ func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 	if subject := terminal.SanitizeLine(v.topicName); subject != "" {
 		centered := lipgloss.NewStyle().Width(sepWidth).Align(lipgloss.Center).Foreground(colorBright).Bold(true).
 			Render(truncateStr(subject, sepWidth))
-		fmt.Fprintf(&b, "%s\n\n", centered)
-		lineCount += 2
+		write(centered + "\n\n")
 	}
 
 	for i, e := range entries {
 		if i > 0 {
-			fmt.Fprintf(&b, "%s\n", sep)
-			lineCount++
+			write(sep + "\n")
 		}
 		offsets = append(offsets, lineCount)
-		entryStart := b.Len()
 
 		from := e.Creator.Name
 		if from == "" {
@@ -2980,26 +3717,63 @@ func (v *mailView) renderEntries(entries []mail.Entry) (string, []int) {
 		if e.AlternativeSenderName != "" {
 			from = e.AlternativeSenderName
 		}
-
-		// A full blank line separates the header from whatever follows it —
-		// the summary here, or the body's own leading blank when there is none.
-		fmt.Fprintf(&b, "%s  %s\n", v.vc.styles.entryFrom.Render(terminal.SanitizeLine(from)), v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt)))
-		if e.Summary != "" {
-			fmt.Fprintf(&b, "\n%s\n", terminal.SanitizeLine(e.Summary))
+		if e.Sender.EmailAddress != "" {
+			from = e.Sender.EmailAddress
+			if e.Sender.Name != "" {
+				from = fmt.Sprintf("%s <%s>", terminal.SanitizeLine(e.Sender.Name), terminal.SanitizeLine(e.Sender.EmailAddress))
+			}
 		}
+
+		// A note or a share notice was never emailed, so it is headed by what it is
+		// rather than by a From line that reads as mail that went out.
+		heading := v.vc.styles.entryFrom.Render(terminal.SanitizeLine(from))
+		date := v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt))
+		if label, tag, internal := mail.InternalEntryLabel(e.Kind, terminal.SanitizeLine(from)); internal {
+			heading = v.vc.styles.entryFrom.Render(label)
+			date += v.vc.styles.entryDate.Render("  · " + tag)
+		}
+
+		// Each arm below opens with a blank line, which is what separates the header
+		// from whatever follows it. The summary is HEY's ~105-character preview of the
+		// body, so it stands in only where HEY served no body at all — the same ladder
+		// as printThreadStyled in internal/cmd/topic.go. Printed beside a body it repeats
+		// the message's opening line; printed for a body that was read and rendered to
+		// nothing, or for one that was not read, it passes a preview off as the message.
+		write(fmt.Sprintf("%s  %s\n", heading, date))
 		switch {
 		case !e.Body.IsEmpty():
-			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryBody.Render(markdown.Render(e.Body, sepWidth)))
-		case e.BodyState == string(threadload.StateOverLimit), e.BodyState == string(threadload.StateFailed):
-			fmt.Fprintf(&b, "\n%s\n", v.vc.styles.entryDate.Render("(body not read: "+e.BodyState+")"))
+			linked := markdown.RenderLinked(e.Body, sepWidth, -1)
+			bodyStartLine := lineCount + 1
+			bodyText := v.vc.styles.entryBody.Render(linked.Text)
+			bodyIndex := len(bodies)
+			bodies = append(bodies, mailLinkBody{entry: i, start: bodyStartLine, lines: strings.Split(bodyText, "\n")})
+			for i, occurrence := range linked.Links {
+				key := fmt.Sprintf("%d\x00%d\x00%s", e.ID, i, occurrence.Destination)
+				links = append(links, mailLink{
+					destination: occurrence.Destination,
+					startLine:   bodyStartLine + occurrence.StartLine,
+					endLine:     bodyStartLine + occurrence.EndLine,
+					body:        bodyIndex,
+					occurrence:  i,
+					key:         key,
+				})
+			}
+			write("\n" + bodyText + "\n")
+		case e.BodyState == string(threadload.StateHydrated):
+			write("\n" + v.vc.styles.entryDate.Render("(empty body)") + "\n")
+		case e.BodyState == string(threadload.StateBodyless) && e.Summary != "":
+			write("\n" + terminal.SanitizeLine(e.Summary) + "\n")
+		case e.BodyState == string(threadload.StateBodyless):
+			write("\n" + v.vc.styles.entryDate.Render("(no body)") + "\n")
+		default:
+			write("\n" + v.vc.styles.entryDate.Render("(body not read: "+e.BodyState+")") + "\n")
 		}
 		entryAttachments := attachmentsForMessage(v.attachments, e.ID)
 		if panel := renderAttachmentPanel(entryAttachments, selectedAttachmentForMessage(v.attachments, v.attachmentCursor, e.ID)); panel != "" {
-			fmt.Fprintf(&b, "\n%s\n", panel)
+			write("\n" + panel + "\n")
 		}
-		b.WriteString("\n")
-		lineCount += strings.Count(b.String()[entryStart:], "\n")
+		write("\n")
 	}
 
-	return b.String(), offsets
+	return b.String(), offsets, links, bodies
 }

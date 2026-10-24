@@ -99,6 +99,11 @@ type contentList struct {
 	height        int // visible rows (each posting takes 2 lines)
 	hideSeenState bool
 	selected      map[int64]struct{}
+	// selectionLost is a selection that went out from under the reader — a re-read took
+	// its threads out of the list or the cover came down over them — rather than one they
+	// let go of. Until they aim again, a key that acts on the selection must not fall
+	// back on the row under the cursor, which is not what they chose.
+	selectionLost bool
 
 	cover       coverPreset // art that hides Previously Seen, coverNone for none
 	coverPeeked bool        // the reader lifted the cover to get at what is under it
@@ -109,15 +114,19 @@ type contentList struct {
 // arrives covered rather than however the last one was left, and whatever the
 // cursor and the selection were on goes out from under the art with it.
 func (c *contentList) setCover(preset coverPreset) {
+	selected := c.hasSelection()
 	c.cover = preset
 	c.coverPeeked = false
 	c.settleCover()
+	c.noteSelectionLost(selected)
 }
 
 // toggleCoverPeek lifts the cover off Previously Seen, or puts it back.
 func (c *contentList) toggleCoverPeek() {
+	selected := c.hasSelection()
 	c.coverPeeked = !c.coverPeeked
 	c.settleCover()
+	c.noteSelectionLost(selected)
 }
 
 // settleCover keeps the cursor and the selection out from under the cover. A
@@ -139,6 +148,7 @@ func (c *contentList) removeAt(index int) {
 	if c.cursor > index {
 		c.cursor--
 	}
+	c.keepSelected()
 	c.settleCover()
 }
 
@@ -247,6 +257,8 @@ func postingIDs(postings []mail.Posting) map[int64]struct{} {
 // window stays where it was scrolled to, and a multi-selection keeps every row that is
 // still there. A posting that left the box takes the cursor or its selection with it.
 func (c *contentList) keepPlaceIn(postings []mail.Posting) {
+	selected := c.hasSelection()
+	defer c.noteSelectionLost(selected)
 	if !c.hideSeenState {
 		postings = partitionSections(postings)
 	}
@@ -255,8 +267,11 @@ func (c *contentList) keepPlaceIn(postings []mail.Posting) {
 		cursorID = posting.ID
 	}
 
+	// A posting that left takes the cursor's row with it, not its place: the cursor
+	// stays on the same row, on whatever came up into it, rather than jumping to the top.
+	row := max(c.cursor, 0)
 	c.postings = postings
-	c.cursor = 0
+	c.cursor = min(row, max(len(c.postings)-1, 0))
 	for i := range c.postings {
 		if c.postings[i].ID == cursorID {
 			c.cursor = i
@@ -332,11 +347,39 @@ func partitionSections(postings []mail.Posting) []mail.Posting {
 }
 
 // markSeen moves a posting into "Previously Seen", clearing the bubbled up
-// state the way Postings::SeenController does.
+// state the way Postings::SeenController does. A posting under the cursor goes
+// down on its own: the cursor stays where it was and lands on the thread that
+// followed it, so working down New for You is one key per thread rather than a
+// chase after the one just put away.
 func (c *contentList) markSeen(index int) {
+	var nextID int64
+	scrollOff := c.scrollOff
+	// Only a posting that leaves its section goes down on its own; e on one already in
+	// Previously Seen moves nothing, so it moves the cursor nowhere either.
+	if index == c.cursor && !c.hideSeenState && sectionOf(c.postings[index]) != sectionPreviouslySeen {
+		if index+1 < len(c.postings) {
+			nextID = c.postings[index+1].ID
+		} else if index > 0 {
+			nextID = c.postings[index-1].ID
+		}
+	}
 	c.postings[index].Seen = true
 	c.postings[index].BubbledUp = false
 	c.resort()
+	if nextID == 0 {
+		return
+	}
+	// resort followed the marked posting down into Previously Seen and scrolled the
+	// window after it; the window goes back where it was, so the rows the reader was
+	// looking at stay put and only the marked one leaves them.
+	c.scrollOff = scrollOff
+	for i := range c.postings {
+		if c.postings[i].ID == nextID {
+			c.cursor = i
+			break
+		}
+	}
+	c.settleCover()
 }
 
 // markUnseen moves a posting to the front of "New for You", including one the reader is
@@ -397,6 +440,7 @@ func (c *contentList) setSize(w, h int) {
 }
 
 func (c *contentList) moveUp() {
+	c.selectionLost = false
 	if c.cursor > 0 {
 		c.cursor--
 		c.ensureVisible()
@@ -404,10 +448,84 @@ func (c *contentList) moveUp() {
 }
 
 func (c *contentList) moveDown() {
+	c.selectionLost = false
 	if c.cursor < c.itemCount()-1 {
 		c.cursor++
 		c.ensureVisible()
 	}
+}
+
+// pageDown scrolls the list on by the window it shows, the way a pager does: what was
+// just past the bottom comes up to the top, and the cursor keeps its row on screen. On
+// the last window already there is nowhere to scroll, so the cursor goes to the end.
+func (c *contentList) pageDown() {
+	c.selectionLost = false
+	count := c.itemCount()
+	if count == 0 {
+		return
+	}
+	row := c.cursor - c.scrollOff
+	scrollOff := min(c.scrollOff+c.visibleItemsFrom(c.scrollOff), c.lastWindowStart())
+	if scrollOff <= c.scrollOff {
+		c.cursor = count - 1
+	} else {
+		c.scrollOff = scrollOff
+		c.cursor = min(scrollOff+row, count-1)
+	}
+	c.ensureVisible()
+}
+
+// pageUp scrolls the list back by a window, keeping the cursor's row on screen. At the
+// top already, the cursor goes to the first thread.
+func (c *contentList) pageUp() {
+	c.selectionLost = false
+	if c.itemCount() == 0 {
+		return
+	}
+	if c.scrollOff == 0 {
+		c.cursor = 0
+		return
+	}
+	row := c.cursor - c.scrollOff
+	// The window above is the one that ends where this one starts.
+	start := c.scrollOff
+	for start > 0 && start-1+c.visibleItemsFrom(start-1) >= c.scrollOff {
+		start--
+	}
+	c.scrollOff = start
+	c.cursor = min(start+row, c.itemCount()-1)
+	c.ensureVisible()
+}
+
+// lastWindowStart is the first posting of the window that ends the list, so a page
+// down never scrolls the last thread up past the bottom of the screen.
+func (c *contentList) lastWindowStart() int {
+	count := c.itemCount()
+	start := max(count-1, 0)
+	for start > 0 && start-1+c.visibleItemsFrom(start-1) >= count {
+		start--
+	}
+	return start
+}
+
+// pageBy moves a cursor and its window a page at a time through a list whose rows are
+// all one height, the way contentList.pageDown and pageUp do through postings: the
+// window moves by what it shows and the cursor keeps its row on screen, or goes to the
+// end when the window cannot move any further.
+func pageBy(cursor, scroll, visible, count, direction int) (int, int) {
+	if count == 0 {
+		return cursor, scroll
+	}
+	visible = max(visible, 1)
+	row := cursor - scroll
+	moved := min(max(scroll+direction*visible, 0), max(count-visible, 0))
+	if moved == scroll {
+		if direction > 0 {
+			return count - 1, scroll
+		}
+		return 0, scroll
+	}
+	return min(max(moved+row, 0), count-1), moved
 }
 
 // listHeight is the rows the postings get. A cover holds back its divider and
@@ -502,6 +620,7 @@ func (c *contentList) toggleSelected() bool {
 	if posting == nil {
 		return false
 	}
+	c.selectionLost = false
 	if c.selected == nil {
 		c.selected = make(map[int64]struct{})
 	}
@@ -525,8 +644,41 @@ func (c *contentList) selectedIDs() []int64 {
 	return ids
 }
 
+// selectedPostings is selectedIDs as rows, for the actions whose availability depends on
+// what kind of row is selected rather than only on how many of them there are.
+func (c *contentList) selectedPostings() []mail.Posting {
+	postings := make([]mail.Posting, 0, len(c.selected))
+	for _, posting := range c.postings[:c.itemCount()] {
+		if _, exists := c.selected[posting.ID]; exists {
+			postings = append(postings, posting)
+		}
+	}
+	return postings
+}
+
 func (c *contentList) clearSelected() {
 	c.selected = nil
+	c.selectionLost = false
+}
+
+// deselect lets go of the threads an action on the selection carried, and only those: a
+// row the reader selected while the action was on its way is a new selection, not part
+// of the one HEY just answered for.
+func (c *contentList) deselect(ids []int64) {
+	for _, id := range ids {
+		delete(c.selected, id)
+	}
+}
+
+func (c *contentList) hasSelection() bool {
+	return len(c.selectedIDs()) > 0
+}
+
+// noteSelectionLost records that the list emptied a selection the reader had, when it did.
+func (c *contentList) noteSelectionLost(hadSelection bool) {
+	if hadSelection && !c.hasSelection() {
+		c.selectionLost = true
+	}
 }
 
 func (c *contentList) view() string {
@@ -620,6 +772,9 @@ func (c *contentList) view() string {
 		}
 		if p.VisibleEntryCount > 1 {
 			subject += fmt.Sprintf(" (%d)", p.VisibleEntryCount)
+		}
+		if p.IsBundle {
+			subject = "▪ " + subject
 		}
 
 		date := formatDisplayDate(p.CreatedAt)

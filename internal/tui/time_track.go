@@ -45,9 +45,16 @@ func ongoingTrackFrom(recording *generated.Recording) *OngoingTrack {
 	}
 	return &OngoingTrack{
 		ID:        recording.Id,
-		Category:  terminal.SanitizeLine(recording.Category),
+		Category:  terminal.SanitizeLine(timeTrackCategory(recording.Category)),
 		StartedAt: recording.StartsAt.Local(),
 	}
+}
+
+func timeTrackCategory(category *string) string {
+	if category == nil {
+		return ""
+	}
+	return *category
 }
 
 // formatElapsed is a stretch of time as a stopwatch reads it, seconds and all — running or
@@ -201,7 +208,7 @@ func (t trackedTime) Duration() time.Duration {
 func trackedTimeFrom(recording generated.Recording) trackedTime {
 	return trackedTime{
 		ID:       recording.Id,
-		Category: recording.Category,
+		Category: timeTrackCategory(recording.Category),
 		Notes:    recording.Notes,
 		StartsAt: recording.StartsAt.Local(),
 		EndsAt:   recording.EndsAt.Local(),

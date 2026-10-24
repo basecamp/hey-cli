@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -25,7 +26,7 @@ func newAuthCommand() *authCommand {
 		Short: "Sign in, sign out, and check login status",
 		Long:  "Sign in to HEY, sign out, or check your login status.",
 		Annotations: map[string]string{
-			"agent_notes": "Use status to check auth before other commands. Returns token expiry info in JSON. Use login --token for non-interactive auth.",
+			"agent_notes": "Data commands reuse stored credentials and refresh expiring OAuth tokens themselves, so run the data command without an auth preflight. Use hey auth status --json only when an explicit check is needed. Never run hey auth login unattended: the browser flow waits for a person, and --token or --cookie is for a human handing over a credential, not something an agent runs on its own. A data command that exits 3 with code auth has no usable credentials; report it rather than signing in.",
 		},
 	}
 
@@ -110,7 +111,7 @@ Use --token or --cookie for non-interactive login.`,
 	}
 
 	cmd.Flags().StringVar(&token, "token", "", "Pre-generated Bearer token")
-	cmd.Flags().StringVar(&cookie, "cookie", "", "Session cookie value from browser (session_token)")
+	cmd.Flags().StringVar(&cookie, "cookie", "", "Session cookie value from browser (__Host-session_token, or session_token)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser, print URL instead")
 
 	return cmd
@@ -146,6 +147,9 @@ func newAuthStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show authentication status",
+		Annotations: map[string]string{
+			"agent_notes": "Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing, so authenticated true does not prove HEY still accepts them. JSON answers authenticated, base_url, mail_account, account_source and install_id; method env_var when HEY_TOKEN is set; otherwise storage (keyring or file), auth_type, and expires_at, expired and refresh_available for a token. An expired token with refresh_available is refreshed by the next data command.",
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			status := map[string]any{
 				"base_url":       cfg.BaseURL,
@@ -183,7 +187,10 @@ func newAuthStatusCommand() *cobra.Command {
 
 			store := authMgr.GetStore()
 			creds, err := store.Load(authMgr.CredentialKey())
-			if err != nil || (creds.AccessToken == "" && creds.SessionCookie == "") {
+			if err != nil && !errors.Is(err, auth.ErrCredentialsNotFound) {
+				return auth.CredentialStorageError("could not read authentication status", err)
+			}
+			if errors.Is(err, auth.ErrCredentialsNotFound) || (creds.AccessToken == "" && creds.SessionCookie == "") {
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
@@ -277,7 +284,7 @@ func newAuthRefreshCommand() *cobra.Command {
 		Short: "Force token refresh",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := authMgr.Refresh(cmd.Context()); err != nil {
-				return apierr.ErrAuth(fmt.Sprintf("refresh failed: %v", err))
+				return authFailure("refresh failed", err)
 			}
 			return writeMutation(cmd, "Token refreshed", nil)
 		},
@@ -310,7 +317,7 @@ Cookie header, so it is not a bearer token and this command refuses to print it.
 
 			token, err := authMgr.AccessToken(cmd.Context())
 			if err != nil {
-				return apierr.ErrAuth(fmt.Sprintf("could not get token: %v", err))
+				return authFailure("could not get token", err)
 			}
 			fmt.Fprint(cmd.OutOrStdout(), token)
 			return nil
@@ -320,6 +327,22 @@ Cookie header, so it is not a bearer token and this command refuses to print it.
 	cmd.Flags().BoolVar(&stored, "stored", false, "Only print stored OAuth token (ignore HEY_TOKEN env var)")
 
 	return cmd
+}
+
+// authFailure reports a manager failure with the command's context in front of it.
+// The manager classifies its own refusals — a refused grant is auth, a throttled
+// token endpoint is rate_limit with how long to wait — and wrapping every one as
+// ErrAuth turned a 429 or a storage failure into exit 3 and "Run: hey auth login".
+// A classified error keeps its code, hint and status; an unclassified one keeps
+// its cause. Both gain only the command's context.
+func authFailure(context string, err error) error {
+	var classified *apierr.Error
+	if !errors.As(err, &classified) {
+		return fmt.Errorf("%s: %w", context, err)
+	}
+	prefixed := *classified
+	prefixed.Message = fmt.Sprintf("%s: %s", context, classified.Message)
+	return &prefixed
 }
 
 // refuseSessionCookieAsToken stops `hey auth token` from printing a session cookie.

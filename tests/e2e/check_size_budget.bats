@@ -117,3 +117,65 @@ write_budget() {
   [[ "$output" == *"| windows_amd64 |"* ]]
   [ "$(printf '%s\n' "$output" | grep -c '^| ')" -eq 3 ]
 }
+
+dist_binary() {
+  # dist_binary <goreleaser build dir> <file name>: the big fixture at that path.
+  mkdir -p "$WORK/dist/$1"
+  cp "$WORK/big" "$WORK/dist/$1/$2"
+  echo "$WORK/dist/$1/$2"
+}
+
+@test "charges an unsigned macOS binary the code signature it will ship with" {
+  # 2 MiB is 512 pages: 512 x 32 bytes of hashes plus 32 KiB is 48 KiB, which
+  # lifts the fixture from 2.0 to 2.05 MiB, over a 2.04 MiB budget.
+  bin=$(dist_binary hey_darwin_amd64_v1 hey)
+  write_budget 2.04 3 true
+
+  run "$CHECK" "$bin"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"| darwin_amd64 | 2.0 |"* ]]
+
+  SIZE_BUDGET_UNSIGNED=darwin run "$CHECK" "$bin"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"| darwin_amd64 | ~2.0 |"* ]]
+  [[ "$output" == *"OVER"* ]]
+  [[ "$output" == *"~ includes the estimated signature"* ]]
+}
+
+@test "charges an unsigned Windows binary its Authenticode signature" {
+  bin=$(dist_binary hey_windows_amd64_v1 hey.exe)
+  write_budget 2.01 3 true
+
+  run "$CHECK" "$bin"
+  [ "$status" -eq 0 ]
+
+  SIZE_BUDGET_UNSIGNED="darwin, windows" run "$CHECK" "$bin"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"| windows_amd64 | ~2.0 |"* ]]
+}
+
+@test "the signature is charged to the gzipped size as well" {
+  bin=$(dist_binary hey_darwin_arm64_v8.0 hey)
+  write_budget 3 2.04 true
+
+  SIZE_BUDGET_UNSIGNED=darwin run "$CHECK" "$bin"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"OVER"* ]]
+}
+
+@test "only the named operating systems are charged a signature" {
+  linux=$(dist_binary hey_linux_amd64_v1 hey)
+  windows=$(dist_binary hey_windows_amd64_v1 hey.exe)
+  write_budget 2.01 3 true
+
+  SIZE_BUDGET_UNSIGNED=darwin run "$CHECK" "$linux" "$windows"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"~"* ]]
+}
+
+@test "refuses an operating system nothing signs" {
+  write_budget 3 3 true
+  SIZE_BUDGET_UNSIGNED=linux run "$CHECK" "$WORK/big"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"only darwin and windows are signed"* ]]
+}

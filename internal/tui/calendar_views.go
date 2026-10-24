@@ -135,13 +135,11 @@ func eventsByDate(events []Recording) map[string][]Recording {
 			continue
 		}
 
-		// Multi-day: add to every day from start through end (inclusive of
-		// end date only if it doesn't start at midnight, i.e. the event
-		// actually occupies part of that day).
 		d := time.Date(st.Year(), st.Month(), st.Day(), 0, 0, 0, 0, st.Location())
 		endDay := time.Date(et.Year(), et.Month(), et.Day(), 0, 0, 0, 0, et.Location())
-		// If the event ends exactly at midnight, the last occupied day is the day before
-		if et.Equal(endDay) {
+		// HEY's all-day end dates are inclusive. A timed event ending at midnight
+		// occupies none of the following day.
+		if !e.AllDay && et.Equal(endDay) {
 			endDay = endDay.AddDate(0, 0, -1)
 		}
 		for !d.After(endDay) {

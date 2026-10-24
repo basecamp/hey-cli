@@ -13,9 +13,40 @@ import (
 )
 
 const (
-	serviceName         = "hey"
-	keyringAvailability = "hey::availability"
+	serviceName               = "hey"
+	keyringAvailability       = "hey::availability"
+	storagePreferenceFilename = "credential-storage"
 )
+
+// ErrCredentialsNotFound means the store has no credential for an origin. It
+// does not cover a credential that could not be read from otherwise available
+// storage.
+var ErrCredentialsNotFound = errors.New("credentials not found")
+
+// ErrKeyringRefused means the system keyring would not hand a credential to this
+// process. Signing in again cannot fix that: the refusal is about where the process
+// runs, not about the login.
+var ErrKeyringRefused = errors.New("system keyring refused access")
+
+// keychainInteractionNotAllowed is the exit status macOS's security tool reports for
+// errSecInteractionNotAllowed (-25308, whose low byte is 36). The Keychain answers it to
+// a process outside the logged-in desktop session, such as one started over SSH or by a
+// background server launched from there.
+const keychainInteractionNotAllowed = 36
+
+// keyringRefusalError keeps the keyring's own message and adds ErrKeyringRefused to its chain.
+type keyringRefusalError struct{ err error }
+
+func (r keyringRefusalError) Error() string   { return r.err.Error() }
+func (r keyringRefusalError) Unwrap() []error { return []error{r.err, ErrKeyringRefused} }
+
+func classifyKeyringError(err error) error {
+	var exit interface{ ExitCode() int }
+	if errors.As(err, &exit) && exit.ExitCode() == keychainInteractionNotAllowed {
+		return keyringRefusalError{err}
+	}
+	return err
+}
 
 type credentialKeyring struct {
 	set    func(service, user, password string) error
@@ -31,6 +62,11 @@ type Credentials struct {
 	OAuthType     string `json:"oauth_type"`
 	TokenEndpoint string `json:"token_endpoint"`
 	SessionCookie string `json:"session_cookie,omitempty"`
+	// InstallID is the install these tokens were issued to. HEY binds a refresh token's
+	// lineage to it and revokes the session when another install presents the token, so it
+	// travels with the tokens: every config directory that shares this keychain entry
+	// refreshes as the same install.
+	InstallID string `json:"install_id,omitempty"`
 }
 
 // Store handles credential storage, preferring system keychain.
@@ -65,11 +101,34 @@ func (s *Store) ensureInit() {
 		_, err := s.keyring.get(serviceName, keyringAvailability)
 		if err == nil || errors.Is(err, keyring.ErrNotFound) {
 			s.useKeyring = true
+			s.rememberKeyringChoice()
+			return
+		}
+		if s.keyringWasChosen() {
+			// Keep using the selected backend, but do not cache this probe failure:
+			// each real operation must be able to recover after the keyring unlocks.
+			s.useKeyring = true
 			return
 		}
 		fmt.Fprintf(os.Stderr, "warning: system keyring unavailable, credentials stored in plaintext at %s\n",
 			filepath.Join(s.fallbackDir, "credentials.json"))
 	})
+}
+
+func (s *Store) credentialStoragePath() string {
+	return filepath.Join(s.fallbackDir, storagePreferenceFilename)
+}
+
+func (s *Store) rememberKeyringChoice() {
+	if err := os.MkdirAll(s.fallbackDir, 0700); err != nil {
+		return
+	}
+	_ = os.WriteFile(s.credentialStoragePath(), []byte("keyring\n"), 0600)
+}
+
+func (s *Store) keyringWasChosen() bool {
+	choice, err := os.ReadFile(s.credentialStoragePath())
+	return err == nil && string(choice) == "keyring\n"
 }
 
 func key(origin string) string {
@@ -100,15 +159,11 @@ func (s *Store) Delete(origin string) error {
 	}
 	defer unlock()
 
-	s.ensureInit()
-	if s.useKeyring {
-		return s.keyring.delete(serviceName, key(origin))
-	}
-	return s.deleteFile(origin)
+	return s.delete(origin)
 }
 
-// load and save are the unlocked pair, for a caller already holding the lock over a
-// whole read-modify-write. Everything else goes through Load and Save.
+// load, save and delete are the unlocked set, for a caller already holding the lock over
+// a whole read-modify-write. Everything else goes through Load, Save and Delete.
 func (s *Store) load(origin string) (*Credentials, error) {
 	s.ensureInit()
 	if s.useKeyring {
@@ -125,10 +180,21 @@ func (s *Store) save(origin string, creds *Credentials) error {
 	return s.saveToFile(origin, creds)
 }
 
+func (s *Store) delete(origin string) error {
+	s.ensureInit()
+	if s.useKeyring {
+		return s.keyring.delete(serviceName, key(origin))
+	}
+	return s.deleteFile(origin)
+}
+
 func (s *Store) loadFromKeyring(origin string) (*Credentials, error) {
 	data, err := s.keyring.get(serviceName, key(origin))
+	if errors.Is(err, keyring.ErrNotFound) {
+		return nil, fmt.Errorf("%w for %s", ErrCredentialsNotFound, origin)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("credentials not found: %w", err)
+		return nil, fmt.Errorf("read credentials from system keyring: %w", classifyKeyringError(err))
 	}
 
 	var creds Credentials
@@ -217,7 +283,7 @@ func (s *Store) loadFromFile(origin string) (*Credentials, error) {
 
 	creds, ok := all[origin]
 	if !ok {
-		return nil, fmt.Errorf("credentials not found for %s", origin)
+		return nil, fmt.Errorf("%w for %s", ErrCredentialsNotFound, origin)
 	}
 	return creds, nil
 }

@@ -20,10 +20,14 @@ type Entry struct {
 	ID                    int64
 	CreatedAt             time.Time
 	Creator               Contact
+	Sender                Contact
 	AlternativeSenderName string
-	Summary               string
-	Body                  htmlutil.Markdown
-	BodyHTML              string
+	// Kind is HEY's Entry#kind: a message, or a note (comment) or share notice
+	// (access_notice) that was never emailed. See InternalEntryLabel.
+	Kind     string
+	Summary  string
+	Body     htmlutil.Markdown
+	BodyHTML string
 	// BodyState is what became of the body when the entry came through threadload:
 	// hydrated, bodyless, over_limit or failed. Empty for an entry read another way.
 	BodyState string
@@ -64,7 +68,9 @@ func NewEntry(entry generated.Entry, message generated.Message) Entry {
 		ID:                    entry.Id,
 		CreatedAt:             createdAt,
 		Creator:               contactOf(creator),
+		Sender:                contactOf(message.Sender),
 		AlternativeSenderName: terminal.SanitizeLine(entry.AlternativeSenderName),
+		Kind:                  entry.Kind,
 		Summary:               terminal.SanitizeLine(summary),
 		Body:                  htmlutil.ToMarkdown(message.Content),
 		BodyHTML:              message.Content,

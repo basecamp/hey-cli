@@ -1,6 +1,7 @@
 package apierr
 
 import (
+	"errors"
 	"fmt"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -13,6 +14,16 @@ import (
 func FromSDK(err error) error {
 	if err == nil {
 		return nil
+	}
+
+	// Not every error that comes back from an SDK call was made by the SDK. The
+	// auth strategy is ours, and the SDK returns what it hands back untouched, so
+	// a credential failure arrives here already classified. hey.AsError only
+	// recognizes the SDK's own type and would flatten it to "api" — losing the
+	// auth exit code and the hint that says how to fix it.
+	var cliErr *Error
+	if errors.As(err, &cliErr) {
+		return cliErr
 	}
 
 	sdkErr := hey.AsError(err)
