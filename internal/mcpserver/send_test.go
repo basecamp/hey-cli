@@ -1221,11 +1221,13 @@ func TestTheWholeSubjectIsShown(t *testing.T) {
 
 func TestEveryInvisibleCharacterIsEscaped(t *testing.T) {
 	for name, r := range map[string]rune{
-		"tag character":      0xE0041,
-		"variation selector": 0xFE0F,
-		"private use":        0xE000,
-		"word joiner":        0x2060,
-		"invisible times":    0x2062,
+		"tag character":             0xE0041,
+		"variation selector":        0xFE0F,
+		"private use":               0xE000,
+		"word joiner":               0x2060,
+		"invisible times":           0x2062,
+		"combining grapheme joiner": 0x034F,
+		"hangul filler":             0x3164,
 	} {
 		if got := escapeInvisible("a"+string(r)+"b", true); !strings.Contains(got, `\u{`) {
 			t.Errorf("%s (U+%04X) shown raw: %q", name, r, got)
