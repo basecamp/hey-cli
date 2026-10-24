@@ -458,3 +458,49 @@ func TestMCPCommandSendsAConfirmedDraftOnce(t *testing.T) {
 		t.Errorf("HEY saw %d deliveries, want 1", got)
 	}
 }
+
+// A delivery answered 401 isn't resent: the SDK would refresh and resend, and a send
+// is one request.
+func TestMCPCommandNeverResendsADeliveryAfterA401(t *testing.T) {
+	var puts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/5/edit.json":
+			_, _ = w.Write([]byte(`{"id":5,"subject":"Re: Q3 plan","content":"<div>Hi Ann</div>","sender":{"id":77,"email_address":"jeremy@hey.example"},"addressed":{"directly":[{"id":1,"email_address":"ann@example.com"}]}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
+			_, _ = w.Write([]byte(`{"id":1,"senders":[{"id":77,"email_address":"jeremy@hey.example"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/advanced_search.json":
+			_, _ = w.Write([]byte(`{"matches":[]}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/messages/5.json":
+			puts.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/oauth/tokens":
+			_, _ = w.Write([]byte(`{"access_token":"fresh","refresh_token":"fresh-refresh","expires_in":3600,"scope":"read write send"}`))
+		default:
+			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	session := runMCPCommandWith(t, upstream, auth.MCPScope, &mcp.ClientOptions{
+		ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, nil
+		},
+	})
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_send",
+		Arguments: map[string]any{"action": "send_draft", "params": map[string]any{"draft_id": 5}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Errorf("a 401 delivery reported success: %v", result.Content)
+	}
+	if got := puts.Load(); got != 1 {
+		t.Errorf("HEY saw %d delivery requests, want 1", got)
+	}
+}
