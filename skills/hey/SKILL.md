@@ -178,7 +178,7 @@ hey box list --quiet --jq '.[].name'
 Every email thread has two IDs: `id`, its **box item ID** (one posting in one box), and `topic_id`, its **thread ID**. Each posting in a thread listing has `id`, `topic_id`, `kind` (`bundle` for a bundle row), `name` (subject), `created_at` and `app_url`; a thread row also has `contacts`, `summary` and `visible_entry_count`.
 
 - **Box item ID** (`id`): `hey seen`, `unseen`, `move`, `label add|remove|create`, `trash`, `spam`, `ignore`, `stop-ignoring`, `bubble up|pop`, `set-aside group`, `bulk-reply` and `bundle view`.
-- **Thread ID** (`topic_id`): `hey thread read|update`, `share`, `unshare`, `attachment list`, `reply`, `forward`, `compose --thread-id`, `collection add|remove` and `workflow add|move|remove`.
+- **Thread ID** (`topic_id`): `hey thread read|update|comment`, `share`, `unshare`, `attachment list`, `reply`, `forward`, `compose --thread-id`, `collection add|remove` and `workflow add|move|remove`.
 - **Entry ID**: an entry's `id` from `hey thread read`; `hey clip create` takes it, and the passage must appear in that message's text.
 - **Contact ID** from `hey contact list` or contact data, **clearance ID** from `hey screener list` (which also gives the `topic_id` of the thread to read before deciding), **box ID** from `hey box list`, **label ID** from `hey label list`. Never substitute one kind for another, or an email address for a contact ID.
 
@@ -200,11 +200,12 @@ for a mark, or read the destination box for a move. An empty `match` with `next_
 - `delayed: true` means Undo Send is still holding it, and HEY leaves it out of its thread until it goes out: `hey thread read` shows the thread without it, or answers `not_found` for a thread it started. Wait and read again rather than treating the send as lost.
 - A send HEY refused (usually the account's sending limit) fails with `not_delivered` (exit 7). HEY kept it as a draft, named by `draft_id` in the error; `hey draft send <draft_id>` sends it later. Do not resend the message; that makes a second draft.
 - To let a person review before anything goes out, add `--draft` to `compose` or `reply`; the answer carries the draft ID for `hey draft show|edit|send|delete`. The person reviews and sends it from any HEY app, or you send it later with `hey draft send`.
+- `hey thread comment <topic_id> -m "..."` adds a note to a thread, which is never emailed but is not private: everyone with access to the thread sees it, HEY for Domains teammates included. The answer lists them in `visible_to`; `--dry-run` answers the same without adding anything. To mail the people on a thread, use `hey reply`.
 - `hey bulk-reply`: run `preview` before `send`. A delivery sent by mistake can be recalled with `hey bulk-reply undo <delivery_id>` while the window is open.
 
 ## Writing content
 
-Message bodies, drafts, journal entries, snippets and contact notes are Markdown by default (`-m`, `--content`, `--note`, positional content, stdin and `$EDITOR` alike) and are converted to rich text on the way out; clip passages, event notes and time track notes are plain text. Each Markdown flag has an HTML twin (such as `--message-html`, `--note-html`, `--content-html`) for raw HTML, and each pair is mutually exclusive. A fenced code block's language survives for the languages HEY highlights (Ruby, Python, JavaScript, TypeScript, Go, Rust, Java, C#, C++, PHP, Swift, HTML and CSS); any other is dropped.
+Message bodies, drafts, thread notes, journal entries, snippets and contact notes are Markdown by default (`-m`, `--content`, `--note`, positional content, stdin and `$EDITOR` alike) and are converted to rich text on the way out; clip passages, event notes and time track notes are plain text. Each Markdown flag has an HTML twin (such as `--message-html`, `--note-html`, `--content-html`) for raw HTML, and each pair is mutually exclusive. A fenced code block's language survives for the languages HEY highlights (Ruby, Python, JavaScript, TypeScript, Go, Rust, Java, C#, C++, PHP, Swift, HTML and CSS); any other is dropped.
 
 Everything a calendar holds is a recording, and each kind has its own command: `hey event`, `hey todo`, `hey journal`, `hey habit`, `hey timetrack`. Without a date, those commands read the account's time zone to find today; name the date to skip the account read.
 

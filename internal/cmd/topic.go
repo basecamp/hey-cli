@@ -79,7 +79,7 @@ func newThreadCommand() *cobra.Command {
 		Use:   "thread",
 		Short: "Read, rename and annotate email threads",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: read, update, comment. Thread IDs come from hey box view. Use the same ID with hey reply or hey forward. hey thread comment posts a private internal note, not a mailed reply.",
+			"agent_notes": "Subcommands: read, update, comment. Thread IDs come from hey box view. Use the same ID with hey reply or hey forward. hey thread comment adds a note everyone with access to the thread sees; it is never emailed.",
 		},
 	}
 	thread.AddCommand(newThreadsCommand().cmd)
