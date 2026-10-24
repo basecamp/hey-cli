@@ -129,13 +129,6 @@ func clearHTTPCache(errOut io.Writer) {
 	}
 }
 
-// newSDKClient builds another client sharing the CLI's configuration — auth,
-// user agent, hooks, logging — plus any extra options. Valid after initSDK.
-func newSDKClient(extra ...hey.ClientOption) *hey.Client {
-	opts := append(append([]hey.ClientOption{}, sdkClientOpts...), extra...)
-	return hey.NewClient(sdkClientCfg, nil, opts...)
-}
-
 // newUncachedSDKClient builds a sibling of sdk — same configuration, same account —
 // without the response cache, for a read a 304 must not answer. The cache revalidates
 // on HEY's ETag, and an ETag can cover less than the body: /boxes.json's is the box

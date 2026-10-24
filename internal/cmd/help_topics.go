@@ -55,7 +55,8 @@ JSON failures also carry a machine-readable error code and an actionable hint wh
 			Long: `Configure hey for the current process with environment variables.
 
 CONNECTION & AUTHENTICATION
-  HEY_TOKEN          Use a bearer token instead of stored credentials.
+  HEY_TOKEN          Use a bearer token instead of stored credentials (never for hey mcp).
+  HEY_MCP_CLIENT_ID  The HEY MCP (local) client id hey auth login --mcp signs in as.
   HEY_BASE_URL       Override the HEY server URL.
   HEY_ACCOUNT_ID     Select a linked mail account ID or all.
   HEY_NO_KEYRING     Store credentials in the config directory instead of a keyring.

@@ -29,8 +29,10 @@ import (
 // schedule when an update omits it, so editing a scheduled draft unschedules
 // it rather than letting it go out later.
 //
-// MCP has no way to deliver mail yet: there is no send_draft action. A person
-// sends the draft from HEY or with `hey draft send <id>`.
+// These actions never deliver. Delivery is send_draft (send.go), in its own hey_send
+// tool, which asks the person to confirm each email, and is served only when hey mcp's
+// sign-in can send. A person can also send the draft from HEY or with
+// `hey draft send <id>`.
 // TestEveryServedOpenWorldOperationIsDraftFirst holds this list total: mapping
 // another operation that can reach people outside the mailbox fails until it
 // has a rule here.
@@ -45,8 +47,8 @@ var draftEntryKeys = map[string]bool{"addressed": true, "status": true}
 
 const drafted = "drafted"
 
-// howToSend is how a person delivers a draft this server saved.
-const howToSend = "a person sends it from HEY or with `hey draft send <id>`"
+// howToSend is how a draft this server saved gets delivered.
+const howToSend = "call hey_send's send_draft with its draft_id, which asks the person to confirm the email (where this server serves hey_send), or a person sends it from HEY or with `hey draft send <id>`"
 
 // draftOnly returns params with the entry forced to a draft, or an error
 // naming what would have delivered. params is not modified.
@@ -59,12 +61,12 @@ func draftOnly(action string, params map[string]any) (map[string]any, error) {
 		}
 		for _, key := range slices.Sorted(maps.Keys(given)) {
 			if !draftEntryKeys[key] {
-				return nil, fmt.Errorf("%s saves a draft and doesn't take entry.%s: hey mcp never sends or schedules mail, and triage has its own actions (allowed: entry.%s). Nothing was sent to HEY. To deliver, save the draft, then %s",
+				return nil, fmt.Errorf("%s saves a draft and doesn't take entry.%s: it never sends or schedules mail, and triage has its own actions (allowed: entry.%s). Nothing was sent to HEY. To deliver, save the draft, then %s",
 					action, key, strings.Join(slices.Sorted(maps.Keys(draftEntryKeys)), ", entry."), howToSend)
 			}
 		}
 		if status, ok := given["status"]; ok && status != drafted {
-			return nil, fmt.Errorf("%s saves a draft: entry.status can only be %q, because hey mcp never sends mail. Nothing was sent to HEY. To deliver, save the draft, then %s",
+			return nil, fmt.Errorf("%s saves a draft: entry.status can only be %q, because it never sends mail. Nothing was sent to HEY. To deliver, save the draft, then %s",
 				action, drafted, howToSend)
 		}
 		maps.Copy(entry, given)
@@ -137,9 +139,9 @@ func draftResult(resp *hey.Response) map[string]any {
 	result := map[string]any{"status": resp.StatusCode, "location": location, "drafted": true}
 	if id := draftID(location); id != "" {
 		result["draft_id"] = id
-		result["note"] = "Saved as a draft, not sent. hey mcp doesn't deliver mail: a person reviews and sends it from HEY, or with `hey draft send " + id + "`."
+		result["note"] = "Saved as a draft, not sent. To deliver it, call hey_send's send_draft with draft_id " + id + ", which asks the person to confirm it (where this server serves hey_send), or a person sends it from HEY or with `hey draft send " + id + "`."
 	} else {
-		result["note"] = "Saved as a draft, not sent. hey mcp doesn't deliver mail: " + howToSend + "."
+		result["note"] = "Saved as a draft, not sent. To deliver it, " + howToSend + "."
 	}
 	return result
 }

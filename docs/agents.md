@@ -62,15 +62,38 @@ Codex keeps in its log.
 ## MCP server
 
 `hey mcp` runs an MCP (Model Context Protocol) server on stdin/stdout, serving HEY
-boxes, search, threads, contacts, todos, calendars, and your identity as tools
-backed by your signed-in account — the same keychain-stored credentials every other command uses.
-Register it with any MCP client as a stdio server:
+boxes, search, threads, contacts, todos, calendars, and your identity as tools.
+Sign it in once, then register it with any MCP client as a stdio server:
 
 ```bash
+hey auth login --mcp                   # hey mcp's own sign-in (read, write and send)
 claude mcp add hey -- hey mcp          # Claude Code
 hey mcp --read-only                    # serve only read-only actions
 hey mcp --domains boxes,search         # narrow the served tool surface
 ```
+
+### Its own sign-in
+
+`hey mcp` doesn't use the CLI's credential. `hey auth login --mcp` signs it in as its own
+app, "HEY MCP (local)" in HEY's Connected Apps, asking to read, write and send but nothing
+more: a model driving `hey mcp` can't reach your settings, forwarding, trash or HEY World,
+which the CLI's own sign-in can. The credential is kept apart from the CLI's, in its own
+keychain item (or its own entry in `credentials.json` when there is no keychain), and it
+refreshes as that app. `HEY_TOKEN` never stands in for it. Without it, `hey mcp` exits and
+says to run `hey auth login --mcp`; it doesn't fall back to the CLI's credential, even
+read-only, because that one holds full access and `--read-only` is hey mcp's own rule,
+not HEY's.
+
+The sign-in uses a device code where HEY offers one (it prints a link and a code to check),
+and the browser otherwise. If you uncheck sending on HEY's page, `hey mcp` saves drafts
+but serves no way to send them; sign in again to allow it. Without write it serves only
+reads. `hey auth status` shows both sign-ins, and `hey auth logout --mcp` revokes hey mcp's
+at HEY and removes it, leaving the CLI signed in.
+
+The app's client id comes from `HEY_MCP_CLIENT_ID`, or from `mcp_client_ids` in
+`~/.config/hey-cli/config.json`, keyed by HEY origin
+(`{"mcp_client_ids": {"https://app.hey.com": "..."}}`). A repository's `.hey/config.json`
+can't set it.
 
 Each domain is one gateway tool (`hey_boxes`, `hey_search`, `hey_threads`,
 `hey_contacts`, `hey_todos`, `hey_calendar`, `hey_identity`) dispatching actions
@@ -85,10 +108,10 @@ the caller rather than risking a duplicate delivery, so retry a failed write
 yourself once you know it did not land. Logs go to stderr — stdout carries
 the MCP wire protocol.
 
-### Drafts, never sends
+### Drafts first, sends confirmed
 
-`hey mcp` never delivers mail. `create_message`, `create_reply` and `update_message`,
-the three actions that can send on HEY's API, always save a draft: the entry's status is
+`create_message`, `create_reply` and `update_message`, the three actions that can send
+on HEY's API, always save a draft: the entry's status is
 forced to `drafted`, and the entry takes only its recipients (`entry.addressed`). A
 call that asks to send (any other `entry.status`), schedule (`entry.scheduled_delivery`
 and its date and hour) or triage the thread in the same request (`mark_done`, `pop`,
@@ -100,8 +123,42 @@ mail may have been sent, so check HEY before trying again. A save that fails wit
 answer from HEY (a dropped connection, a timeout, a 5xx) may still have been saved, and
 its error says to check Drafts before retrying.
 
-There is no send action yet. A person reviews the draft and sends it from HEY, or with
-`hey draft send <draft_id>`. Earlier releases delivered mail when a call omitted
-`entry.status`. An MCP client that relied on that now gets a draft. `describe` for these
-actions serves the draft-only schema, and the `hey_threads` tool description says the same.
-`--read-only` still drops every write action, drafts included.
+Delivery is one action in a tool of its own: `hey_send`'s `send_draft`, with the draft's
+id. Each call asks you to confirm the email in your MCP client (an MCP elicitation),
+showing the sending address, To, Cc and Bcc (a dash when empty), the subject, attachments
+and the body's first 1,500 characters, with every control and invisible character
+escaped so a display name can't forge a line. Recipients you hadn't emailed before
+`hey mcp` was signed in are marked new. What you approve is what goes: the draft is
+fetched again after you answer, and if its recipients, sender, subject, body or
+attachments changed it isn't sent. Each draft is sent through `hey mcp` once; another
+attempt in the next 24 hours, even after a failure, is refused, and the send is never
+retried, so an unclear outcome says to check Sent.
+
+To someone you hadn't emailed before, or within ten minutes of a read that may have
+returned an unscreened sender's mail, the draft goes as the plain text the confirmation
+shows: its formatting isn't sent, and invisible characters and trailing spaces are
+dropped, so what goes is exactly what you read. To people you've emailed before, it
+goes as it is. `send_draft` refuses, pointing at the
+draft in HEY:
+
+- any draft, from a client that can't show a confirmation (it answers with the draft's
+  link, and saying yes in the chat doesn't send it);
+- a draft that is already scheduled, or has no recipients, or more than 20;
+- a draft with a reference a mail client loads by itself, such as a remote image;
+- a draft with an attachment, or more than 1,500 characters, when it goes to someone
+  new or within the ten minutes below (otherwise such a draft goes, and the
+  confirmation says how much it can't show);
+- a draft to someone new within ten minutes of a read that may have returned an
+  unscreened sender's mail (search, threads, messages, drafts, contacts, the Screener,
+  calendar recordings; box reads don't count);
+- past 50 sends, or 10 new addresses, in a day on one sign-in.
+
+That state (claims, the daily counts and the ten-minute marker) lives in
+`~/.local/state/hey-cli/mcp-send-state.json`, under a file lock and fsynced, so two
+`hey mcp` processes can't both send one draft. `send_draft` is served only when the
+sign-in was granted sending, and never under `--read-only`.
+
+Earlier releases delivered mail when a call omitted `entry.status`, and then saved
+drafts only. `describe` for the draft actions serves the draft-only schema, and the
+`hey_threads` tool description says the same. A person can still send any draft from HEY
+or with `hey draft send <draft_id>`.

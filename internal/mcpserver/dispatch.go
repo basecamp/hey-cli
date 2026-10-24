@@ -42,6 +42,9 @@ var _ API = (*hey.Client)(nil)
 // three. Failures are in-band isError results per MCP convention.
 type dispatcher struct {
 	api API
+	// markExposed records that a read may have returned an unscreened sender's words
+	// (exposure.go). Nil when nothing is served that exposure could tighten.
+	markExposed func(ctx context.Context, action string) error
 }
 
 func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.Operation, params map[string]any) (*mcp.CallToolResult, error) {
@@ -78,15 +81,35 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		}
 		return gateway.ErrorResult("%v", err), nil
 	}
+	// A write whose success is one exact status is checked first, so nothing below
+	// reports a redirect's 200 as applied.
+	if want, ok := acknowledgedBy[full.ID]; ok && resp.StatusCode != want {
+		return gateway.ErrorResult("%s was not acknowledged: HEY answered HTTP %d, not %d, so nothing was changed",
+			full.Action, resp.StatusCode, want), nil
+	}
+	// The exposure marker lands before the content leaves (D6). A read not in the
+	// table exposes: it can't be shown not to. So does a write that answers with a body
+	// (reveal_contact answers the contact): what HEY returns is content, whatever the
+	// verb. A draft save's answer is this server's own.
+	if d.markExposed != nil && !draft && exposingAnswer(full, resp) {
+		if err := d.markExposed(ctx, full.Action); err != nil {
+			if !full.ReadOnly {
+				// HEY already applied the write: say so, so it isn't retried, and
+				// withhold only the answer.
+				return gateway.JSONResult(map[string]any{
+					"applied": true,
+					"status":  resp.StatusCode,
+					"note":    fmt.Sprintf("HEY applied %s. Its answer is withheld because hey mcp couldn't record that it may include mail from an unscreened sender (%v). Don't retry it.", full.Action, err),
+				})
+			}
+			return gateway.ErrorResult("hey mcp can't return %s right now: it couldn't record that the answer may include mail from an unscreened sender (%v)", full.Action, err), nil
+		}
+	}
 	if draft {
 		if !savedAsDraft(resp) {
 			return gateway.ErrorResult("%s", unconfirmedDraft(full.Action, resp)), nil
 		}
 		return gateway.JSONResult(draftResult(resp))
-	}
-	if want, ok := acknowledgedBy[full.ID]; ok && resp.StatusCode != want {
-		return gateway.ErrorResult("%s was not acknowledged: HEY answered HTTP %d, not %d, so nothing was changed",
-			full.Action, resp.StatusCode, want), nil
 	}
 	if len(bytes.TrimSpace(resp.Data)) == 0 {
 		result := map[string]any{"status": resp.StatusCode}
@@ -109,6 +132,17 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		}
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(resp.Data)}}}, nil
+}
+
+// exposingAnswer reports whether an answer may carry an unscreened sender's words
+// (exposure.go): a read the table doesn't clear, or a write whose answer has a body.
+func exposingAnswer(op *catalog.Operation, resp *hey.Response) bool {
+	if op.ReadOnly {
+		exposes, classified := readExposes[op.ID]
+		return exposes || !classified
+	}
+	body := bytes.TrimSpace(resp.Data)
+	return len(body) > 0 && !bytes.Equal(body, []byte("null"))
 }
 
 // acknowledgedBy names the mutations whose success is one exact status, because a

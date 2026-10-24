@@ -121,6 +121,7 @@ func newRootCmd() *cobra.Command {
 			// that credential any more than it outlives a logout.
 			authMgr.OnCredentialCleared(func() { clearHTTPCache(cmd.ErrOrStderr()) })
 			initSDK(authMgr, cfg.BaseURL)
+			initMCPAuth(httpClient, configDir)
 
 			// The agent-local setup subcommands and skill commands never read
 			// credentials and never rewrite the global config, so they defer
@@ -275,6 +276,10 @@ func commandUsesAccountScope(cmd *cobra.Command) bool {
 	}
 	switch parts[1] {
 	case "account", "auth", "commands", "config", "doctor", "login", "logout", "setup", "shell-completion", "skill", "upgrade", "version":
+		return false
+	case "mcp":
+		// hey mcp scopes its own clients, on its own credential (mcp.go): the shared
+		// client the pre-run would scope carries the CLI's.
 		return false
 	default:
 		return true
