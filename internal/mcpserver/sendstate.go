@@ -345,9 +345,10 @@ type refusalError struct{ reason string }
 func (r *refusalError) Error() string { return r.reason }
 
 // claim takes a draft's send claim and charges the grant's caps, in one locked update,
-// or refuses. It re-reads exposure there: a draft with a new recipient, or with content
-// the confirmation couldn't show in full (unseen), is refused if an unscreened read
-// landed since the policy was checked (D2, D6). Nothing is written when it refuses.
+// or refuses. It re-reads exposure there: a draft with a new recipient, or one going as
+// it is rather than as the plain text the confirmation showed (unseen), is refused if
+// an unscreened read landed since the policy was checked (D2, D6). Nothing is written
+// when it refuses.
 func (s *SendState) claim(ctx context.Context, origin string, draftID int64, grantKey string, newAddresses []string, unseen bool, now time.Time) error {
 	return s.update(ctx, func(d *sendStateData) error {
 		d.prune(now)

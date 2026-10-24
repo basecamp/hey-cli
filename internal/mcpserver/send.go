@@ -216,6 +216,7 @@ func (s *sender) ask(ctx context.Context, draftID int64) (*mcp.CallToolResult, e
 		Kind: confirmKind, Method: confirmMethod,
 		Grant: s.cfg.Grant.Key, Origin: s.cfg.Origin, Draft: draftID,
 		Fingerprint: snap.fingerprint,
+		Plain:       outcome.plain,
 		Expires:     s.cfg.Now().Add(confirmTTL).Unix(),
 	})
 
@@ -246,11 +247,14 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 	if refusal != nil {
 		return refusal, nil
 	}
+	if outcome.plain != state.Plain {
+		return gateway.ErrorResult("not sent: since you approved it, this conversation read unscreened mail or the recipients' history changed, which changes how the draft would go. Call send_draft again to review it as it would go now"), nil
+	}
 	if !hmac.Equal([]byte(snap.fingerprint), []byte(state.Fingerprint)) {
 		return gateway.ErrorResult("not sent: the draft changed since you approved it (its recipients, sender, subject, body or attachments differ). Call send_draft again to review it as it is now"), nil
 	}
 
-	if err = s.cfg.State.claim(ctx, s.cfg.Origin, draftID, s.cfg.Grant.Key, outcome.newList, outcome.unseen, s.cfg.Now()); err != nil {
+	if err = s.cfg.State.claim(ctx, s.cfg.Origin, draftID, s.cfg.Grant.Key, outcome.newList, !outcome.plain, s.cfg.Now()); err != nil {
 		var refused *refusalError
 		if errors.As(err, &refused) {
 			return gateway.ErrorResult("%s", refused.reason), nil
@@ -260,7 +264,7 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 
 	// From here the draft is claimed for good: the claim is never released, even when
 	// HEY refuses, so there's no rollback to get wrong (D2.3).
-	sent, err := s.cfg.Drafts.SendDraft(ctx, draftID, snap.content())
+	sent, err := s.cfg.Drafts.SendDraft(ctx, draftID, snap.content(outcome.plain))
 	if err != nil {
 		if refusedByHEY(err) {
 			return gateway.ErrorResult("HEY refused the send: %v. The draft is still a draft, and hey mcp won't send it again for 24 hours; send it from HEY: %s", err, s.editURL(draftID)), nil
@@ -407,11 +411,16 @@ type draftSnapshot struct {
 // landing after the final fetch is overwritten by what was approved (D2). HEY replaces
 // the whole recipient set when addressed is present (haystack Entry::Addressed#address),
 // so a Bcc added concurrently is dropped rather than delivered. The body is the one the
-// fingerprint hashed, attachments rebuilt from their identity (sendbody.go).
-func (d *draftSnapshot) content() hey.DraftContent {
+// fingerprint hashed, attachments rebuilt from their identity, or, when plain, the
+// plain text the confirmation showed (sendbody.go).
+func (d *draftSnapshot) content(plain bool) hey.DraftContent {
+	body := d.body.delivered
+	if plain {
+		body = d.body.plainHTML
+	}
 	return hey.DraftContent{
 		Subject:        d.subject,
-		Content:        d.body.delivered,
+		Content:        body,
 		To:             emails(d.to),
 		CC:             emails(d.cc),
 		BCC:            emails(d.bcc),
@@ -489,8 +498,9 @@ func snapshotOf(edit *generated.MessageEditState) (*draftSnapshot, error) {
 
 // reviewOutcome is what the policy found, for the prompt.
 type reviewOutcome struct {
-	// unseen: the confirmation can't show everything the draft transmits.
-	unseen       bool
+	// plain: the draft goes as the plain text the confirmation shows (sendbody.go),
+	// because it's to someone new or the sign-in is exposed. Otherwise it goes as it is.
+	plain        bool
 	newList      []string
 	newAddresses map[string]bool
 	exposed      bool
@@ -556,9 +566,12 @@ func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *re
 
 	// Measured on the escaped text the prompt shows: escapes lengthen it, and what
 	// falls past the cut is unseen however short the raw text was.
-	unseen := !snap.body.lossless || utf8.RuneCountInString(inertBody(snap.body.text)) > bodyPromptCap
-	if unseen && (len(newAddresses) > 0 || exposed) {
-		return refuse("not sent: the draft can't be fully reviewed here (it has an attachment, more than %d characters, or formatting that can hide text), and it goes to someone you haven't emailed before or this conversation read unscreened mail. Send it from HEY: %s",
+	// To someone new, or while exposed, nothing may go that the person didn't read
+	// (D2): the draft goes as the plain text the confirmation shows, so it has to fit
+	// there whole, and an attachment, which a name and a size don't show, can't go.
+	plain := len(newAddresses) > 0 || exposed
+	if plain && (len(snap.body.attachments) > 0 || utf8.RuneCountInString(snap.body.plainText) > bodyPromptCap) {
+		return refuse("not sent: the draft can't be fully reviewed here (it has an attachment, or more than %d characters), and it goes to someone you haven't emailed before or this conversation read unscreened mail. Send it from HEY: %s",
 			bodyPromptCap, s.editURL(draftID))
 	}
 
@@ -579,7 +592,7 @@ func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *re
 		return refuse("not sent: hey mcp sends to at most %d new addresses a day on one sign-in, and this draft would go past it. Send it from HEY: %s", maxNewAddressesPerDay, s.editURL(draftID))
 	}
 
-	outcome := &reviewOutcome{unseen: unseen, newList: newAddresses, newAddresses: map[string]bool{}, exposed: exposed, exposedBy: by}
+	outcome := &reviewOutcome{plain: plain, newList: newAddresses, newAddresses: map[string]bool{}, exposed: exposed, exposedBy: by}
 	for _, address := range newAddresses {
 		outcome.newAddresses[address] = true
 	}
@@ -674,6 +687,7 @@ type confirmState struct {
 	Origin      string `json:"o"`
 	Draft       int64  `json:"d"`
 	Fingerprint string `json:"f"`
+	Plain       bool   `json:"p,omitempty"`
 	Expires     int64  `json:"e"`
 }
 

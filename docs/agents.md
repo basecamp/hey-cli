@@ -111,15 +111,22 @@ escaped so a display name can't forge a line. Recipients you hadn't emailed befo
 fetched again after you answer, and if its recipients, sender, subject, body or
 attachments changed it isn't sent. Each draft is sent through `hey mcp` once; another
 attempt in the next 24 hours, even after a failure, is refused, and the send is never
-retried, so an unclear outcome says to check Sent. `send_draft` refuses, pointing at the
+retried, so an unclear outcome says to check Sent.
+
+To someone you hadn't emailed before, or within ten minutes of a read that may have
+returned an unscreened sender's mail, the draft goes as the plain text the confirmation
+shows: its formatting isn't sent, and invisible characters and trailing spaces are
+dropped, so what goes is exactly what you read. To people you've emailed before, it
+goes as it is. `send_draft` refuses, pointing at the
 draft in HEY:
 
 - any draft, from a client that can't show a confirmation (it answers with the draft's
   link, and saying yes in the chat doesn't send it);
 - a draft that is already scheduled, or has no recipients, or more than 20;
 - a draft with a reference a mail client loads by itself, such as a remote image;
-- a draft it can't show in full (an attachment, more than 1,500 characters, or
-  formatting that can hide text), when it goes to someone new;
+- a draft with an attachment, or more than 1,500 characters, when it goes to someone
+  new or within the ten minutes below (otherwise such a draft goes, and the
+  confirmation says how much it can't show);
 - a draft to someone new within ten minutes of a read that may have returned an
   unscreened sender's mail (search, threads, messages, drafts, contacts, the Screener,
   calendar recordings; box reads don't count);

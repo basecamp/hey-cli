@@ -47,9 +47,15 @@ type reviewedBody struct {
 	// filename, or embedded HTML content, as Trix carries an embedded email body), or
 	// "". It can't be delivered as an identity, so such a draft isn't sent.
 	unverifiable string
-	// delivered is the body send_draft sends: the draft's, with each attachment rebuilt
-	// from its identity.
+	// delivered is the body send_draft sends to known recipients: the draft's, with
+	// each attachment rebuilt from its identity.
 	delivered string
+	// plainText and plainHTML are the body as plain text, and the HTML made from that
+	// text alone. A draft to someone new, or sent while exposed, goes as plainHTML, and
+	// the confirmation shows plainText, so what goes is exactly what was shown: no
+	// markup choice (a list's type, bold against italic, a line break against a new
+	// paragraph) is left to carry anything the person didn't read.
+	plainText, plainHTML string
 	// hash is the sha256 of delivered. Two fetches of an unchanged draft hash alike
 	// (signed URLs aren't in it), and a changed attachment doesn't.
 	hash string
@@ -118,8 +124,11 @@ func analyzeBody(content string) (reviewedBody, error) {
 	}
 	sum := sha256.Sum256(delivered.Bytes())
 	text, hidesWhitespace := plainText(w.text.String())
+	shown := plainOf(text)
 	return reviewedBody{
 		text:         text,
+		plainText:    shown,
+		plainHTML:    plainHTML(shown),
 		lossless:     w.lossless && len(w.attachments) == 0 && !hidesWhitespace,
 		attachments:  w.attachments,
 		remote:       w.remote,
@@ -323,6 +332,36 @@ func hasAttr(n *html.Node, key string) bool {
 func asText(v any) string {
 	s, _ := v.(string)
 	return s
+}
+
+// plainOf is text as it goes when sent as plain text: trailing spaces and tabs dropped
+// from each line, and every invisible character removed, so nothing in it is unseen.
+func plainOf(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		lines[i] = strings.Map(func(r rune) rune {
+			if invisible(r) {
+				return -1
+			}
+			return r
+		}, strings.TrimRight(line, " \t"))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// plainHTML is the body made from plain text: its lines, escaped, with a break between
+// each, in one block.
+func plainHTML(text string) string {
+	var b strings.Builder
+	b.WriteString("<div>")
+	for i, line := range strings.Split(text, "\n") {
+		if i > 0 {
+			b.WriteString("<br>")
+		}
+		b.WriteString(html.EscapeString(line))
+	}
+	b.WriteString("</div>")
+	return b.String()
 }
 
 // plainText is the text the prompt shows: the rendering with its line endings
