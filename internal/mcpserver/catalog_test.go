@@ -55,8 +55,11 @@ func TestCatalogUnmappedTagsArePinned(t *testing.T) {
 	want := []string{
 		"Attachments", "Bulk Reply", "Calendar Events", "Calendar Habits", "Calendar Journal",
 		"Calendar Periods", "Calendar Time Tracks", "Clips",
-		"Collections", "Extenzions", "Folders", "Postings",
-		"Publications", "Snippets", "Stickies", "Workflows",
+		"Collections", "Extenzions", "Folders",
+		// The token endpoint stays unmapped on purpose: exchanging a code or revoking a
+		// token is the CLI's own sign-in, never a tool to hand an agent.
+		"OAuth",
+		"Postings", "Publications", "Snippets", "Stickies", "Workflows",
 	}
 	got, _ := json.Marshal(unmapped)
 	expected, _ := json.Marshal(want)

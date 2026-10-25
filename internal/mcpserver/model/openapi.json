@@ -7794,6 +7794,194 @@
         "x-hey-untrusted-content": false
       }
     },
+    "/oauth/tokens.json": {
+      "delete": {
+        "description": "Revoke an access or a refresh token the client was handed, ending the session behind it:\nwhat a sign-out asks. HEY answers 200 {} for a token that names nothing, the point of\nrevoking it reached, and refuses one another client was handed (invalid_client, 401).\nThe token goes in the body, never the query, where logs would keep it, so this DELETE has\na payload: HEY reads its params from either, and every SDK's client sends one.",
+        "operationId": "RevokeToken",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeTokenRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "RevokeToken 200 response"
+          },
+          "400": {
+            "description": "OAuthBadRequestError 400 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthBadRequestErrorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "OAuthUnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthUnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OAuthTooManyRequestsError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthTooManyRequestsErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ServiceUnavailableError 503 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "OAuth"
+        ],
+        "x-hey-destructive": true,
+        "x-hey-no-redirect": {},
+        "x-hey-open-world": false,
+        "x-hey-retry": {
+          "maxAttempts": 3,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        },
+        "x-hey-unsigned": {},
+        "x-hey-untrusted-content": false
+      },
+      "post": {
+        "description": "Trade an authorization code, or a refresh token, for tokens. `grant_type` names which:\n\"authorization_code\" sends `code`, `redirect_uri` and `code_verifier` (PKCE), and\n\"refresh_token\" sends `refresh_token`. Every grant names the client and the install it is\nfor. A refresh answers the refresh token it was sent, unchanged, beside the new access\ntoken. Not sent again after a failure: a code is redeemed once.",
+        "operationId": "CreateToken",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTokenRequestContent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "CreateToken 200 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OAuthBadRequestError 400 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthBadRequestErrorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "OAuthUnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthUnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "OAuthForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "OAuthTooManyRequestsError 429 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthTooManyRequestsErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ServiceUnavailableError 503 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "OAuth"
+        ],
+        "x-hey-destructive": false,
+        "x-hey-no-redirect": {},
+        "x-hey-open-world": false,
+        "x-hey-retry": {
+          "maxAttempts": 1,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": []
+        },
+        "x-hey-unsigned": {},
+        "x-hey-untrusted-content": false
+      }
+    },
     "/paper_trail.json": {
       "get": {
         "description": "Get the Paper Trail",
@@ -12888,6 +13076,53 @@
       "CreateTimeTrackResponseContent": {
         "$ref": "#/components/schemas/Recording"
       },
+      "CreateTokenRequestContent": {
+        "type": "object",
+        "properties": {
+          "grant_type": {
+            "type": "string",
+            "description": "\"authorization_code\" or \"refresh_token\"."
+          },
+          "client_id": {
+            "type": "string",
+            "description": "The OAuth client's id."
+          },
+          "install_id": {
+            "type": "string",
+            "description": "Identifies this installation to HEY as a device: the value the authorization URL\ncarried, for a code."
+          },
+          "code": {
+            "type": "string",
+            "description": "The authorization code the redirect carried (authorization_code).",
+            "x-hey-sensitive": {
+              "category": "credential"
+            }
+          },
+          "redirect_uri": {
+            "type": "string",
+            "description": "The redirect URI the authorization request named (authorization_code)."
+          },
+          "code_verifier": {
+            "type": "string",
+            "description": "The PKCE verifier whose challenge the authorization request sent (authorization_code).",
+            "x-hey-sensitive": {
+              "category": "credential"
+            }
+          },
+          "refresh_token": {
+            "type": "string",
+            "description": "The refresh token to trade (refresh_token).",
+            "x-hey-sensitive": {
+              "category": "credential"
+            }
+          }
+        },
+        "required": [
+          "client_id",
+          "grant_type",
+          "install_id"
+        ]
+      },
       "CreateTopicCommentRequestContent": {
         "type": "object",
         "description": "Wire format: {comment: {content: \"<div>…</div>\"}}",
@@ -14152,6 +14387,98 @@
           "message"
         ]
       },
+      "OAuthBadRequestErrorResponseContent": {
+        "type": "object",
+        "description": "A refusal from the token endpoint (RFC 6749 §5.2): invalid_request, invalid_grant,\nunsupported_grant_type and the like. `error` is the code a client acts on;\n`error_description` is HEY's sentence for a person (\"install_id doesn't identify this install.\nUpgrade your client.\").",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "OAuthForbiddenErrorResponseContent": {
+        "type": "object",
+        "description": "unauthorized_client, or two_factor_authentication_required.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "OAuthToken": {
+        "type": "object",
+        "description": "The tokens a grant answers.",
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "x-hey-sensitive": {
+              "category": "credential"
+            }
+          },
+          "token_type": {
+            "type": "string",
+            "description": "\"bearer\"."
+          },
+          "expires_in": {
+            "type": "integer",
+            "description": "Seconds the access token lasts from the moment HEY answered.",
+            "format": "int64"
+          },
+          "refresh_token": {
+            "type": "string",
+            "description": "The token to refresh with: a new one for a code, the one sent for a refresh.",
+            "x-hey-sensitive": {
+              "category": "credential"
+            }
+          }
+        },
+        "required": [
+          "access_token",
+          "token_type"
+        ]
+      },
+      "OAuthTooManyRequestsErrorResponseContent": {
+        "type": "object",
+        "description": "rate_limit_exceeded: too many failed grants within the hour.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "OAuthUnauthorizedErrorResponseContent": {
+        "type": "object",
+        "description": "invalid_client, or invalid_grant for a dead refresh token: HEY answers that one 401 rather\nthan RFC 6749's 400, since shipped apps sign out on a refresh 401. The code tells the two\napart.",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
       "Organizer": {
         "type": "object",
         "description": "Organizer — calendar event organizer",
@@ -14753,6 +15080,26 @@
       },
       "RevealContactResponseContent": {
         "$ref": "#/components/schemas/Contact"
+      },
+      "RevokeTokenRequestContent": {
+        "type": "object",
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "The OAuth client's id: the client the token was handed to."
+          },
+          "token": {
+            "type": "string",
+            "description": "The access or refresh token to revoke.",
+            "x-hey-sensitive": {
+              "category": "credential"
+            }
+          }
+        },
+        "required": [
+          "client_id",
+          "token"
+        ]
       },
       "SchedulePostingsBubbleUpRequestContent": {
         "type": "object",
