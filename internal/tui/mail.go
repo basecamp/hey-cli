@@ -3025,7 +3025,7 @@ func (v *mailView) selectionHelpBindings(selected int) []helpBinding {
 		bindings = append(bindings, helpBinding{"t", "trash"})
 	}
 	bindings = append(bindings,
-		helpBinding{"space", "toggle"},
+		helpBinding{"space/x", "toggle"},
 		helpBinding{"esc", "clear"},
 		helpBinding{"ctrl+b", "bulk reply"},
 	)
