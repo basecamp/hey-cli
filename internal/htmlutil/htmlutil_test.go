@@ -269,6 +269,24 @@ func TestNonHTMLActionTextAttachmentContentIsNotABody(t *testing.T) {
 	}
 }
 
+// Only an unnamed HTML attachment is an email body; a named one is a file, even when it is HTML.
+func TestNamedHTMLActionTextAttachmentIsAFile(t *testing.T) {
+	file := `<action-text-attachment filename="itinerary.html" content-type="text/html" content="<p>Flight to Lisbon departs at 09:40</p><img src=&quot;https://example.com/boarding-pass.png&quot;>"></action-text-attachment>`
+
+	if got := toMarkdown(file); got != "📄 itinerary.html" {
+		t.Errorf("ToMarkdown = %q, want the file row", got)
+	}
+	if got := ToText(file); got != "[itinerary.html]" {
+		t.Errorf("ToText = %q, want the filename", got)
+	}
+	if got := MessageSourceText(file); got != "" {
+		t.Errorf("MessageSourceText = %q, want no source text from a file", got)
+	}
+	if urls := ExtractImageURLs(file); len(urls) != 0 {
+		t.Errorf("ExtractImageURLs = %v, want no image from inside a file", urls)
+	}
+}
+
 func TestExtractAttachmentsSkipsEmbeddedHTMLAttachment(t *testing.T) {
 	attachments := ExtractAttachments(`<figure data-trix-attachment='{"contentType":"text/html","content":"<p>body</p>"}'></figure>`)
 	if len(attachments) != 0 {
