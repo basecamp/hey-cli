@@ -313,8 +313,11 @@ func parseTrixAttachment(n *html.Node) *trixAttachment {
 	return &att
 }
 
+// embeddedActionTextContent returns the markup an unnamed text/html attachment carries
+// in its content attribute. HEY renders any other attachment as itself, whatever
+// content it carries.
 func embeddedActionTextContent(n *html.Node) string {
-	if getAttr(n, "filename") != "" {
+	if getAttr(n, "filename") != "" || !isHTMLContentType(getAttr(n, "content-type")) {
 		return ""
 	}
 	return getAttr(n, "content")

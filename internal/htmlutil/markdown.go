@@ -730,14 +730,13 @@ func (m *markdownizer) embedded(content string) {
 	m.depth--
 }
 
-// actionTextAttachment writes an attachment node — or nothing, for a decorative image.
+// actionTextAttachment writes an attachment node — or nothing, for a decorative image,
+// or the markup an unnamed text/html one carries inline, which is an email body.
 // HEY rewrites an inbound email's <img> tags into these nodes, so a notification
 // email's avatars and icons arrive as image attachments declaring icon-sized
 // dimensions, decoration beside the text that already says who or what they show. A
 // caption names an image its missing filename does not — the alt text of the <img>
 // the node used to be.
-// actionTextAttachment renders an unnamed attachment's inline content as embedded HTML
-// and a named one as a file attachment.
 func (m *markdownizer) actionTextAttachment(n *html.Node) {
 	if isImageContentType(getAttr(n, "content-type")) && isDecorativeImage(getAttr(n, "width"), getAttr(n, "height")) {
 		return

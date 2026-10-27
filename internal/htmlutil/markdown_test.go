@@ -541,9 +541,32 @@ func TestToMarkdownEmbeddedActionTextAttachment(t *testing.T) {
 
 func TestToMarkdownNamedActionTextAttachmentIgnoresInlineContent(t *testing.T) {
 	got := toMarkdown(`<action-text-attachment filename="report.pdf" content-type="application/pdf" content="<p>not the body</p>"></action-text-attachment>`)
-	want := "📎 report.pdf"
+	want := "📄 report.pdf"
 	if got != want {
 		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+// HEY renders an attachment's content as HTML only when its content type is HTML.
+func TestToMarkdownNonHTMLActionTextAttachmentIgnoresInlineContent(t *testing.T) {
+	got := toMarkdown(`<action-text-attachment content-type="image/png" url="https://example.com/floor-plan.png" caption="Floor plan" content="<p>not the body</p>"></action-text-attachment>`)
+	want := "![Floor plan](https://example.com/floor-plan.png)"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownEmbeddedActionTextAttachmentStopsRecursing(t *testing.T) {
+	withinLimit := "<p>innermost</p>"
+	for range embeddedContentDepthLimit {
+		withinLimit = embeddedActionTextAttachment(withinLimit)
+	}
+	if got := toMarkdown(withinLimit); got != "innermost" {
+		t.Errorf("ToMarkdown = %q, want the body at the nesting limit", got)
+	}
+
+	if got := toMarkdown(embeddedActionTextAttachment(withinLimit)); strings.Contains(got, "innermost") {
+		t.Errorf("ToMarkdown = %q, should stop before the body beyond the nesting limit", got)
 	}
 }
 

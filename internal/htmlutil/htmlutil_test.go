@@ -225,6 +225,50 @@ func TestExtractImageURLsInsideEmbeddedActionTextAttachment(t *testing.T) {
 	}
 }
 
+func embeddedActionTextAttachment(content string) string {
+	return `<action-text-attachment content-type="text/html" content="` + stdhtml.EscapeString(content) + `"></action-text-attachment>`
+}
+
+func TestEmbeddedActionTextAttachmentStopsRecursing(t *testing.T) {
+	withinLimit := `<p>innermost</p><img src="https://example.com/innermost.png">`
+	for range embeddedContentDepthLimit {
+		withinLimit = embeddedActionTextAttachment(withinLimit)
+	}
+	beyondLimit := embeddedActionTextAttachment(withinLimit)
+
+	for name, text := range map[string]func(string) string{"ToText": ToText, "MessageSourceText": MessageSourceText} {
+		if got := text(withinLimit); !strings.Contains(got, "innermost") {
+			t.Errorf("%s = %q, want the body at the nesting limit", name, got)
+		}
+		if got := text(beyondLimit); strings.Contains(got, "innermost") {
+			t.Errorf("%s = %q, should stop before the body beyond the nesting limit", name, got)
+		}
+	}
+	if urls := ExtractImageURLs(withinLimit); len(urls) != 1 {
+		t.Errorf("ExtractImageURLs = %v, want the image at the nesting limit", urls)
+	}
+	if urls := ExtractImageURLs(beyondLimit); len(urls) != 0 {
+		t.Errorf("ExtractImageURLs = %v, should stop before the image beyond the nesting limit", urls)
+	}
+}
+
+// HEY renders an attachment's content as HTML only when its content type is HTML; any
+// other attachment is itself, whatever content it carries.
+func TestNonHTMLActionTextAttachmentContentIsNotABody(t *testing.T) {
+	image := `<action-text-attachment content-type="image/png" url="https://example.com/floor-plan.png" caption="Floor plan" content="<img src=&quot;https://example.com/not-the-image.png&quot;>"></action-text-attachment>`
+	if urls := ExtractImageURLs(image); len(urls) != 1 || urls[0] != "https://example.com/floor-plan.png" {
+		t.Errorf("ExtractImageURLs = %v, want the attachment's own image", urls)
+	}
+
+	untyped := `<p>Visible</p><action-text-attachment content="<p>not the body</p>"></action-text-attachment>`
+	if got := ToText(untyped); strings.Contains(got, "not the body") {
+		t.Errorf("ToText = %q, should not render a non-HTML attachment's content", got)
+	}
+	if got := strings.Join(strings.Fields(MessageSourceText(untyped)), " "); got != "Visible" {
+		t.Errorf("MessageSourceText = %q, want only the visible text", got)
+	}
+}
+
 func TestExtractAttachmentsSkipsEmbeddedHTMLAttachment(t *testing.T) {
 	attachments := ExtractAttachments(`<figure data-trix-attachment='{"contentType":"text/html","content":"<p>body</p>"}'></figure>`)
 	if len(attachments) != 0 {
