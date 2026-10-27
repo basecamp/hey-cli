@@ -107,7 +107,7 @@ jobs:
         uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
 
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        uses: zizmorcore/zizmor-action@85b2b9fb8e3325e7a23d7d0a9d7ba5ae0f999e3e # v0.7.1
         with:
           advanced-security: false
 
@@ -410,7 +410,7 @@ jobs:
 
       - name: Install Nix
         if: steps.filter.outputs.nix == 'true' || steps.filter.conclusion == 'skipped'
-        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31.11.2
 
       - name: Build the flake
         if: steps.filter.outputs.nix == 'true' || steps.filter.conclusion == 'skipped'
