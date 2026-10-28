@@ -3,7 +3,9 @@ package auth
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,6 +65,13 @@ func (f *fakeKeyring) Delete(service, user string) error {
 	delete(f.values, service+"/"+user)
 	return nil
 }
+
+// exitStatusError stands in for the *exec.ExitError go-keyring returns when macOS's
+// security tool fails for a reason other than a missing item.
+type exitStatusError int
+
+func (e exitStatusError) Error() string { return "exit status " + strconv.Itoa(int(e)) }
+func (e exitStatusError) ExitCode() int { return int(e) }
 
 func keyringStore(t *testing.T, fake *fakeKeyring) *Store {
 	t.Helper()
@@ -157,6 +166,45 @@ func TestKeyringFailures(t *testing.T) {
 		}
 		if errors.Is(err, ErrCredentialsNotFound) {
 			t.Fatalf("error = %v, an unavailable keyring is not missing credentials", err)
+		}
+		if errors.Is(err, ErrKeyringRefused) {
+			t.Fatalf("error = %v, a locked keyring is not a refusal", err)
+		}
+	})
+
+	t.Run("refusal", func(t *testing.T) {
+		type refusalCase struct {
+			name    string
+			getErr  error
+			refused bool
+		}
+		tests := []refusalCase{
+			{name: "interaction not allowed", getErr: exitStatusError(36), refused: true},
+			{name: "another exit status", getErr: exitStatusError(1), refused: false},
+		}
+		if runtime.GOOS != "windows" {
+			// go-keyring hands back the *exec.ExitError of macOS's security tool.
+			tests = append(tests, refusalCase{name: "real exit status 36", getErr: exec.CommandContext(t.Context(), "sh", "-c", "exit 36").Run(), refused: true})
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				fake := newFakeKeyring()
+				store := keyringStore(t, fake)
+				if !store.UsingKeyring() {
+					t.Fatal("UsingKeyring = false")
+				}
+				fake.getErr = tt.getErr
+				_, err := store.Load("https://app.hey.com")
+				if err == nil || !strings.Contains(err.Error(), "read credentials from system keyring: exit status") {
+					t.Fatalf("error = %v, want the keyring's own message", err)
+				}
+				if errors.Is(err, ErrKeyringRefused) != tt.refused {
+					t.Fatalf("errors.Is(%v, ErrKeyringRefused) = %v, want %v", err, !tt.refused, tt.refused)
+				}
+				if errors.Is(err, ErrCredentialsNotFound) {
+					t.Fatalf("error = %v, a refused keyring is not missing credentials", err)
+				}
+			})
 		}
 	})
 

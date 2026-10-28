@@ -77,6 +77,8 @@ forward answers. The drafts index (`/entries/drafts.json`) pages the same way, w
 | `/messages.json` | POST | SDK `Messages().Create`, `Messages().CreateDraft` | `hey compose`, `hey compose --draft`, `hey forward <topic-id>` | covered |
 | `/entries/{id}/replies` | POST | SDK `Entries().CreateReply`, `Entries().CreateReplyDraft` | `hey reply <topic-id>`, `hey reply --draft`, `hey compose --thread-id [--draft]` | covered |
 | `/topics/{id}.json` | GET | SDK `Topics().Get` | `hey forward <topic-id>`, `hey reply <topic-id>`, TUI `r` | covered |
+| `/topics/{id}/comments.json` | POST | SDK `Topics().CreateComment` | `hey thread comment <topic-id>` | covered |
+| `/topics/{id}/comments/new.json` | GET | SDK `Topics().GetCommentAudience` | `hey thread comment <topic-id> --dry-run` | covered |
 | `/entries/{id}/forwards/new.json` | GET | SDK `Entries().NewForward` | `hey forward <topic-id>` | covered |
 | `/bulk_replies/new.json` | GET | SDK `BulkReplies().Draft` | `hey bulk-reply preview`, `hey bulk-reply send`, TUI `ctrl+b` | covered |
 | `/bulk_replies.json` | POST | SDK `BulkReplies().Send` | `hey bulk-reply send`, TUI bulk reply | covered |

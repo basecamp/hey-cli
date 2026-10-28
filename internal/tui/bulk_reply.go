@@ -287,7 +287,7 @@ func replyNoun(count int) string {
 func (v *mailView) startBulkReply() tea.Cmd {
 	postingIDs := v.actionList().selectedIDs()
 	if len(postingIDs) == 0 {
-		v.notice = "Select threads with space before starting a bulk reply"
+		v.notice = "Select threads with space or x before starting a bulk reply"
 		return nil
 	}
 	requestID, ctx := v.requests.begin(v.vc.ctx, mailRequestBulkReply)

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -3487,16 +3488,144 @@ func TestMailViewHaystackPickerAliases(t *testing.T) {
 	}
 }
 
-func TestMailViewCoverPeekUsesX(t *testing.T) {
+func TestMailViewCoverPeekUsesZ(t *testing.T) {
+	v := mailWithPostings()
+	v.postingList.setCover(coverTopo)
+	v.HandleContentKey(keyPress("z"))
+	if !v.postingList.coverPeeked {
+		t.Fatal("z did not lift the cover")
+	}
+	v.HandleContentKey(keyPress("z"))
+	if v.postingList.coverPeeked {
+		t.Fatal("z did not replace the cover")
+	}
+}
+
+// x selects like space does, matching the HEY desktop app — including on a covered
+// Imbox, where x used to lift the cover (that is z's key now).
+func TestMailViewSelectsWithXLikeSpace(t *testing.T) {
+	v := mailWithPostings()
+	v.postingList.setCover(coverTopo)
+
+	v.HandleContentKey(keyPress("x"))
+	if ids := v.postingList.selectedIDs(); len(ids) != 1 || ids[0] != 100 {
+		t.Fatalf("selected after x = %v, want [100]", ids)
+	}
+	if v.postingList.coverPeeked {
+		t.Error("x lifted the cover instead of selecting")
+	}
+	v.HandleContentKey(keyPress("x"))
+	if ids := v.postingList.selectedIDs(); len(ids) != 0 {
+		t.Errorf("selected after second x = %v, want none", ids)
+	}
+
+	seen := mailWithPostings()
+	seen.seenActive = true
+	seen.seenList.setPostings(testPostings())
+	seen.HandleContentKey(keyPress("x"))
+	if ids := seen.seenList.selectedIDs(); len(ids) != 1 || ids[0] != 100 {
+		t.Errorf("seen screen selected after x = %v, want [100]", ids)
+	}
+}
+
+func TestMailViewSeenScreenXDeselectsWithoutLeaving(t *testing.T) {
+	v := mailWithPostings()
+	v.seenActive = true
+	v.seenList.setPostings(testPostings())
+
+	v.HandleContentKey(keyPress("x"))
+	if ids := v.seenList.selectedIDs(); len(ids) != 1 || ids[0] != 100 {
+		t.Fatalf("seen screen selected after x = %v, want [100]", ids)
+	}
+	v.HandleContentKey(keyPress("x"))
+	if ids := v.seenList.selectedIDs(); len(ids) != 0 {
+		t.Errorf("seen screen selected after second x = %v, want none", ids)
+	}
+	if !v.seenActive {
+		t.Error("x left the Previously Seen screen")
+	}
+}
+
+func TestMailViewSelectionHelpNamesEveryToggleKey(t *testing.T) {
+	v := mailWithPostings()
+	v.HandleContentKey(keyPress("x"))
+
+	var toggle string
+	for _, binding := range v.HelpBindings() {
+		if binding.desc == "toggle" {
+			toggle = binding.key
+		}
+	}
+	if toggle != "space/x" {
+		t.Fatalf("selection help toggle key = %q, want %q", toggle, "space/x")
+	}
+	for _, step := range []struct {
+		key  string
+		want int
+	}{{" ", 0}, {" ", 1}, {"x", 0}} {
+		v.HandleContentKey(keyPress(step.key))
+		if ids := v.postingList.selectedIDs(); len(ids) != step.want {
+			t.Fatalf("selected after %q = %v, want %d", step.key, ids, step.want)
+		}
+	}
+}
+
+// The peek works on a list with a selection standing, and leaves the selection alone:
+// lifting the cover changes what is shown, not what a bulk action will act on.
+func TestMailViewCoverPeekKeepsTheSelection(t *testing.T) {
 	v := mailWithPostings()
 	v.postingList.setCover(coverTopo)
 	v.HandleContentKey(keyPress("x"))
-	if !v.postingList.coverPeeked {
-		t.Fatal("x did not lift the cover")
+
+	for _, wantPeeked := range []bool{true, false} {
+		v.HandleContentKey(keyPress("z"))
+		if v.postingList.coverPeeked != wantPeeked {
+			t.Fatalf("coverPeeked after z = %v, want %v", v.postingList.coverPeeked, wantPeeked)
+		}
+		if ids := v.postingList.selectedIDs(); len(ids) != 1 || ids[0] != 100 {
+			t.Fatalf("selected after z = %v, want [100]", ids)
+		}
 	}
-	v.HandleContentKey(keyPress("x"))
+}
+
+// Every place that tells the reader how to look under the cover names the key that
+// does it: the cover picker's footer, the help bar, and the divider either way round.
+func TestMailViewCoverHintsNameThePeekKey(t *testing.T) {
+	footer := regexp.MustCompile(`Press (\S+) to look under it`).FindStringSubmatch(newCoverPicker(coverTopo).view(newStyles(), 120))
+	if footer == nil {
+		t.Fatal("cover picker does not name the peek key")
+	}
+	key := footer[1]
+
+	list := coveredList(coverTopo, 20, false, true)
+	if hint := regexp.MustCompile(`hidden · (\S+) to peek`).FindStringSubmatch(ansi.Strip(list.view())); hint == nil || hint[1] != key {
+		t.Errorf("covered divider hint = %v, want %q", hint, key)
+	}
+	list.toggleCoverPeek()
+	if hint := regexp.MustCompile(`(\S+) to cover`).FindStringSubmatch(ansi.Strip(list.view())); hint == nil || hint[1] != key {
+		t.Errorf("peeked divider hint = %v, want %q", hint, key)
+	}
+
+	v := mailWithPostings()
+	v.postingList.setCover(coverTopo)
+	if !hasHelpBinding(v.HelpBindings(), key) {
+		t.Errorf("help bar does not offer %q for the peek: %+v", key, v.HelpBindings())
+	}
+	v.HandleContentKey(keyPress(key))
+	if !v.postingList.coverPeeked {
+		t.Fatalf("%q, the key the picker names, did not lift the cover", key)
+	}
+	if ids := v.postingList.selectedIDs(); len(ids) != 0 {
+		t.Errorf("the peek key selected %v", ids)
+	}
+	for _, binding := range v.HelpBindings() {
+		if binding.desc == "cover" && binding.key != key {
+			t.Errorf("help bar puts the cover back with %q, want %q", binding.key, key)
+		}
+	}
+	v.HandleContentKey(keyPress(key))
 	if v.postingList.coverPeeked {
-		t.Fatal("x did not replace the cover")
+		t.Errorf("%q did not put the cover back", key)
 	}
 }
 
@@ -4563,7 +4692,7 @@ func TestMailViewSeenScreenHelpOffersTheThreadActions(t *testing.T) {
 	v.seenActive = true
 
 	bindings := v.HelpBindings()
-	for _, key := range []string{"enter", "space", "ctrl+b", "a", "l", "u", "t", "v", "b", "n"} {
+	for _, key := range []string{"enter", "space/x", "ctrl+b", "a", "l", "u", "t", "v", "b", "n"} {
 		if !hasHelpBinding(bindings, key) {
 			t.Errorf("seen screen help misses %q: %+v", key, bindings)
 		}

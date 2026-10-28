@@ -1110,7 +1110,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		}
 		bindings := []helpBinding{
 			{"enter", "open"},
-			{"space", "select"},
+			{"space/x", "select"},
 			{"ctrl+b", "bulk reply"},
 			{"r", "reply"},
 			{"f", "forward"},
@@ -1148,7 +1148,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"/", "search"},
 		{"ctrl+s", "screener"},
 		{"c", "compose"},
-		{"space", "select"},
+		{"space/x", "select"},
 		{"ctrl+b", "bulk reply"},
 		{"r", "reply"},
 		{"f", "forward"},
@@ -1172,9 +1172,9 @@ func (v *mailView) HelpBindings() []helpBinding {
 		helpBinding{"ctrl+r", "reload"},
 	)
 	if v.postingList.cover != coverNone {
-		peek := helpBinding{"x", "peek under cover"}
+		peek := helpBinding{"z", "peek under cover"}
 		if v.postingList.coverPeeked {
-			peek = helpBinding{"x", "cover"}
+			peek = helpBinding{"z", "cover"}
 		}
 		bindings = append(bindings, peek)
 	}
@@ -1505,7 +1505,7 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			case "j":
 				v.seenList.moveDown()
 				return v.loadMoreSeenPostings()
-			case " ", "space":
+			case " ", "space", "x":
 				v.seenList.toggleSelected()
 				return nil
 			case "ctrl+b":
@@ -1559,7 +1559,7 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return v.startSearch()
 		case "c":
 			return v.startCompose()
-		case " ", "space":
+		case " ", "space", "x":
 			v.postingList.toggleSelected()
 			return nil
 		case "ctrl+b":
@@ -1581,7 +1581,7 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 				return nil
 			}
 			return v.startCollectionPicker()
-		case "x":
+		case "z":
 			v.postingList.toggleCoverPeek()
 			return nil
 		case "ctrl+v":
@@ -3025,7 +3025,7 @@ func (v *mailView) selectionHelpBindings(selected int) []helpBinding {
 		bindings = append(bindings, helpBinding{"t", "trash"})
 	}
 	bindings = append(bindings,
-		helpBinding{"space", "toggle"},
+		helpBinding{"space/x", "toggle"},
 		helpBinding{"esc", "clear"},
 		helpBinding{"ctrl+b", "bulk reply"},
 	)

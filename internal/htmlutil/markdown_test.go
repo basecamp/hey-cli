@@ -529,6 +529,47 @@ func TestToMarkdownEmbeddedHTMLAttachment(t *testing.T) {
 	}
 }
 
+// A nested action-text-attachment carries its HTML in a content attribute.
+func TestToMarkdownEmbeddedActionTextAttachment(t *testing.T) {
+	got := toMarkdown(`<figure data-trix-attachment='{"contentType":"text/html","content":"<action-text-attachment content-type=\"text/html\" content=\"<p>Dear customer,</p><p>Please <a href=&amp;quot;https://example.com/sign&amp;quot;>sign the document</a>.</p>\"></action-text-attachment>"}'></figure>`)
+
+	want := "Dear customer,\n\nPlease [sign the document](https://example.com/sign)."
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownNamedActionTextAttachmentIgnoresInlineContent(t *testing.T) {
+	got := toMarkdown(`<action-text-attachment filename="report.pdf" content-type="application/pdf" content="<p>not the body</p>"></action-text-attachment>`)
+	want := "📄 report.pdf"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+// HEY renders an attachment's content as HTML only when its content type is HTML.
+func TestToMarkdownNonHTMLActionTextAttachmentIgnoresInlineContent(t *testing.T) {
+	got := toMarkdown(`<action-text-attachment content-type="image/png" url="https://example.com/floor-plan.png" caption="Floor plan" content="<p>not the body</p>"></action-text-attachment>`)
+	want := "![Floor plan](https://example.com/floor-plan.png)"
+	if got != want {
+		t.Errorf("ToMarkdown = %q, want %q", got, want)
+	}
+}
+
+func TestToMarkdownEmbeddedActionTextAttachmentStopsRecursing(t *testing.T) {
+	withinLimit := "<p>innermost</p>"
+	for range embeddedContentDepthLimit {
+		withinLimit = embeddedActionTextAttachment(withinLimit)
+	}
+	if got := toMarkdown(withinLimit); got != "innermost" {
+		t.Errorf("ToMarkdown = %q, want the body at the nesting limit", got)
+	}
+
+	if got := toMarkdown(embeddedActionTextAttachment(withinLimit)); strings.Contains(got, "innermost") {
+		t.Errorf("ToMarkdown = %q, should stop before the body beyond the nesting limit", got)
+	}
+}
+
 func TestToMarkdownEmbeddedContentStopsRecursing(t *testing.T) {
 	nested := "<p>innermost</p>"
 	for range embeddedContentDepthLimit + 1 {

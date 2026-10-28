@@ -1400,3 +1400,99 @@ func TestRateLimitHoldSurvivesABodyThatNeverArrives(t *testing.T) {
 		t.Errorf("the credential was cleared on a rate limit: %v", err)
 	}
 }
+
+func TestAKeychainRefusalSaysSigningInAgainWontHelp(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	operations := map[string]func(*Manager) error{
+		"status": func(mgr *Manager) error {
+			_, err := mgr.AuthenticationStatus()
+			return err
+		},
+		"access token": func(mgr *Manager) error {
+			_, err := mgr.AccessToken(t.Context())
+			return err
+		},
+	}
+	sandboxes := map[string]struct{ value, want string }{
+		"outside a sandbox":      {value: "", want: "Run hey from Terminal on the Mac"},
+		"inside Codex's sandbox": {value: "seatbelt", want: "Let Codex run hey outside its sandbox"},
+	}
+	for name, operation := range operations {
+		for place, sandbox := range sandboxes {
+			t.Run(name+" "+place, func(t *testing.T) {
+				t.Setenv("HEY_TOKEN", "")
+				t.Setenv("CODEX_SANDBOX", sandbox.value)
+				fake := newFakeKeyring()
+				store := keyringStore(t, fake)
+				if !store.UsingKeyring() {
+					t.Fatal("UsingKeyring = false")
+				}
+				fake.getErr = exitStatusError(36)
+
+				mgr := testManager(t, server)
+				mgr.store = store
+				err := operation(mgr)
+				var classified *apierr.Error
+				if !errors.As(err, &classified) {
+					t.Fatalf("error = %v, want a classified error carrying a hint", err)
+				}
+				if classified.Code == apierr.CodeAuth {
+					t.Errorf("code = %q, a refused keyring is not an authentication failure", classified.Code)
+				}
+				if classified.Message != "could not read stored credentials: read credentials from system keyring: exit status 36" {
+					t.Errorf("message = %q", classified.Message)
+				}
+				if !strings.HasPrefix(classified.Hint, "Signing in again won't help") || !strings.Contains(classified.Hint, sandbox.want) {
+					t.Errorf("hint = %q, want it to rule out a new login and contain %q", classified.Hint, sandbox.want)
+				}
+				// The refusal is about the desktop session, so its remedy holds in the sandbox too.
+				if !strings.Contains(classified.Hint, "codex app-server daemon restart") {
+					t.Errorf("hint = %q, want the background-server restart", classified.Hint)
+				}
+			})
+		}
+	}
+}
+
+func TestAnUnclassifiedStorageFailureCarriesNoHint(t *testing.T) {
+	err := CredentialStorageError("could not read stored credentials", errors.New("keyring is locked"))
+	var classified *apierr.Error
+	if errors.As(err, &classified) {
+		t.Fatalf("error = %#v, only a refusal is classified", classified)
+	}
+	if err.Error() != "could not read stored credentials: keyring is locked" {
+		t.Errorf("error = %q", err)
+	}
+}
+
+func TestNotLoggedInHintInsideCodexSandbox(t *testing.T) {
+	server := httptest.NewServer(http.NotFoundHandler())
+	defer server.Close()
+
+	tests := []struct {
+		name    string
+		sandbox string
+		want    string
+	}{
+		{name: "outside a sandbox", sandbox: "", want: "Run: hey auth login"},
+		{name: "inside Codex's sandbox", sandbox: "seatbelt", want: "Codex's sandbox hides the system keyring"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HEY_TOKEN", "")
+			t.Setenv("CODEX_SANDBOX", tt.sandbox)
+			mgr := testManager(t, server)
+
+			_, err := mgr.AccessToken(t.Context())
+			var classified *apierr.Error
+			if !errors.As(err, &classified) || classified.Code != apierr.CodeAuth {
+				t.Fatalf("error = %v, want an auth error", err)
+			}
+			if !strings.Contains(classified.Hint, tt.want) {
+				t.Errorf("hint = %q, want it to contain %q", classified.Hint, tt.want)
+			}
+		})
+	}
+}

@@ -381,6 +381,10 @@ hey snippet update --name
 hey spam
 hey stop-ignoring
 hey thread
+hey thread comment
+hey thread comment --dry-run
+hey thread comment --message
+hey thread comment --message-html
 hey thread read
 hey thread read --allow-partial
 hey thread update

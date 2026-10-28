@@ -401,7 +401,7 @@ func TestMailViewHelpBarOffersOnlyTheSelectionActions(t *testing.T) {
 	if !strings.Contains(bindings[0].key, "2 selected") || bindings[0].desc != "" {
 		t.Errorf("first binding = %+v, want the selected count", bindings[0])
 	}
-	for _, key := range []string{"e", "u", "t", "space", "esc", "ctrl+b"} {
+	for _, key := range []string{"e", "u", "t", "space/x", "esc", "ctrl+b"} {
 		if !hasHelpBinding(bindings, key) {
 			t.Errorf("help bar is missing %q: %v", key, bindings)
 		}

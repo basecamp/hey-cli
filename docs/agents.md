@@ -38,6 +38,27 @@ hey only ever writes skill directories it owns: each one it creates carries a
 `hey` skill directory (or symlink) without it — a hand-authored skill at one of those paths
 is never overwritten or claimed. `hey doctor` flags an unmanaged baseline and how to adopt it.
 
+### Keychain access from agents
+
+hey keeps your login in the system keyring, which on a Mac is the Keychain. Two things can
+keep an agent's commands from reading it, and signing in again fixes neither:
+
+- **Codex's sandbox** hides the keyring from the commands it sandboxes, so a saved login
+  reads as missing there; hey's hint says so when `CODEX_SANDBOX` is set. Let Codex run hey
+  outside its sandbox: approve its escalation prompt, or allow read-only hey commands with
+  `prefix_rule`s in a file under `~/.codex/rules/`.
+- **A process outside your Mac's desktop session**, such as one started over SSH, is refused
+  by the Keychain: hey fails with `exit status 36` (`errSecInteractionNotAllowed`) and a hint
+  that a new login won't help. Codex runs its commands and MCP servers from a background
+  server that keeps running after you quit Codex. If that server was started from such a
+  session, every hey command and `hey mcp` fails this way, sandboxed or not, and a rules
+  file can't help. Quit Codex, run `codex app-server daemon restart` in Terminal on the Mac,
+  and start Codex again; `codex --no-daemon` runs without the background server.
+
+`hey mcp` reads the login before it answers the MCP handshake, so a client that can't use
+it reports only that the connection closed. The reason is on the server's stderr, which
+Codex keeps in its log.
+
 ## MCP server
 
 `hey mcp` runs an MCP (Model Context Protocol) server on stdin/stdout, serving HEY

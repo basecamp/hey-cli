@@ -431,7 +431,9 @@ func requireAuth() error {
 			return nil
 		}
 	}
-	return apierr.ErrAuth("Not logged in")
+	notLoggedIn := apierr.ErrAuth("Not logged in")
+	notLoggedIn.Hint = auth.NotLoggedInHint()
+	return notLoggedIn
 }
 
 // migrateOldCredentials migrates credentials from the old config.json format
