@@ -192,14 +192,14 @@ func (w *bodyWalker) walk(n *html.Node) {
 		w.lossless = false
 	}
 	if loadingTags[n.DataAtom] && w.remote == "" {
-		w.remote = "<" + n.Data + ">"
+		w.remote = elementName(n)
 	}
 	for _, attr := range n.Attr {
 		if n.DataAtom != atom.A || attr.Key != "href" {
 			w.lossless = false
 		}
 		if w.remote == "" && loadsByItself(attr) {
-			w.remote = attr.Key + " on <" + n.Data + ">"
+			w.remote = attr.Key + " on " + elementName(n)
 		}
 	}
 
@@ -221,6 +221,17 @@ func (w *bodyWalker) walk(n *html.Node) {
 	if blockTags[n.DataAtom] {
 		w.text.WriteString("\n")
 	}
+}
+
+// elementName names n for a refusal the model reads. Only an element HTML knows is
+// named: a custom element's name is the draft's own text (<ignore-previous-instructions
+// src=...>), and the refusal must carry none of it. An attribute that loads is named by
+// its key alone, which loadingAttributes or style has already fixed.
+func elementName(n *html.Node) string {
+	if n.DataAtom == 0 {
+		return "a custom element"
+	}
+	return "<" + n.DataAtom.String() + ">"
 }
 
 // loadsByItself reports whether an attribute makes a mail client fetch a URL on open:
