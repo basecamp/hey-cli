@@ -147,3 +147,31 @@ func TestMCPCanSendNeedsWriteAndSend(t *testing.T) {
 		t.Error("a sign-in without a local key can send")
 	}
 }
+
+func TestHeyMCPSaysAKeychainRefusalIsntAMissingSignIn(t *testing.T) {
+	t.Setenv("CODEX_SANDBOX", "")
+	// What the store returns when macOS's security tool exits 36 for a process outside
+	// the desktop session, such as an MCP client's background server.
+	refused := fmt.Errorf("read credentials from system keyring: %w",
+		errors.Join(errors.New("exit status 36"), auth.ErrKeyringRefused))
+
+	_, err := checkMCPCredentials(nil, refused)
+	var classified *apierr.Error
+	if !errors.As(err, &classified) {
+		t.Fatalf("err = %v, want a classified error carrying a hint", err)
+	}
+	if classified.Code == apierr.CodeAuth {
+		t.Errorf("code = %q, a refused keyring is not a missing sign-in", classified.Code)
+	}
+	if !strings.HasPrefix(classified.Hint, "Signing in again won't help") {
+		t.Errorf("hint = %q, want it to rule out another hey auth login --mcp", classified.Hint)
+	}
+	if !strings.HasPrefix(classified.Message, "could not read hey mcp's credentials: ") {
+		t.Errorf("message = %q", classified.Message)
+	}
+
+	_, err = checkMCPCredentials(nil, fmt.Errorf("%w for mcp::https://app.hey.com", auth.ErrCredentialsNotFound))
+	if !errors.As(err, &classified) || classified.Code != apierr.CodeAuth || classified.Hint != "Run: "+mcpLoginCommand {
+		t.Errorf("err = %#v, a missing credential still points at %s", err, mcpLoginCommand)
+	}
+}
