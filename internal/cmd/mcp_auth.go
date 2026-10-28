@@ -51,12 +51,19 @@ func errMCPClientUnconfigured() *apierr.Error {
 // falls back to the CLI's credential: that one holds full, and serving hey mcp on it would
 // undo what the scoped sign-in contains.
 func requireMCPCredentials() (*auth.Credentials, error) {
-	creds, err := mcpAuthMgr.StoredCredentials()
+	return checkMCPCredentials(mcpAuthMgr.StoredCredentials())
+}
+
+// checkMCPCredentials is requireMCPCredentials' verdict on what the store returned. A
+// store that couldn't be read isn't a missing sign-in: a Keychain refusal says signing in
+// again won't help, which matters here since hey mcp is usually started by an MCP
+// client's background process, the kind the Keychain refuses.
+func checkMCPCredentials(creds *auth.Credentials, err error) (*auth.Credentials, error) {
 	if errors.Is(err, auth.ErrCredentialsNotFound) {
 		return nil, errMCPNotSignedIn()
 	}
 	if err != nil {
-		return nil, fmt.Errorf("could not read hey mcp's credentials: %w", err)
+		return nil, auth.CredentialStorageError("could not read hey mcp's credentials", err)
 	}
 	if creds.AccessToken == "" && creds.RefreshToken == "" {
 		return nil, errMCPNotSignedIn()
