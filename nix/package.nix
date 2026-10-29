@@ -43,5 +43,8 @@ buildGoModule.override { inherit go; } (finalAttrs: {
     changelog = "https://github.com/basecamp/hey-cli/releases/tag/v${finalAttrs.version}";
     license = lib.licenses.mit;
     mainProgram = "hey";
+    identifiers.cpeParts = lib.meta.cpeFullVersionWithVendor "basecamp" finalAttrs.version // {
+      product = "hey-cli";
+    };
   };
 })
