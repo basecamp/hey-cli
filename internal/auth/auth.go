@@ -28,7 +28,27 @@ const callbackListenAddr = "127.0.0.1:0"
 
 // Manager handles OAuth authentication.
 type Manager struct {
-	baseURL      string
+	baseURL string
+	// storeKey is where the credential lives in the store: the origin for the CLI's
+	// own, "mcp::" and the origin for hey mcp's (mcp.go).
+	storeKey string
+	// clientID is the OAuth client this manager signs in and refreshes as.
+	clientID string
+	// scope is what a sign-in asks for. Empty asks for none, which HEY grants the
+	// CLI's own row as full.
+	scope string
+	// honorEnvToken lets HEY_TOKEN stand in for the stored credential. Only the CLI's
+	// manager honors it: the variable holds whatever token a person exported, usually
+	// a full one, and hey mcp must never end up holding that.
+	honorEnvToken bool
+	// wait sleeps between device-flow polls; a seam for tests.
+	wait func(context.Context, time.Duration) error
+	// pinnedGrant, when set, is the only sign-in this manager authenticates with: a
+	// credential stored under another grant key (a later `hey auth login --mcp`) is
+	// refused rather than adopted, so a running hey mcp never moves onto a sign-in it
+	// didn't start with. Guarded by mu.
+	pinnedGrant string
+
 	store        *Store
 	httpClient   *http.Client
 	callbackWait callbackWaiter
@@ -63,11 +83,28 @@ const defaultRefreshHold = 15 * time.Minute
 // NewManager creates a new auth manager.
 func NewManager(baseURL string, httpClient *http.Client, configDir string) *Manager {
 	listenConfig := &net.ListenConfig{}
+	origin := normalizeBaseURL(baseURL)
 	return &Manager{
-		baseURL:    normalizeBaseURL(baseURL),
-		store:      NewStore(configDir),
-		httpClient: httpClient,
-		listen:     listenConfig.Listen,
+		baseURL:       origin,
+		storeKey:      origin,
+		clientID:      oauthClientID,
+		honorEnvToken: true,
+		wait:          sleepContext,
+		store:         NewStore(configDir),
+		httpClient:    httpClient,
+		listen:        listenConfig.Listen,
+	}
+}
+
+// sleepContext waits d, or until ctx is done.
+func sleepContext(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
@@ -85,9 +122,9 @@ func cloneCredentials(creds *Credentials) *Credentials {
 }
 
 // AccessToken returns a valid access token, refreshing if needed.
-// If HEY_TOKEN env var is set, it's used directly.
+// If HEY_TOKEN env var is set, the CLI's manager uses it directly.
 func (m *Manager) AccessToken(ctx context.Context) (string, error) {
-	if token := os.Getenv("HEY_TOKEN"); token != "" {
+	if token := m.envToken(); token != "" {
 		return token, nil
 	}
 
@@ -135,8 +172,17 @@ func (m *Manager) AuthenticateRequestFromStore(ctx context.Context, req *http.Re
 	return m.authenticateRequest(ctx, req, true)
 }
 
+// envToken is HEY_TOKEN, for a manager that honors it. A nil manager is the CLI's, as
+// it always was: HEY_TOKEN alone authenticates.
+func (m *Manager) envToken() string {
+	if m != nil && !m.honorEnvToken {
+		return ""
+	}
+	return os.Getenv("HEY_TOKEN")
+}
+
 func (m *Manager) authenticateRequest(ctx context.Context, req *http.Request, reload bool) error {
-	if token := os.Getenv("HEY_TOKEN"); token != "" {
+	if token := m.envToken(); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 		return nil
 	}
@@ -182,7 +228,7 @@ func (m *Manager) authenticateRequest(ctx context.Context, req *http.Request, re
 // credential is a known signed-out state; a storage failure leaves the state
 // unknown and is returned to the caller.
 func (m *Manager) AuthenticationStatus() (bool, error) {
-	if os.Getenv("HEY_TOKEN") != "" {
+	if m.envToken() != "" {
 		return true, nil
 	}
 
@@ -255,7 +301,10 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 		return fmt.Errorf("invalid auth endpoint: %w", err)
 	}
 	q := u.Query()
-	q.Set("client_id", oauthClientID)
+	q.Set("client_id", m.clientID)
+	if m.scope != "" {
+		q.Set("scope", m.scope)
+	}
 	q.Set("grant_type", "authorization_code")
 	q.Set("redirect_uri", redirectURI)
 	q.Set("state", state)
@@ -276,11 +325,22 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	}
 
 	// Exchange code for tokens
-	token, err := exchangeCode(ctx, m.httpClient, tokenEndpoint, code, redirectURI, oauthClientID, codeVerifier, installID)
+	token, err := exchangeCode(ctx, m.httpClient, tokenEndpoint, code, redirectURI, m.clientID, codeVerifier, installID)
 	if err != nil {
 		return fmt.Errorf("token exchange failed: %w", err)
 	}
 
+	creds, err := m.signedInCredentials(token, tokenEndpoint, installID)
+	if err != nil {
+		return err
+	}
+	return m.saveCredentials(creds)
+}
+
+// signedInCredentials is what a completed sign-in stores. A scoped sign-in (hey mcp's)
+// also records the scope HEY granted, the client its refreshes must name, and when and
+// under which local key the grant was made (mcp.go).
+func (m *Manager) signedInCredentials(token *OAuthToken, tokenEndpoint, installID string) (*Credentials, error) {
 	creds := &Credentials{
 		AccessToken:   token.AccessToken,
 		RefreshToken:  token.RefreshToken,
@@ -291,8 +351,19 @@ func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
 	if !token.ExpiresAt.IsZero() {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
+	if m.scope == "" {
+		return creds, nil
+	}
 
-	return m.saveCredentials(creds)
+	granted, err := grantedScope(m.scope, token.Scope)
+	if err != nil {
+		return nil, err
+	}
+	creds.Scope = granted
+	creds.ClientID = m.clientID
+	creds.GrantKey = generateState()
+	creds.GrantedAt = time.Now().Unix()
+	return creds, nil
 }
 
 // LoginWithToken stores a pre-provided bearer token.
@@ -328,7 +399,7 @@ func (m *Manager) Logout() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := m.store.Delete(m.baseURL); err != nil {
+	if err := m.store.Delete(m.storeKey); err != nil {
 		return err
 	}
 	m.cachedCredentials = nil
@@ -355,7 +426,10 @@ func (m *Manager) loadCredentialsLocked() (*Credentials, error) {
 }
 
 func (m *Manager) reloadCredentialsLocked() (*Credentials, error) {
-	creds, err := m.store.Load(m.baseURL)
+	creds, err := m.store.Load(m.storeKey)
+	if err == nil {
+		err = m.checkPinnedGrant(creds)
+	}
 	if err != nil {
 		m.cachedCredentials = nil
 		return nil, err
@@ -368,7 +442,7 @@ func (m *Manager) saveCredentials(creds *Credentials) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if err := m.store.Save(m.baseURL, creds); err != nil {
+	if err := m.store.Save(m.storeKey, creds); err != nil {
 		return err
 	}
 	m.cachedCredentials = cloneCredentials(creds)
@@ -387,7 +461,7 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	}
 	defer unlock()
 
-	stored, loadErr := m.store.load(m.baseURL)
+	stored, loadErr := m.store.load(m.storeKey)
 	if errors.Is(loadErr, ErrCredentialsNotFound) {
 		// Another process deleted the credential while we waited for the lock.
 		// Nothing stale may survive a forced read that proves it is gone.
@@ -396,6 +470,10 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	}
 	if loadErr != nil {
 		return credentialLoadError(loadErr)
+	}
+	if pinErr := m.checkPinnedGrant(stored); pinErr != nil {
+		m.cachedCredentials = nil
+		return pinErr
 	}
 	m.cachedCredentials = cloneCredentials(stored)
 	changed := stored.AccessToken != creds.AccessToken || stored.SessionCookie != creds.SessionCookie
@@ -441,7 +519,14 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		return err
 	}
 
-	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, oauthClientID, installID)
+	// A refresh names the client the tokens were issued to. hey mcp's are the local
+	// MCP client's, and HEY refuses a refresh token presented by another client.
+	clientID := creds.ClientID
+	if clientID == "" {
+		clientID = m.clientID
+	}
+
+	token, err := refreshOAuthToken(ctx, m.httpClient, tokenEndpoint, creds.RefreshToken, clientID, installID)
 	if err != nil {
 		return m.accountForRefreshFailure(err, creds.RefreshToken)
 	}
@@ -450,6 +535,15 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	// take the working token with it and leave nothing to authenticate with.
 	if token.AccessToken == "" {
 		return fmt.Errorf("token refresh returned no access token")
+	}
+	if creds.Scope != "" {
+		// A refresh keeps the grant's scope. Take HEY's word when it narrows it, and
+		// refuse an answer that names anything the grant never held.
+		refreshed, scopeErr := grantedScope(creds.Scope, token.Scope)
+		if scopeErr != nil {
+			return scopeErr
+		}
+		creds.Scope = refreshed
 	}
 
 	creds.AccessToken = token.AccessToken
@@ -462,7 +556,7 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		creds.ExpiresAt = token.ExpiresAt.Unix()
 	}
 
-	if err := m.store.save(m.baseURL, creds); err != nil {
+	if err := m.store.save(m.storeKey, creds); err != nil {
 		return err
 	}
 	m.cachedCredentials = cloneCredentials(creds)
@@ -520,7 +614,7 @@ func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) e
 
 	// Forget it under the lock that already spans this load-refresh-save, so the
 	// next command asks for a login instead of re-sending it.
-	if delErr := m.store.delete(m.baseURL); delErr != nil {
+	if delErr := m.store.delete(m.storeKey); delErr != nil {
 		// Keep the process-local guard even if the durable fallback also fails.
 		m.refusedRefreshToken = sentRefreshToken
 
@@ -529,7 +623,7 @@ func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) e
 		// process cannot load and submit it again. A later login overwrites this
 		// through the ordinary save path.
 		tombstone := &Credentials{}
-		if saveErr := m.store.save(m.baseURL, tombstone); saveErr != nil {
+		if saveErr := m.store.save(m.storeKey, tombstone); saveErr != nil {
 			return errRefusedGrant(errors.Join(delErr, fmt.Errorf("replace refused credential: %w", saveErr)))
 		}
 		m.cachedCredentials = cloneCredentials(tombstone)
@@ -657,9 +751,10 @@ func (m *Manager) GetStore() *Store {
 	return m.store
 }
 
-// CredentialKey returns the base URL used as the credential storage key.
+// CredentialKey returns the credential's storage key: the base URL for the CLI's own
+// credential, prefixed for hey mcp's (mcp.go).
 func (m *Manager) CredentialKey() string {
-	return m.baseURL
+	return m.storeKey
 }
 
 func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL string, listener net.Listener, opts LoginOptions) (string, error) {

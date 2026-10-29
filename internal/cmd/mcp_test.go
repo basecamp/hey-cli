@@ -4,13 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/config"
 )
 
 func TestMCPCommandRegistration(t *testing.T) {
@@ -29,28 +36,52 @@ func TestMCPCommandRegistration(t *testing.T) {
 		t.Error("domains flag missing")
 	}
 
-	if !commandUsesAccountScope(command) {
-		t.Error("mcp must use the configured account scope")
+	// hey mcp scopes its own clients to the configured account, on its own credential;
+	// the pre-run's account scoping would ask HEY with the CLI's.
+	if commandUsesAccountScope(command) {
+		t.Error("the pre-run must not scope hey mcp's account with the CLI's credential")
 	}
 }
 
-func TestMCPCommandRequiresAuth(t *testing.T) {
+// hey mcp refuses to start without its own credential, even with the CLI signed in
+// and HEY_TOKEN set: both hold full, and serving on either would undo the scoped
+// sign-in. Nothing reaches HEY.
+func TestMCPCommandRefusesWithoutItsOwnCredential(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(upstream.Close)
+
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 	t.Setenv("XDG_STATE_HOME", tmpDir)
 	t.Setenv("XDG_CACHE_HOME", tmpDir)
-	t.Setenv("HEY_TOKEN", "")
 	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_TOKEN", "a-full-token")
 	stubInteractive(t, false)
+	if err := auth.NewManager(upstream.URL, upstream.Client(), config.ConfigDir()).LoginWithToken("the-clis-full-token"); err != nil {
+		t.Fatal(err)
+	}
 
+	// If hey mcp started serving instead of refusing, it would wait on this transport.
+	_ = stubMCPTransport(t)
 	root := newRootCmd()
 	var buf bytes.Buffer
 	root.SetOut(&buf)
 	root.SetErr(&buf)
-	root.SetArgs([]string{"mcp"})
+	root.SetArgs([]string{"mcp", "--base-url", upstream.URL})
 
-	if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "Not logged in") {
-		t.Fatalf("err = %v, want auth error", err)
+	done := make(chan error, 1)
+	go func() { done <- root.Execute() }()
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("hey mcp started serving without its own credential")
+	}
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.CodeAuth || !strings.Contains(refusal.Hint, "hey auth login --mcp") {
+		t.Fatalf("err = %#v, want an auth error pointing at hey auth login --mcp", err)
 	}
 }
 
@@ -65,17 +96,47 @@ func stubMCPTransport(t *testing.T) mcp.Transport {
 	return clientTransport
 }
 
-// runMCPCommand runs `hey mcp` against a stub HEY server and connects a real
-// MCP client to it over the transport seam. The command exits when the
-// client session closes.
+// mcpTestToken is the access token of the hey mcp credential the tests store.
+const mcpTestToken = "mcp-scoped-token"
+
+// mcpTokenExpiresIn is how long the stored test credential's token lives.
+var mcpTokenExpiresIn = time.Hour
+
+// storeMCPCredential stores a hey mcp credential granted scope, as `hey auth login
+// --mcp` would, signed in a week ago.
+func storeMCPCredential(t *testing.T, baseURL, scope string) {
+	t.Helper()
+	mgr := auth.NewMCPManager(baseURL, http.DefaultClient, config.ConfigDir(), "LocalMcpClient0000000001")
+	creds := &auth.Credentials{
+		AccessToken: mcpTestToken, RefreshToken: "mcp-refresh", OAuthType: "oauth",
+		ExpiresAt: time.Now().Add(mcpTokenExpiresIn).Unix(), Scope: scope, ClientID: "LocalMcpClient0000000001",
+		GrantKey: "test-grant", GrantedAt: time.Now().Add(-7 * 24 * time.Hour).Unix(),
+	}
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), creds); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// runMCPCommand runs `hey mcp` against a stub HEY server, signed in on its own
+// credential with read write send, and connects a real MCP client to it over the
+// transport seam. The command exits when the client session closes.
 func runMCPCommand(t *testing.T, upstream *httptest.Server, args ...string) *mcp.ClientSession {
 	t.Helper()
-	t.Setenv("HEY_TOKEN", "test-token")
+	return runMCPCommandWith(t, upstream, auth.MCPScope, nil, args...)
+}
+
+// runMCPCommandWith is runMCPCommand with the credential's scope and the client's
+// options given.
+func runMCPCommandWith(t *testing.T, upstream *httptest.Server, scope string, clientOpts *mcp.ClientOptions, args ...string) *mcp.ClientSession {
+	t.Helper()
+	// HEY_TOKEN holds whatever a person exported; hey mcp must never send it.
+	t.Setenv("HEY_TOKEN", "a-full-token-hey-mcp-must-not-use")
 	t.Setenv("HEY_NO_KEYRING", "1")
 	tmpDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", tmpDir)
 	t.Setenv("XDG_STATE_HOME", tmpDir)
 	t.Setenv("XDG_CACHE_HOME", tmpDir)
+	storeMCPCredential(t, upstream.URL, scope)
 
 	clientTransport := stubMCPTransport(t)
 
@@ -93,7 +154,7 @@ func runMCPCommand(t *testing.T, upstream *httptest.Server, args ...string) *mcp
 		}
 	})
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "0.0.0"}, clientOpts)
 	session, err := client.Connect(context.Background(), clientTransport, nil)
 	if err != nil {
 		t.Fatalf("MCP initialize failed: %v", err)
@@ -109,9 +170,9 @@ func TestMCPCommandServesMCP(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		// Tool calls must ride on the CLI's own credentials.
-		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
-			t.Errorf("Authorization = %q, want the CLI's token", got)
+		// Tool calls ride on hey mcp's own credential, never the CLI's or HEY_TOKEN.
+		if got := r.Header.Get("Authorization"); got != "Bearer "+mcpTestToken {
+			t.Errorf("Authorization = %q, want hey mcp's own token", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{"id":1,"name":"Imbox"}]`))
@@ -131,8 +192,8 @@ func TestMCPCommandServesMCP(t *testing.T) {
 		}
 		names = append(names, tool.Name)
 	}
-	if len(names) != 7 {
-		t.Fatalf("tools = %v, want 7 hey_* tools", names)
+	if len(names) != 8 || !slices.Contains(names, "hey_send") {
+		t.Fatalf("tools = %v, want the 7 domain tools and hey_send", names)
 	}
 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -282,5 +343,217 @@ func TestMCPCommandSavesDraftsAndNeverSends(t *testing.T) {
 	}
 	if text := saved.Content[0].(*mcp.TextContent).Text; !strings.Contains(text, `"drafted": true`) || !strings.Contains(text, "hey draft send 42") {
 		t.Errorf("result = %s", text)
+	}
+}
+
+func toolNames(t *testing.T, session *mcp.ClientSession) []string {
+	t.Helper()
+	var names []string
+	for tool, err := range session.Tools(context.Background(), nil) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+// The tools follow the scope HEY granted: a sign-in with send unchecked serves no
+// hey_send, and one without write serves nothing that writes.
+func TestMCPCommandServesWhatTheGrantAllows(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(upstream.Close)
+
+	t.Run("send unchecked", func(t *testing.T) {
+		names := toolNames(t, runMCPCommandWith(t, upstream, "read write", nil))
+		if slices.Contains(names, "hey_send") || len(names) != 7 {
+			t.Errorf("tools = %v, want the 7 domain tools and no hey_send", names)
+		}
+	})
+	t.Run("read only", func(t *testing.T) {
+		session := runMCPCommandWith(t, upstream, "read", nil)
+		for tool, err := range session.Tools(context.Background(), nil) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tool.Name == "hey_send" || strings.Contains(tool.Description, "- trash_topic") {
+				t.Errorf("a read-only grant serves a write: %s", tool.Name)
+			}
+		}
+	})
+	t.Run("--read-only", func(t *testing.T) {
+		if names := toolNames(t, runMCPCommand(t, upstream, "--read-only")); slices.Contains(names, "hey_send") {
+			t.Errorf("--read-only serves hey_send: %v", names)
+		}
+	})
+}
+
+// End to end through the command: send_draft reads the draft, asks the person, and
+// sends the approved snapshot once, on hey mcp's own credential, through the client
+// that never retries.
+func TestMCPCommandSendsAConfirmedDraftOnce(t *testing.T) {
+	var puts atomic.Int32
+	var putBody atomic.Value
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer "+mcpTestToken {
+			t.Errorf("%s %s Authorization = %q, want hey mcp's own token", r.Method, r.URL.Path, got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/5/edit.json":
+			_, _ = w.Write([]byte(`{"id":5,"subject":"Re: Q3 plan","content":"<div>Hi Ann</div>","sender":{"id":77,"name":"Jeremy Daer","email_address":"jeremy@hey.example"},"addressed":{"directly":[{"id":1,"name":"Ann Example","email_address":"ann@example.com"}]}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
+			_, _ = w.Write([]byte(`{"id":1,"primary_contact":{"id":77,"email_address":"jeremy@hey.example"},"senders":[{"id":77,"email_address":"jeremy@hey.example"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/advanced_search.json":
+			_, _ = w.Write([]byte(`{"matches":[]}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/messages/5.json":
+			puts.Add(1)
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			putBody.Store(body)
+			_, _ = w.Write([]byte(`{"id":5,"topic_id":900}`))
+		default:
+			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	var prompt string
+	session := runMCPCommandWith(t, upstream, auth.MCPScope, &mcp.ClientOptions{
+		ElicitationHandler: func(_ context.Context, req *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			prompt = req.Params.Message
+			return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, nil
+		},
+	})
+	call := func() *mcp.CallToolResult {
+		t.Helper()
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "hey_send",
+			Arguments: map[string]any{"action": "send_draft", "params": map[string]any{"draft_id": 5}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	sent := call()
+	if sent.IsError {
+		t.Fatalf("send_draft failed: %v", sent.Content)
+	}
+	if !strings.Contains(prompt, `"Ann Example" <ann@example.com> (new: never emailed before)`) {
+		t.Errorf("prompt = %s", prompt)
+	}
+	body, _ := putBody.Load().(map[string]any)
+	entry, _ := body["entry"].(map[string]any)
+	if entry["status"] != nil || entry["addressed"] == nil {
+		t.Errorf("delivery entry = %v, want recipients and no drafted status", entry)
+	}
+
+	again := call()
+	if !again.IsError {
+		t.Fatalf("a second send_draft of the same draft went through: %v", again.Content)
+	}
+	if got := puts.Load(); got != 1 {
+		t.Errorf("HEY saw %d deliveries, want 1", got)
+	}
+}
+
+// A delivery answered 401 isn't resent: the SDK would refresh and resend, and a send
+// is one request.
+func TestMCPCommandNeverResendsADeliveryAfterA401(t *testing.T) {
+	var puts atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/5/edit.json":
+			_, _ = w.Write([]byte(`{"id":5,"subject":"Re: Q3 plan","content":"<div>Hi Ann</div>","sender":{"id":77,"email_address":"jeremy@hey.example"},"addressed":{"directly":[{"id":1,"email_address":"ann@example.com"}]}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
+			_, _ = w.Write([]byte(`{"id":1,"senders":[{"id":77,"email_address":"jeremy@hey.example"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/advanced_search.json":
+			_, _ = w.Write([]byte(`{"matches":[]}`))
+		case r.Method == http.MethodPut && r.URL.Path == "/messages/5.json":
+			puts.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/oauth/tokens":
+			_, _ = w.Write([]byte(`{"access_token":"fresh","refresh_token":"fresh-refresh","expires_in":3600,"scope":"read write send"}`))
+		default:
+			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	session := runMCPCommandWith(t, upstream, auth.MCPScope, &mcp.ClientOptions{
+		ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, nil
+		},
+	})
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_send",
+		Arguments: map[string]any{"action": "send_draft", "params": map[string]any{"draft_id": 5}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Errorf("a 401 delivery reported success: %v", result.Content)
+	}
+	if got := puts.Load(); got != 1 {
+		t.Errorf("HEY saw %d delivery requests, want 1", got)
+	}
+}
+
+// A token that can't be renewed refuses the send without claiming the draft. The reads
+// before the claim renew too, so this holds the outcome; the check right before the
+// claim is held by mcpserver's TestAGrantNarrowedDuringTheReviewDoesntClaimTheDraft.
+func TestMCPCommandDoesntClaimWhenTheTokenCantBeRenewed(t *testing.T) {
+	var puts, refreshes atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/messages/5/edit.json":
+			_, _ = w.Write([]byte(`{"id":5,"subject":"Re: Q3 plan","content":"<div>Hi Ann</div>","sender":{"id":77,"email_address":"jeremy@hey.example"},"addressed":{"directly":[{"id":1,"email_address":"ann@example.com"}]}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
+			_, _ = w.Write([]byte(`{"id":1,"senders":[{"id":77,"email_address":"jeremy@hey.example"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/advanced_search.json":
+			_, _ = w.Write([]byte(`{"matches":[]}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/oauth/tokens":
+			refreshes.Add(1)
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case r.Method == http.MethodPut:
+			puts.Add(1)
+			_, _ = w.Write([]byte(`{"id":5,"topic_id":900}`))
+		default:
+			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	orig := mcpTokenExpiresIn
+	mcpTokenExpiresIn = -time.Minute // expired: every use asks for a renewal
+	t.Cleanup(func() { mcpTokenExpiresIn = orig })
+	session := runMCPCommandWith(t, upstream, auth.MCPScope, &mcp.ClientOptions{
+		ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+			return &mcp.ElicitResult{Action: "accept", Content: map[string]any{"confirm": true}}, nil
+		},
+	})
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_send",
+		Arguments: map[string]any{"action": "send_draft", "params": map[string]any{"draft_id": 5}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError || puts.Load() != 0 {
+		t.Fatalf("sent (%d PUTs) on a token that couldn't be renewed: %v", puts.Load(), result.Content)
+	}
+	if strings.Contains(result.Content[0].(*mcp.TextContent).Text, "already sent") {
+		t.Error("the draft was claimed")
 	}
 }
