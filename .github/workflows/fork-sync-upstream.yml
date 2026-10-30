@@ -1,0 +1,28 @@
+# Fork-only: keeps justanotherspy/hey-cli's main current with basecamp/hey-cli.
+#
+# This fork exists for one reason: it drops bin/.keep, because the claude.ai
+# marketplace sync refuses a plugin with a top-level bin/ directory. Everything
+# else comes from upstream, merged in daily.
+#
+# Needs the FORK_SYNC_TOKEN secret: a fine-grained PAT on this repository with
+# Contents and Workflows read/write. GITHUB_TOKEN cannot push upstream commits
+# that change .github/workflows, so it is not enough.
+name: Sync fork with upstream
+
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  sync:
+    if: github.repository == 'justanotherspy/hey-cli'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge basecamp/hey-cli main into main
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: gh api --method POST "repos/${REPO}/merge-upstream" -f branch=main
