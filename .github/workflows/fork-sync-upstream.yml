@@ -4,9 +4,9 @@
 # marketplace sync refuses a plugin with a top-level bin/ directory. Everything
 # else comes from upstream, merged in daily.
 #
-# Needs the FORK_SYNC_TOKEN secret: a fine-grained PAT on this repository with
-# Contents and Workflows read/write. GITHUB_TOKEN cannot push upstream commits
-# that change .github/workflows, so it is not enough.
+# The token comes from octo-sts (trust policy: .github/chainguard/fork-sync.sts.yaml),
+# not a stored secret: GITHUB_TOKEN cannot push upstream commits that change
+# .github/workflows, and a short-lived token beats a long-lived PAT.
 name: Sync fork with upstream
 
 on:
@@ -14,15 +14,22 @@ on:
     - cron: '23 5 * * *'
   workflow_dispatch:
 
-permissions: {}
+permissions:
+  id-token: write
 
 jobs:
   sync:
     if: github.repository == 'justanotherspy/hey-cli'
     runs-on: ubuntu-latest
     steps:
+      - uses: octo-sts/action@f603d3be9d8dd9871a265776e625a27b00effe05 # v1.1.1
+        id: sts
+        with:
+          scope: justanotherspy/hey-cli
+          identity: fork-sync
+
       - name: Merge basecamp/hey-cli main into main
         env:
-          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+          GH_TOKEN: ${{ steps.sts.outputs.token }}
           REPO: ${{ github.repository }}
         run: gh api --method POST "repos/${REPO}/merge-upstream" -f branch=main

@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/octo-sts/app/refs/heads/main/pkg/octosts/octosts.TrustPolicy.json
+
+# Fork-only: lets the "Sync fork with upstream" workflow on main mint a
+# short-lived token to merge basecamp/hey-cli into this fork's main.
+#
+# Workflows write is needed because upstream commits often touch
+# .github/workflows, which GITHUB_TOKEN can never push.
+#
+# The scheduled and manual runs both run on refs/heads/main, so this matches
+# exactly. If this repository opts in to GitHub's immutable OIDC subject, the
+# subject becomes repo:justanotherspy@4822513/hey-cli@<repo id>:ref:refs/heads/main.
+issuer: https://token.actions.githubusercontent.com
+subject: repo:justanotherspy/hey-cli:ref:refs/heads/main
+
+permissions:
+  contents: write
+  workflows: write
