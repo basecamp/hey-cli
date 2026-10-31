@@ -329,9 +329,46 @@ func TestRecipientsForReplyTo(t *testing.T) {
 					Blindcopied: []generated.Contact{contact("bcc@example.com")},
 				},
 			},
+			want: replyRecipients{To: []string{"jane@example.com", "Rick@example.com"}},
+		},
+		{
+			name: "a reply leaves out the people the message blind copied",
+			message: generated.Message{
+				Sender: contact("rick@example.com"),
+				Addressed: generated.Addressed{
+					Directly:    []generated.Contact{contact("jane@example.com")},
+					Copied:      []generated.Contact{contact("cc@example.com")},
+					Blindcopied: []generated.Contact{contact("bcc@example.com")},
+				},
+			},
 			want: replyRecipients{
-				To:  []string{"jane@example.com", "Rick@example.com"},
-				BCC: []string{"bcc@example.com"},
+				To: []string{"jane@example.com", "rick@example.com"},
+				CC: []string{"cc@example.com"},
+			},
+		},
+		{
+			name: "a reply to our own message to ourselves keeps the list we blind copied",
+			message: generated.Message{
+				Sender: contact("me@example.com"),
+				Addressed: generated.Addressed{
+					Directly:    []generated.Contact{contact("me@example.com")},
+					Blindcopied: []generated.Contact{contact("a@example.com"), contact("b@example.com")},
+				},
+			},
+			want: replyRecipients{
+				To:  []string{"me@example.com"},
+				BCC: []string{"a@example.com", "b@example.com"},
+			},
+		},
+		{
+			name: "a message only blind copied people received keeps them blind copied",
+			message: generated.Message{
+				Sender:    contact("me@example.com"),
+				Addressed: generated.Addressed{Blindcopied: []generated.Contact{contact("a@example.com"), contact("b@example.com")}},
+			},
+			want: replyRecipients{
+				To:  []string{"me@example.com"},
+				BCC: []string{"a@example.com", "b@example.com"},
 			},
 		},
 		{

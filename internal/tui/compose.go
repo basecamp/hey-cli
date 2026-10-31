@@ -691,7 +691,9 @@ func replySubjectFor(message generated.Message) string {
 // recipientsForReplyTo answers who a reply to this message goes to: the message's own
 // recipients, with whoever sent it moved onto the To line. That is what HEY does in
 // Entry::Addressed#participating_contacts_in_reply_by_kind, so a reply reaches the
-// person who wrote the message as well as everyone they wrote to.
+// person who wrote the message as well as everyone they wrote to. The people it
+// blind copied stay off the reply, as HEY leaves them off, unless they are all the
+// audience there is: see keepsBlindCopied.
 func recipientsForReplyTo(message generated.Message) (to, cc, bcc []string) {
 	sender := message.Sender.EmailAddress
 	if sender == "" {
@@ -702,7 +704,22 @@ func recipientsForReplyTo(message generated.Message) (to, cc, bcc []string) {
 	if sender != "" {
 		to = append(to, sender)
 	}
-	return to, addressesOf(message.Addressed.Copied, sender), addressesOf(message.Addressed.Blindcopied, sender)
+	cc = addressesOf(message.Addressed.Copied, sender)
+	if keepsBlindCopied(message.Addressed, sender) {
+		bcc = addressesOf(message.Addressed.Blindcopied, sender)
+	}
+	return to, cc, bcc
+}
+
+// keepsBlindCopied is HEY's rule (haystack#9169) for whether a reply keeps the people the
+// answered message blind copied: only when they are the whole audience, because blind
+// copying is often "this once" and a follow-up shouldn't reach them unseen. Nobody is left
+// to address once the sender, who is the replier when they answer their own message
+// (the fallback cannot tell otherwise), is set aside, as with "To: me, Bcc: the list"
+// or a thread of only blind copied people.
+func keepsBlindCopied(addressed generated.Addressed, sender string) bool {
+	visible := append(append([]generated.Contact{}, addressed.Directly...), addressed.Copied...)
+	return len(addressesOf(visible, sender)) == 0
 }
 
 // addressesOf answers the contacts' email addresses, dropping blanks, repeats, and the
