@@ -15,6 +15,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/calendarday"
 	"github.com/basecamp/hey-cli/internal/output"
 	"github.com/basecamp/hey-cli/internal/terminal"
 	"github.com/basecamp/hey-cli/internal/timezone"
@@ -70,7 +71,14 @@ series expanded into the days they fall on — read 'hey event day' or 'hey even
 
 Without --starts-on the window is the 30 days from today, today in your HEY account's time
 zone, whatever this machine's is. An account with no time zone set reads this machine's
-today, and says so on stderr.`,
+today, and says so on stderr.
+
+--starts-on and --ends-on name days in that same zone, and --ends-on is included. An
+event is listed when it overlaps those days, so an evening event is on its own day and not
+on the next UTC day. An all-day event is listed on the dates it names. A repeating series
+is listed as the row HEY stores, unless the series starts after the last day.
+
+The table shows times in that same zone, and --json keeps HEY's UTC times.`,
 		Annotations: map[string]string{
 			"agent_notes": "list carries no countdowns; day and week do. " + recordingWindowNotes,
 		},
@@ -104,7 +112,12 @@ func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	events, err := window.read(ctx, recordingTypeEvent)
+	loc, err := account.locationToRead(ctx, cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
+
+	events, err := readEventsOfLocalDays(ctx, window, loc)
 	if err != nil {
 		return err
 	}
@@ -115,19 +128,55 @@ func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	notice := output.TruncationNotice(len(events), total)
 
-	return writeEventRows(cmd, eventRows(events), window.describe(), notice)
+	return writeEventRows(cmd, eventRows(events), window.describe(), notice, loc)
+}
+
+// readEventsOfLocalDays reads the events that overlap the window's days in the account's zone.
+// HEY reads a date as a UTC day, so it asks for the UTC day the zone reaches into on each
+// side, and keeps what falls on the days named.
+func readEventsOfLocalDays(ctx context.Context, window recordingWindow, loc *time.Location) ([]generated.Recording, error) {
+	first, err := parseDateArg("starts-on date", window.startsOn)
+	if err != nil {
+		return nil, err
+	}
+	last, err := parseDateArg("ends-on date", window.endsOn)
+	if err != nil {
+		return nil, err
+	}
+
+	wide := window
+	wide.startsOn = first.Format(dateLayout)
+	if calendarday.ReachesDayBefore(first, loc) {
+		wide.startsOn = first.AddDate(0, 0, -1).Format(dateLayout)
+	}
+	wide.endsOn = last.AddDate(0, 0, 1).Format(dateLayout)
+	if calendarday.ReachesDayAfter(last, loc) {
+		wide.endsOn = last.AddDate(0, 0, 2).Format(dateLayout)
+	}
+	read, err := wide.read(ctx, recordingTypeEvent)
+	if err != nil {
+		return nil, err
+	}
+
+	events := make([]generated.Recording, 0, len(read))
+	for _, event := range read {
+		if calendarday.InDays(event, first, last, loc) {
+			events = append(events, event)
+		}
+	}
+	return events, nil
 }
 
 // eventBoundary writes one end of an event: a day for an all-day event, a day and a clock
 // time for a timed one. An all-day event has no time of day, and printing it midnight reads
 // as an event that starts at midnight. HEY's JSON is always UTC, so a timed boundary
-// converts to the reader's clock the way HEY's own views draw it, while an all-day date is
-// the day it names and does not shift.
-func eventBoundary(at time.Time, allDay bool) string {
+// converts to the zone the days were picked in, the way HEY's own views draw it, while an
+// all-day date is the day it names and does not shift.
+func eventBoundary(at time.Time, allDay bool, loc *time.Location) string {
 	if allDay {
-		return formatDate(at)
+		return formatDate(at.UTC())
 	}
-	return formatTimestamp(at.Local())
+	return formatTimestamp(at.In(loc))
 }
 
 // add
@@ -282,8 +331,10 @@ the later where neither is; a time you keep at the other, or with seconds, canno
 so the edit refuses until you retype it. All of this holds for an --occurrence edit too.
 
 The event is found by reading every calendar it might be on, which is one request each and
-covers the pages HEY answers with. Give the day it starts as [date] to look on that day
-alone. Without [date] it is looked for within a year either side of today, and an event not
+covers the pages HEY answers with. Give the day it starts as [date] to look from the day
+before it to the day after it, so an evening or early-morning event is found by the date it
+shows on.
+Without [date] it is looked for within a year either side of today, and an event not
 found there is refused as not_found rather than written blind.
 
 --calendar moves the event to that calendar, which has to be one you own or share: not your
@@ -578,10 +629,10 @@ func movedReadBackError(id, calendarID int64, err error) error {
 // --calendar is not one of them: it is where the event is moving to, which is the one
 // calendar it is not on yet.
 //
-// The day is read as the window [day, day+1): HEY's recordings window is a pair of
-// instants, and the degenerate same-day window — midnight to the same midnight — can
-// never contain a timed event, which is how editing an event by its own day used to
-// answer not-found. Reading a day too many is harmless here: the event is matched by id.
+// The day is read as the window [day-1, day+2): HEY's recordings window is a pair of
+// instants, and the degenerate same-day window can never contain a timed event, which is how
+// editing an event by its own day used to answer not-found. Reading a day too many is
+// harmless here: the event is matched by id.
 func (c *eventsEditCommand) findEvent(ctx context.Context, id int64, on string) (generated.Recording, error) {
 	window, err := eventSearchWindow(ctx, on)
 	if err != nil {
@@ -610,14 +661,16 @@ func findEventIn(ctx context.Context, window recordingWindow, id int64) (generat
 }
 
 // eventSearchWindow is where an event given by id is looked for: the day given, read as
-// [day, day+1), or a year either side of today, over every calendar.
+// [day-1, day+2), or a year either side of today, over every calendar. It reads no zone, since
+// that costs a request of its own, and the wider window costs none.
 func eventSearchWindow(ctx context.Context, on string) (recordingWindow, error) {
-	endsOn := on
+	startsOn, endsOn := on, on
 	if day, err := time.Parse(dateLayout, on); err == nil {
-		endsOn = day.AddDate(0, 0, 1).Format(dateLayout)
+		startsOn = day.AddDate(0, 0, -1).Format(dateLayout)
+		endsOn = day.AddDate(0, 0, 2).Format(dateLayout)
 	}
 	filter := recordingFilter{
-		startsOn:         on,
+		startsOn:         startsOn,
 		endsOn:           endsOn,
 		defaultWindow:    eventSearchYear,
 		defaultCalendars: allCalendarIDs,

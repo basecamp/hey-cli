@@ -223,6 +223,11 @@ With an event picked out, Enter opens a read-only card showing what it carries â
 
 Press `l` to open time tracking, then choose Categories to manage time track categories. Create a category with `n`, rename the selected category with Enter or `r`, and press `x` twice to delete it. Time tracks in a deleted category become uncategorized.
 
+The day and week views show days of this machine's local time zone. A timed event belongs to
+the local day it overlaps. HEY reads a date as a UTC day, so the app also reads the UTC day
+that the local day (or week) reaches into: the day after west of UTC, the day before east of
+it, and neither in UTC. An all-day event stays on its own dates.
+
 A new event's times are written in your HEY account's time zone, the one HEY's web app and
 `hey event add` use: the Starts and Ends rows name it, and the event is saved in it. The
 Calendar reads the zone each time it opens; if the account has none or it cannot be read,
