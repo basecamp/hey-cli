@@ -53,7 +53,9 @@ nothing else is refused.
 The reply is addressed the way HEY's own web app addresses one: everyone that entry was
 addressed to, with whoever wrote it on the To line, minus your own addresses. If HEY's
 prefill is unavailable or names no one, a send falls back to the message's own recipients,
-which can include you. Repeatable --to, --cc and --bcc
+which can include you. The fallback leaves out the people that message blind copied, as HEY
+does, unless they are everyone left to address, and it takes the sender as the replier, so
+answering your own message can keep its blind copied people. Repeatable --to, --cc and --bcc
 values add or move recipients on those lines; each value can also be comma-separated.
 --replace-recipients uses only the explicitly supplied recipients instead. A dry run
 resolves and prints the complete envelope without requiring a message or sending one.
