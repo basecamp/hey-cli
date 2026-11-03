@@ -51,7 +51,9 @@ or a top-level domain HEY does not know — is refused before anything is sent.
 A send answers the new message's id and the topic_id of the thread it is on (for hey
 thread read or hey reply), with its subject and delayed, which is true while Undo Send
 holds the delivery back. Whatever HEY's answer leaves out is left out here too; nothing
-is guessed in its place. --draft saves instead of sending and answers the draft's id.
+is guessed in its place. --draft saves instead of sending and answers the draft's id
+and, where the configured server names one, app_url: the draft's page in HEY, also on
+the styled line.
 
 While Undo Send holds a message back (delayed), HEY leaves it out of its thread:
 hey thread read shows the thread without it, and a thread it started answers not_found,
