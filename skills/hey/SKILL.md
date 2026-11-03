@@ -196,10 +196,11 @@ for a mark, or read the destination box for a move. An empty `match` with `next_
 
 ## Sending
 
+- **Writing an email for a person goes draft, review, send.** Save it with `--draft` on `compose` or `reply`, show the person its From, To, Cc, Bcc, Subject and Body in the conversation (`hey draft show <id> --json` reads it back), change it with `hey draft edit <id>` as they ask, and run `hey draft send <id>` when they say to send it. They don't need to open HEY to review it. When the person asks outright for a message to go out, `compose` or `reply` without `--draft` sends it in one step.
 - A send (`compose`, `reply`, `forward`, `draft send`) answers the new message's `id` and the `topic_id` of the thread it landed on; read it with `hey thread read <topic_id>`.
 - `delayed: true` means Undo Send is still holding it, and HEY leaves it out of its thread until it goes out: `hey thread read` shows the thread without it, or answers `not_found` for a thread it started. Wait and read again rather than treating the send as lost.
 - A send HEY refused (usually the account's sending limit) fails with `not_delivered` (exit 7). HEY kept it as a draft, named by `draft_id` in the error; `hey draft send <draft_id>` sends it later. Do not resend the message; that makes a second draft.
-- To let a person review before anything goes out, add `--draft` to `compose` or `reply`; the answer carries the draft ID for `hey draft show|edit|send|delete` and, when the CLI can name it, `app_url`, the draft's page in HEY. The person reviews and sends it from any HEY app, or you send it later with `hey draft send`.
+- A `--draft` answer carries the draft ID for `hey draft show|edit|send|delete` and, when the CLI can name it, `app_url`, the draft's page in HEY. The person can also review and send it from any HEY app.
 - `hey thread comment <topic_id> -m "..."` adds a note to a thread, which is never emailed but is not private: everyone with access to the thread sees it, HEY for Domains teammates included. The answer lists them in `visible_to`; `--dry-run` answers the same without adding anything. To mail the people on a thread, use `hey reply`.
 - `hey bulk-reply`: run `preview` before `send`. A delivery sent by mistake can be recalled with `hey bulk-reply undo <delivery_id>` while the window is open.
 
