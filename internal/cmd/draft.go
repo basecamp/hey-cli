@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ type draftOutput struct {
 	IsReply             bool              `json:"is_reply,omitempty"`
 	ScheduledDeliveryAt *time.Time        `json:"scheduled_delivery_at,omitempty"`
 	UpdatedAt           *time.Time        `json:"updated_at,omitempty"`
+	AppURL              string            `json:"app_url,omitempty"`
 }
 
 func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
@@ -44,6 +46,7 @@ func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 		CC:      addressEmails(edit.Addressed.Copied),
 		BCC:     addressEmails(edit.Addressed.Blindcopied),
 		IsReply: edit.IsReply,
+		AppURL:  draftAppURL(id),
 	}
 	if edit.Sender.Id == 0 {
 		out.From = edit.Creator.EmailAddress
@@ -135,7 +138,7 @@ func newDraftShowCommand() *draftShowCommand {
 		Use:   "show <draft-id>",
 		Short: "Read a draft back",
 		Annotations: map[string]string{
-			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown. The answer includes from, the sender the draft goes out as, and, for a draft scheduled in a HEY app, scheduled_delivery_at in UTC like every HEY timestamp (the styled view shows it in local time).",
+			"agent_notes": "Draft IDs come from `hey draft list` or from saving with `hey compose --draft`. The body is Markdown. The answer includes from, the sender the draft goes out as, app_url, the draft's page in HEY, and, for a draft scheduled in a HEY app, scheduled_delivery_at in UTC like every HEY timestamp (the styled view shows it in local time).",
 		},
 		Example: `  hey draft show 12345
   hey draft show 12345 --json`,
@@ -180,6 +183,9 @@ func (c *draftShowCommand) run(cmd *cobra.Command, args []string) error {
 		if out.ScheduledDeliveryAt != nil {
 			fmt.Fprintf(w, "Scheduled: %s\n", out.ScheduledDeliveryAt.Local().Format("2006-01-02 15:04"))
 		}
+		if out.AppURL != "" {
+			fmt.Fprintf(w, "In HEY: %s\n", terminal.SanitizeLine(out.AppURL))
+		}
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, markdown.Render(out.Body, stdoutWidth()))
 		return nil
@@ -216,7 +222,7 @@ func newDraftEditCommand() *draftEditCommand {
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
 or a top-level domain HEY does not know — is refused before anything is sent.`,
 		Annotations: map[string]string{
-			"agent_notes": "--from chooses a configured sender email or ID within this draft account. It preserves the body verbatim, including existing signatures; use a body flag to replace those. Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved. A draft scheduled between whole UTC hours, which HEY's API cannot express, is refused as a usage error (exit 1) rather than moved — adjust it in a HEY app first. --from saves no default sender.",
+			"agent_notes": "--from chooses a configured sender email or ID within this draft account. It preserves the body verbatim, including existing signatures; use a body flag to replace those. Each flag replaces its field and an omitted flag keeps what the draft has — --to/--cc/--bcc replace that whole recipient kind (an explicit empty value clears it). With no field flags the body opens in $EDITOR as Markdown. A scheduled delivery is preserved. A draft scheduled between whole UTC hours, which HEY's API cannot express, is refused as a usage error (exit 1) rather than moved — adjust it in a HEY app first. --from saves no default sender. It answers the draft's id and app_url, its page in HEY.",
 		},
 		Example: `  hey draft edit 12345 --subject "Quarterly planning (v2)"
   hey draft edit 12345 --to maria@example.com --cc finance@example.com
@@ -312,8 +318,31 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 	if err := editClient.Messages().UpdateDraft(ctx, draftID, content); err != nil {
 		return apierr.FromSDK(err)
 	}
-	return writeMutationLine(cmd, fmt.Sprintf("Draft %d updated.", draftID), "Draft updated",
-		map[string]any{"id": draftID})
+	data := map[string]any{"id": draftID}
+	line := fmt.Sprintf("Draft %d updated.", draftID)
+	if link := draftAppURL(draftID); link != "" {
+		data["app_url"] = link
+		line = fmt.Sprintf("Draft %d updated: %s", draftID, link)
+	}
+	return writeMutationLine(cmd, line, "Draft updated", data)
+}
+
+// draftAppURL is where a person opens draft id in HEY, or "" when there is no
+// server to name. HEY's answer to a draft save names the draft's resource
+// (Location: <origin>/messages/<id>), which in a browser opens its thread, and
+// the SDK keeps only the id from it. The page that opens the draft is
+// /messages/<id>/edit, haystack's edit_message_url, which HEY's Drafts listing
+// serves as edit_url. It's named on the server the CLI talks to, the origin
+// HEY's Location carries.
+func draftAppURL(id int64) string {
+	if cfg == nil || id <= 0 {
+		return ""
+	}
+	u, err := url.Parse(strings.TrimSpace(cfg.BaseURL))
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
+		return ""
+	}
+	return fmt.Sprintf("%s://%s/messages/%d/edit", u.Scheme, u.Host, id)
 }
 
 // --- send ---

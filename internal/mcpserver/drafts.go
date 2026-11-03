@@ -130,6 +130,24 @@ func draftID(location string) string {
 	return ""
 }
 
+// draftLink is the page that opens a saved draft in HEY, or "" when its
+// Location names none. The Location is the draft's resource,
+// <origin>/messages/{entry_id}, which in a browser opens its thread; the
+// draft's page is that URL's /edit (haystack's edit_message_url, which HEY's
+// Drafts listing serves as edit_url), on the origin HEY answered from. A
+// relative Location names no origin, so it gives no link rather than a guess.
+func draftLink(location string) string {
+	u, err := url.Parse(location)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.User != nil {
+		return ""
+	}
+	m := draftPath.FindStringSubmatch(u.Path)
+	if m == nil || strings.TrimSuffix(u.Path, "/") != "/messages/"+m[1] {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/messages/" + m[1] + "/edit"
+}
+
 // draftResult is what a confirmed draft save answers, so the model doesn't
 // report a send that didn't happen and knows how the draft gets delivered.
 func draftResult(resp *hey.Response) map[string]any {
@@ -137,6 +155,9 @@ func draftResult(resp *hey.Response) map[string]any {
 	result := map[string]any{"status": resp.StatusCode, "location": location, "drafted": true}
 	if id := draftID(location); id != "" {
 		result["draft_id"] = id
+		if link := draftLink(location); link != "" {
+			result["app_url"] = link
+		}
 		result["note"] = "Saved as a draft, not sent. hey mcp doesn't deliver mail: a person reviews and sends it from HEY, or with `hey draft send " + id + "`."
 	} else {
 		result["note"] = "Saved as a draft, not sent. hey mcp doesn't deliver mail: " + howToSend + "."

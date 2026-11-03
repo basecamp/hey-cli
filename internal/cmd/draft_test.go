@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/config"
 )
 
 // draftLifecycleServer serves the identity the SDK's sending operations resolve, a
@@ -150,6 +152,66 @@ func TestDraftShowAnswersTheEditableState(t *testing.T) {
 	}
 	if len(writes) != 0 {
 		t.Errorf("show must not write, wrote %+v", writes)
+	}
+}
+
+// Every verb that saves a draft answers with its page in HEY, in JSON and in the
+// styled line, so it can be handed over without another call; show names it too.
+func TestDraftSavesAnswerWithTheDraftsPage(t *testing.T) {
+	isPage := func(link any) bool {
+		s, _ := link.(string)
+		return strings.HasPrefix(s, "http://127.0.0.1:") && strings.HasSuffix(s, "/messages/12345/edit")
+	}
+	for _, args := range [][]string{
+		{"compose", "--subject", "Board update", "-m", "Numbers.", "--draft"},
+		{"draft", "edit", "12345", "--subject", "New"},
+		{"draft", "show", "12345"},
+	} {
+		var writes []draftWrite
+		response, err := runJSONCommand(t, draftLifecycleServer(t, draftEditJSON, &writes), args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if data, _ := response.Data.(map[string]any); !isPage(data["app_url"]) {
+			t.Errorf("%v: data = %#v, want app_url naming the draft's page", args, response.Data)
+		}
+	}
+	for _, args := range [][]string{
+		{"compose", "--subject", "Board update", "-m", "Numbers.", "--draft"},
+		{"draft", "edit", "12345", "--subject", "New"},
+		{"draft", "show", "12345"},
+	} {
+		var writes []draftWrite
+		out, err := runStyledCommand(t, draftLifecycleServer(t, draftEditJSON, &writes), args...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		if !strings.Contains(out, "/messages/12345/edit") {
+			t.Errorf("%v: output = %q, want the draft's page", args, out)
+		}
+	}
+}
+
+func TestDraftAppURLNamesOnlyAServer(t *testing.T) {
+	previous := cfg
+	t.Cleanup(func() { cfg = previous })
+	for base, want := range map[string]string{
+		"https://app.hey.com":      "https://app.hey.com/messages/7/edit",
+		"https://app.hey.com/":     "https://app.hey.com/messages/7/edit",
+		"http://localhost:3000":    "http://localhost:3000/messages/7/edit",
+		"":                         "",
+		"app.hey.com":              "",
+		"https://u:p@app.hey.com":  "",
+		"javascript://app.hey.com": "",
+	} {
+		cfg = &config.Config{BaseURL: base}
+		if got := draftAppURL(7); got != want {
+			t.Errorf("draftAppURL with %q = %q, want %q", base, got, want)
+		}
+	}
+	cfg = nil
+	if got := draftAppURL(7); got != "" {
+		t.Errorf("draftAppURL with no config = %q", got)
 	}
 }
 
