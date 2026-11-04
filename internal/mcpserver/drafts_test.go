@@ -286,6 +286,33 @@ func TestDraftSaveWithAnUnknownOutcomeSaysToCheckHEY(t *testing.T) {
 	}
 }
 
+// A draft's page is its Location's /edit on the origin HEY answered from; a
+// Location with no origin, or naming anything but a draft, gives no link.
+func TestDraftLinkReadsTheLocation(t *testing.T) {
+	for location, want := range map[string]string{
+		"https://app.hey.com/messages/77":         "https://app.hey.com/messages/77/edit",
+		"https://app.hey.com/messages/77/":        "https://app.hey.com/messages/77/edit",
+		"https://staging.hey.example/messages/77": "https://staging.hey.example/messages/77/edit",
+		"/messages/77":                         "",
+		"https://app.hey.com/topics/77":        "",
+		"https://app.hey.com/x/messages/77":    "",
+		"https://u:p@app.hey.com/messages/77":  "",
+		"javascript://app.hey.com/messages/77": "",
+		"%zz":                                  "",
+	} {
+		if got := draftLink(location); got != want {
+			t.Errorf("draftLink(%q) = %q, want %q", location, got, want)
+		}
+	}
+	result := draftResult(draftSaved("https://app.hey.com/messages/77"))
+	if result["app_url"] != "https://app.hey.com/messages/77/edit" {
+		t.Errorf("result = %v, want the draft's page as app_url", result)
+	}
+	if result := draftResult(draftSaved("/messages/77")); result["app_url"] != nil {
+		t.Errorf("result = %v, want no app_url for a Location with no origin", result)
+	}
+}
+
 func TestDraftIDReadsTheLocation(t *testing.T) {
 	for location, want := range map[string]string{
 		"/messages/77":                      "77",

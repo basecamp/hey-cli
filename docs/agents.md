@@ -94,7 +94,10 @@ call that asks to send (any other `entry.status`), schedule (`entry.scheduled_de
 and its date and hour) or triage the thread in the same request (`mark_done`, `pop`,
 `scheduled_bubble_up`) is refused before anything reaches HEY. Updating a draft that was
 scheduled clears its schedule rather than letting it go out later. A save comes back as
-`{"drafted": true, "draft_id": ..., "location": ..., "note": ...}`. HEY acknowledges a
+`{"drafted": true, "draft_id": ..., "location": ..., "app_url": ..., "note": ...}`.
+`location` is HEY's answer, the draft's resource, which in a browser opens its thread;
+`app_url` is the page that opens the draft (`/messages/<id>/edit` on the Location's
+origin), left out when the Location is relative or names anything but a draft. HEY acknowledges a
 draft with 204 and a Location. Any other answer is reported as an error that says the
 mail may have been sent, so check HEY before trying again. A save that fails with no
 answer from HEY (a dropped connection, a timeout, a 5xx) may still have been saved, and

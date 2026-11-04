@@ -51,7 +51,9 @@ or a top-level domain HEY does not know — is refused before anything is sent.
 A send answers the new message's id and the topic_id of the thread it is on (for hey
 thread read or hey reply), with its subject and delayed, which is true while Undo Send
 holds the delivery back. Whatever HEY's answer leaves out is left out here too; nothing
-is guessed in its place. --draft saves instead of sending and answers the draft's id.
+is guessed in its place. --draft saves instead of sending and answers the draft's id
+and, where the configured server names one, app_url: the draft's page in HEY, also on
+the styled line.
 
 While Undo Send holds a message back (delayed), HEY leaves it out of its thread:
 hey thread read shows the thread without it, and a thread it started answers not_found,
@@ -62,7 +64,7 @@ it keeps the message as a draft; the command then fails with not_delivered (exit
 naming the draft, which hey draft send sends later.`,
 		Args: recipientsChecked(nil),
 		Annotations: map[string]string{
-			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages. --from does not save a default sender. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not; --thread-id answers the thread's latest emailed message, never a note (kind \"comment\") or share notice (kind \"access_notice\"), and a thread with no emailed message is refused as not_found. Repeatable --attach files are uploaded before sending and can be sent without body text. With neither -m nor --message-html the body is read from stdin when stdin is not a terminal, and $EDITOR opens when it is (unless --attach files stand in for a body). The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out. A send answers the new message's id and the topic_id of its thread (for hey thread read), with subject and delayed (true while Undo Send holds it back) — only the fields HEY's answer carries, never guessed. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
+			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages. --from does not save a default sender. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not; --thread-id answers the thread's latest emailed message, never a note (kind \"comment\") or share notice (kind \"access_notice\"), and a thread with no emailed message is refused as not_found. Repeatable --attach files are uploaded before sending and can be sent without body text. With neither -m nor --message-html the body is read from stdin when stdin is not a terminal, and $EDITOR opens when it is (unless --attach files stand in for a body). The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete, with app_url, the draft's page in HEY. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out. A send answers the new message's id and the topic_id of its thread (for hey thread read), with subject and delayed (true while Undo Send holds it back) — only the fields HEY's answer carries, never guessed. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
@@ -242,11 +244,18 @@ func appendSenderNameTag(ctx context.Context, message string) (string, error) {
 	return message, nil
 }
 
-// writeDraftSaved confirms a saved draft, naming the id every draft verb takes.
+// writeDraftSaved confirms a saved draft, naming the id every draft verb takes
+// and, where there is one, the draft's page in HEY.
 func writeDraftSaved(cmd *cobra.Command, draftID int64, attachments int) error {
 	summary := sentWithAttachmentsSummary("Draft saved", attachments)
-	return writeMutationLine(cmd, fmt.Sprintf("%s (id %d).", summary, draftID), summary,
-		map[string]any{"id": draftID},
+	data := map[string]any{"id": draftID}
+	line := fmt.Sprintf("%s (id %d).", summary, draftID)
+	if link := draftAppURL(draftID); link != "" {
+		data["app_url"] = link
+		line = fmt.Sprintf("%s (id %d): %s", summary, draftID, link)
+	}
+	return writeMutationLine(cmd, line, summary,
+		data,
 		output.WithBreadcrumbs(
 			output.Breadcrumb{Action: "show", Command: fmt.Sprintf("hey draft show %d", draftID), Description: "Read the draft back"},
 			output.Breadcrumb{Action: "edit", Command: fmt.Sprintf("hey draft edit %d", draftID), Description: "Change it"},

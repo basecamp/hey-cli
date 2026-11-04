@@ -201,7 +201,11 @@ func TestComposeDraftStillAnswersTheDraftID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("compose --draft: %v", err)
 	}
-	assertSentData(t, response, map[string]any{"id": float64(12345)})
+	data, _ := response.Data.(map[string]any)
+	link, _ := data["app_url"].(string)
+	if len(data) != 2 || data["id"] != float64(12345) || !strings.HasPrefix(link, "http://127.0.0.1:") || !strings.HasSuffix(link, "/messages/12345/edit") {
+		t.Errorf("data = %#v, want the draft id and its page on the server", response.Data)
+	}
 }
 
 // A reply lands on the thread it answers — or, when it breaks out into a thread of its
