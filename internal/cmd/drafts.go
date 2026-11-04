@@ -27,7 +27,7 @@ func newDraftCommand() *cobra.Command {
 		Use:   "draft",
 		Short: "Manage unsent drafts",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, show, edit, send, delete. Draft IDs come from `hey draft list` or from `hey compose --draft`/`hey reply --draft`. list's --page continues from the next_page cursor of an earlier listing.",
+			"agent_notes": "Subcommands: list, show, edit, send, delete. Draft IDs come from `hey draft list` or from `hey compose --draft`/`hey reply --draft`. Mail written for a person usually goes: save it with --draft, show them its From, To, Cc, Bcc, Subject and Body in the conversation, revise it with edit as they ask, and send it once they say to. list's --page continues from the next_page cursor of an earlier listing.",
 		},
 	}
 	draft.AddCommand(newDraftsCommand().cmd)
