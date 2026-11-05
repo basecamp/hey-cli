@@ -167,6 +167,12 @@ func mcpCredentialStatus() map[string]any {
 
 // printMCPStatus is the styled line for hey mcp's credential.
 func printMCPStatus(w io.Writer, status map[string]any) {
+	// A credential that couldn't be read isn't a missing one: signing in again won't
+	// help, so say what the store answered (checkMCPCredentials reads it the same way).
+	if storeErr, ok := status["error"].(string); ok && storeErr != "" {
+		fmt.Fprintf(w, "MCP:       Couldn't read hey mcp's sign-in: %s\n", storeErr)
+		return
+	}
 	if status["authenticated"] != true {
 		fmt.Fprintf(w, "MCP:       Not signed in (run: %s)\n", mcpLoginCommand)
 		return

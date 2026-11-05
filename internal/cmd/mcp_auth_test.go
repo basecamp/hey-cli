@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -159,5 +160,21 @@ func TestHeyMCPSaysAKeychainRefusalIsntAMissingSignIn(t *testing.T) {
 	_, err = checkMCPCredentials(nil, fmt.Errorf("%w for mcp::https://app.hey.com", auth.ErrCredentialsNotFound))
 	if !errors.As(err, &classified) || classified.Code != apierr.CodeAuth || classified.Hint != "Run: "+mcpLoginCommand {
 		t.Errorf("err = %#v, a missing credential still points at %s", err, mcpLoginCommand)
+	}
+}
+
+// A credential the store couldn't read is reported as that, not as signed out: signing
+// in again won't help.
+func TestStyledMCPStatusReportsAStoreErrorRatherThanSignedOut(t *testing.T) {
+	var out bytes.Buffer
+	printMCPStatus(&out, map[string]any{"authenticated": false, "error": "keychain access denied"})
+	if got := out.String(); !strings.Contains(got, "Couldn't read hey mcp's sign-in: keychain access denied") || strings.Contains(got, "Not signed in") {
+		t.Errorf("styled status = %q", got)
+	}
+
+	out.Reset()
+	printMCPStatus(&out, map[string]any{"authenticated": false})
+	if got := out.String(); !strings.Contains(got, "Not signed in (run: hey auth login --mcp)") {
+		t.Errorf("styled status = %q", got)
 	}
 }
