@@ -599,3 +599,54 @@ func TestMCPCommandChoosesItsToolsAfterRenewing(t *testing.T) {
 		t.Errorf("tools = %v: hey_send served on a grant renewed down to read", names)
 	}
 }
+
+// hey mcp's sign-in reaches only the accounts the person chose when they connected it.
+// The account hey is set to use may not be one of them, and HEY answers it as one that
+// isn't there: hey mcp says which, and how to reach it, before serving anything.
+func TestMCPCommandExplainsAnAccountItsSignInWasntGiven(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/identity.json" {
+			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":1,"accounts":[{"id":2,"name":"Work","purpose":"work","status":"active"}],
+			"all_users":[{"id":22,"account_id":2,"contact":{"id":202,"email_address":"jane@company.example"}}]}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	t.Setenv("HEY_TOKEN", "a-full-token-hey-mcp-must-not-use")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	t.Setenv("HEY_ACCOUNT_ID", "")
+	tmpDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmpDir)
+	t.Setenv("XDG_STATE_HOME", tmpDir)
+	t.Setenv("XDG_CACHE_HOME", tmpDir)
+	storeMCPCredential(t, upstream.URL, auth.MCPScope)
+	previousAccountFlag := accountFlag
+	t.Cleanup(func() { accountFlag = previousAccountFlag })
+
+	_ = stubMCPTransport(t)
+	root := newRootCmd()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(&buf)
+	root.SetArgs([]string{"mcp", "--base-url", upstream.URL, "--account", "1"})
+
+	done := make(chan error, 1)
+	go func() { done <- root.Execute() }()
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("hey mcp started serving an account its sign-in wasn't given")
+	}
+	var refusal *apierr.Error
+	if !errors.As(err, &refusal) || refusal.Code != apierr.CodeNotFound {
+		t.Fatalf("err = %#v, want not_found", err)
+	}
+	if !strings.Contains(refusal.Message, "wasn't given access to account 1") || !strings.Contains(refusal.Hint, "hey auth login --mcp") {
+		t.Fatalf("refusal = %q / %q, want it to name the account and point at hey auth login --mcp", refusal.Message, refusal.Hint)
+	}
+}

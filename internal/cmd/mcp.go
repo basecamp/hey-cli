@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,6 +15,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
+	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/mcpserver"
@@ -117,11 +120,11 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 			return err
 		}
 	}
-	reads, err := clientForAccountSelection(ctx, newMCPSDKClient(), cfg.AccountID)
+	reads, err := mcpClientForAccountSelection(ctx, newMCPSDKClient(), cfg.AccountID)
 	if err != nil {
 		return err
 	}
-	writes, err := clientForAccountSelection(ctx, newMCPSDKClient(hey.WithMaxRetries(0)), cfg.AccountID)
+	writes, err := mcpClientForAccountSelection(ctx, newMCPSDKClient(hey.WithMaxRetries(0)), cfg.AccountID)
 	if err != nil {
 		return err
 	}
@@ -139,7 +142,7 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 		// The delivery goes through a client of its own that can't resend: the SDK
 		// answers a 401 by refreshing and resending once, and a send is one request
 		// (D2.4). The token is refreshed before the send instead.
-		sends, sendsErr := clientForAccountSelection(ctx, newMCPSDKClient(hey.WithMaxRetries(0), hey.WithAuthStrategy(onceAuthStrategy{mgr: mcpAuthMgr})), cfg.AccountID)
+		sends, sendsErr := mcpClientForAccountSelection(ctx, newMCPSDKClient(hey.WithMaxRetries(0), hey.WithAuthStrategy(onceAuthStrategy{mgr: mcpAuthMgr})), cfg.AccountID)
 		if sendsErr != nil {
 			return sendsErr
 		}
@@ -226,4 +229,24 @@ func (d mcpDrafts) SendDraft(ctx context.Context, draftID int64, draft hey.Draft
 	// The token was renewed just before the claim (CurrentGrant), so this one request
 	// goes out on a live one.
 	return d.sends.Messages().SendDraft(ctx, draftID, draft)
+}
+
+// mcpClientForAccountSelection scopes a client to the account hey is set to use, as
+// every command does. hey mcp's sign-in reaches only the accounts the person chose when
+// they connected it, so the account may be one it was never given, which HEY answers as
+// an account that isn't there. Say which account it is and how to reach it, rather than
+// a bare not_found.
+func mcpClientForAccountSelection(ctx context.Context, client *hey.Client, accountID string) (*hey.Client, error) {
+	scoped, err := clientForAccountSelection(ctx, client, accountID)
+	var cliErr *apierr.Error
+	if errors.As(err, &cliErr) && cliErr.Code == apierr.CodeNotFound {
+		return nil, &apierr.Error{
+			Code:       apierr.CodeNotFound,
+			Message:    fmt.Sprintf("hey mcp's sign-in wasn't given access to account %s, the one hey is set to use", accountID),
+			Hint:       "Run `hey auth login --mcp` to choose the accounts it can reach, or `hey account use all` (or --account <id>) to serve the ones it was given.",
+			HTTPStatus: cliErr.HTTPStatus,
+			Cause:      err,
+		}
+	}
+	return scoped, err
 }
