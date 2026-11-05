@@ -40,6 +40,10 @@ primary one), a stored bearer token (`--token`), a browser session cookie (`--co
 the `HEY_TOKEN` environment variable. The Manager refreshes tokens with a 5-minute buffer,
 and the SDK reaches it through the bridge in `internal/cmd/sdk.go`.
 
+`cfg.APIOrigin()` (`api_url`, `HEY_API_URL`) is where the SDK sends API requests, and nothing
+else follows it. Signing in, refreshing, the credential key, `/cable` and links a person opens
+stay on `cfg.BaseURL`. A refresh at the API origin would fork the token family.
+
 Every data-access command calls `requireAuth()` before it makes an API call. Logged out,
 it exits 3 with `Run: hey auth login`, or offers to sign in at an interactive terminal with
 styled output. `HEY_NONINTERACTIVE=1` turns the offer off. The auth subcommands, `hey
@@ -55,7 +59,7 @@ The setup wizard, the Omarchy bar plugin and the skill refresh hook are in
 
 ### State storage
 
-Configuration (the base URL, the default linked account, the Imbox's cover, and the `onboarded` flag) is stored in `~/.config/hey-cli/config.json`; `onboarded` is read from the global file only, never from a repository's `.hey/config.json`. Credentials are stored in the system keyring (service name: `hey`) with automatic fallback to `~/.config/hey-cli/credentials.json` when the keyring is unavailable. Set `HEY_NO_KEYRING=1` to force file storage.
+Configuration (the base URL, the API origin saved for it, the default linked account, the Imbox's cover, and the `onboarded` flag) is stored in `~/.config/hey-cli/config.json`; `onboarded` is read from the global file only, never from a repository's `.hey/config.json`. Credentials are stored in the system keyring (service name: `hey`) with automatic fallback to `~/.config/hey-cli/credentials.json` when the keyring is unavailable. Set `HEY_NO_KEYRING=1` to force file storage.
 
 ### CLI
 

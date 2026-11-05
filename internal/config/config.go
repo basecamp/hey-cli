@@ -32,6 +32,7 @@ const (
 
 type Config struct {
 	BaseURL   string `json:"base_url"`
+	APIURL    string `json:"api_url,omitempty"`
 	AccountID string `json:"account_id,omitempty"`
 	Onboarded bool   `json:"onboarded,omitempty"`
 
@@ -43,6 +44,7 @@ type Config struct {
 
 type fileConfig struct {
 	BaseURL             string                              `json:"base_url,omitempty"`
+	APIURLs             map[string]string                   `json:"api_urls,omitempty"`
 	AccountID           string                              `json:"account_id,omitempty"`
 	Onboarded           *bool                               `json:"onboarded,omitempty"`
 	Cover               string                              `json:"cover,omitempty"`
@@ -207,6 +209,16 @@ func load(localPath string) (*Config, error) {
 			cfg.sources["account_id"] = SourceGlobal
 		}
 	}
+	if apiErr := cfg.useSavedAPIURL(); apiErr != nil {
+		return nil, apiErr
+	}
+	if env := os.Getenv("HEY_API_URL"); env != "" {
+		if apiErr := validateAPIURL(env); apiErr != nil {
+			return nil, apiErr
+		}
+		cfg.APIURL = strings.TrimRight(env, "/")
+		cfg.sources["api_url"] = SourceEnv
+	}
 	cfg.trustedLocalConfigs = global.TrustedLocalConfigs
 	if localPath != "" {
 		cfg.localConfig, err = makeLocalConfig(localPath, local, cfg.BaseURL, global.TrustedLocalConfigs)
@@ -257,6 +269,17 @@ func readFileConfig(path string) (fileConfig, error) {
 		}
 		file.AccountDefaults = normalizedDefaults
 	}
+	if len(file.APIURLs) > 0 {
+		normalizedAPIURLs := make(map[string]string, len(file.APIURLs))
+		for origin, apiURL := range file.APIURLs {
+			normalizedOrigin, originErr := serverOrigin(origin)
+			if originErr != nil {
+				return fileConfig{}, fmt.Errorf("could not parse API URL origin %s in %s: %w", origin, path, originErr)
+			}
+			normalizedAPIURLs[normalizedOrigin] = apiURL
+		}
+		file.APIURLs = normalizedAPIURLs
+	}
 	return file, nil
 }
 
@@ -275,11 +298,28 @@ func accountDefaultFor(file fileConfig, baseURL string) (string, bool) {
 	return "", false
 }
 
+// apiURLFor is the API origin saved for a login origin. Only the global file is ever
+// asked: a token goes wherever this says, so a repository's .hey/config.json has no say.
+func apiURLFor(file fileConfig, baseURL string) string {
+	origin, err := serverOrigin(baseURL)
+	if err != nil {
+		return ""
+	}
+	return file.APIURLs[origin]
+}
+
 func firstNonEmpty(value, fallback string) string {
 	if value != "" {
 		return value
 	}
 	return fallback
+}
+
+// APIOrigin is where API requests go: the API URL when one is set, or the base URL, which
+// also answers them on every server but the one with an API host of its own. Signing in,
+// refreshing, the credential key, /cable and the pages a person opens stay on the base URL.
+func (c *Config) APIOrigin() string {
+	return firstNonEmpty(c.APIURL, c.BaseURL)
 }
 
 func (c *Config) SourceOf(key string) Source {
@@ -313,6 +353,11 @@ func (c *Config) SetFromFlag(key, value string) error {
 				c.sources["account_id"] = SourceGlobal
 			}
 		}
+		// The flag names a server, and an API origin chosen for another one, in the
+		// environment included, must not be sent that server's token.
+		if err := c.useSavedAPIURL(); err != nil {
+			return err
+		}
 		c.refreshLocalConfigTrust()
 	case "account_id":
 		accountID, err := normalizeAccountID(value)
@@ -325,6 +370,22 @@ func (c *Config) SetFromFlag(key, value string) error {
 		}
 		c.sources["account_id"] = SourceFlag
 	}
+	return nil
+}
+
+// useSavedAPIURL takes the API origin saved for the login origin in effect, or none.
+func (c *Config) useSavedAPIURL() error {
+	c.APIURL = ""
+	c.sources["api_url"] = SourceDefault
+	saved := apiURLFor(c.globalConfig, c.BaseURL)
+	if saved == "" {
+		return nil
+	}
+	if err := validateAPIURL(saved); err != nil {
+		return err
+	}
+	c.APIURL = strings.TrimRight(saved, "/")
+	c.sources["api_url"] = SourceGlobal
 	return nil
 }
 
@@ -355,6 +416,38 @@ func (c *Config) SaveBaseURL(baseURL string) error {
 		return err
 	}
 	file.BaseURL = baseURL
+	return saveGlobalConfig(file)
+}
+
+// SaveAPIURL stores the API origin for the effective server without touching any other
+// server's, as SaveAccountID does. An empty apiURL removes it, which sends API requests
+// back to the base URL.
+func (c *Config) SaveAPIURL(apiURL string) error {
+	origin, err := serverOrigin(c.BaseURL)
+	if err != nil {
+		return err
+	}
+	if apiURL != "" {
+		if validationErr := validateAPIURL(apiURL); validationErr != nil {
+			return validationErr
+		}
+	}
+
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		return err
+	}
+	if err := migrateLegacyAccountDefault(&file); err != nil {
+		return err
+	}
+	if apiURL == "" {
+		delete(file.APIURLs, origin)
+		return saveGlobalConfig(file)
+	}
+	if file.APIURLs == nil {
+		file.APIURLs = make(map[string]string)
+	}
+	file.APIURLs[origin] = strings.TrimRight(apiURL, "/")
 	return saveGlobalConfig(file)
 }
 
@@ -502,7 +595,7 @@ func migrateLegacyAccountDefault(file *fileConfig) error {
 
 // fileConfigKeys are the keys the fileConfig schema owns. A rewrite replaces
 // exactly these; every other key in the file is preserved verbatim.
-var fileConfigKeys = []string{"base_url", "account_id", "onboarded", "cover", "help_hidden", "account_defaults", "trusted_local_configs"}
+var fileConfigKeys = []string{"base_url", "api_urls", "account_id", "onboarded", "cover", "help_hidden", "account_defaults", "trusted_local_configs"}
 
 // legacyCredentialKeys are the embedded-credential fields of the pre-store
 // config format. They survive every ordinary rewrite (deleting a credential
@@ -658,17 +751,35 @@ func serverOrigin(base string) (string, error) {
 }
 
 func validateBaseURL(base string) error {
-	u, err := url.Parse(base)
+	_, err := parseServerURL("base URL", base)
+	return err
+}
+
+// validateAPIURL holds an API URL to an origin and nothing more: the SDK prefixes every
+// request with it, and userinfo in it would go along to the server.
+func validateAPIURL(apiURL string) error {
+	u, err := parseServerURL("API URL", apiURL)
 	if err != nil {
-		return apierr.ErrUsage(fmt.Sprintf("invalid base URL %q: %v", base, err))
+		return err
+	}
+	if u.User != nil || strings.Trim(u.Path, "/") != "" || u.RawQuery != "" || u.Fragment != "" {
+		return apierr.ErrUsage(fmt.Sprintf("API URL must be only a scheme and a host (got %q)", apiURL))
+	}
+	return nil
+}
+
+func parseServerURL(name, raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil, apierr.ErrUsage(fmt.Sprintf("invalid %s %q: %v", name, raw, err))
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return apierr.ErrUsage(fmt.Sprintf("base URL must be an absolute URL with scheme and host (got %q)", base))
+		return nil, apierr.ErrUsage(fmt.Sprintf("%s must be an absolute URL with scheme and host (got %q)", name, raw))
 	}
 	// Enforce HTTPS for non-localhost
 	host := u.Hostname()
 	if u.Scheme != "https" && host != "localhost" && host != "127.0.0.1" && host != "::1" && !strings.HasSuffix(host, ".localhost") {
-		return apierr.ErrUsage(fmt.Sprintf("base URL must use HTTPS (got %q)", base))
+		return nil, apierr.ErrUsage(fmt.Sprintf("%s must use HTTPS (got %q)", name, raw))
 	}
-	return nil
+	return u, nil
 }

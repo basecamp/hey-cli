@@ -332,8 +332,8 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 // (Location: <origin>/messages/<id>), which in a browser opens its thread, and
 // the SDK keeps only the id from it. The page that opens the draft is
 // /messages/<id>/edit, haystack's edit_message_url, which HEY's Drafts listing
-// serves as edit_url. It's named on the server the CLI talks to, the origin
-// HEY's Location carries.
+// serves as edit_url. It's named on the base URL, the server a person signs in at,
+// even when API requests go to an origin of their own, which serves no pages.
 func draftAppURL(id int64) string {
 	if cfg == nil || id <= 0 {
 		return ""

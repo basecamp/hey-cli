@@ -37,7 +37,9 @@ func newConfigSetCommand() *cobra.Command {
 		Use:   "set <key> <value>",
 		Short: "Set a configuration value in the global config",
 		Example: `  hey config set base_url http://app.hey.localhost:3003
-  hey config set base_url https://app.hey.com`,
+  hey config set base_url https://app.hey.com
+  hey config set api_url https://api.hey.com
+  hey config set api_url ""`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key, value := args[0], args[1]
@@ -50,6 +52,10 @@ func newConfigSetCommand() *cobra.Command {
 				if err := cfg.SaveBaseURL(cfg.BaseURL); err != nil {
 					return err
 				}
+			case "api_url":
+				if err := cfg.SaveAPIURL(value); err != nil {
+					return err
+				}
 			case "onboarded":
 				onboarded, err := strconv.ParseBool(value)
 				if err != nil {
@@ -59,7 +65,7 @@ func newConfigSetCommand() *cobra.Command {
 					return err
 				}
 			default:
-				return apierr.ErrUsage(fmt.Sprintf("unknown config key: %s (available: base_url, onboarded)", key))
+				return apierr.ErrUsage(fmt.Sprintf("unknown config key: %s (available: base_url, api_url, onboarded)", key))
 			}
 
 			summary := fmt.Sprintf("Set %s = %s", key, value)
@@ -164,6 +170,13 @@ func newConfigShowCommand() *cobra.Command {
 					"value":  strconv.FormatBool(cfg.Onboarded),
 					"source": "global",
 				},
+			}
+			if cfg.APIURL != "" {
+				entries = append(entries, map[string]string{
+					"key":    "api_url",
+					"value":  cfg.APIURL,
+					"source": string(cfg.SourceOf("api_url")),
+				})
 			}
 			if local := cfg.LocalConfig(); local != nil {
 				trust := "untrusted"
