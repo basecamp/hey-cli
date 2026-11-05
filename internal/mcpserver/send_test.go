@@ -878,6 +878,6 @@ func TestATextareasTextIsShownAndNamed(t *testing.T) {
 
 // The cut falls on the draft's characters, so an escape is never cut in half.
 func TestALongBodyIsCutBetweenEscapes(t *testing.T) {
-	prompt := promptFor(t, "<div>"+strings.Repeat("a", bodyPromptCap-1)+strings.Repeat("​", 10)+"</div>")
+	prompt := promptFor(t, "<div>"+strings.Repeat("a", bodyPromptCap-1)+strings.Repeat("\u200b", 10)+"</div>")
 	mustContain(t, prompt, `a\u{200B} …`, "Body (the first 1,500 of 1,509 characters)")
 }
