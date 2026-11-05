@@ -70,7 +70,7 @@ var shownTags = map[atom.Atom]bool{
 	atom.Em: true, atom.I: true, atom.U: true, atom.Del: true, atom.S: true, atom.Strike: true,
 	atom.A: true, atom.Ul: true, atom.Ol: true, atom.Li: true, atom.Blockquote: true,
 	atom.Pre: true, atom.H1: true, atom.H2: true, atom.H3: true, atom.H4: true, atom.H5: true,
-	atom.H6: true, atom.Hr: true, atom.Code: true,
+	atom.H6: true, atom.Hr: true, atom.Code: true, atom.Listing: true,
 	// html.Parse wraps a fragment in these.
 	atom.Html: true, atom.Head: true, atom.Body: true,
 }
@@ -79,7 +79,7 @@ var shownTags = map[atom.Atom]bool{
 var blockTags = map[atom.Atom]bool{
 	atom.Div: true, atom.P: true, atom.Li: true, atom.Blockquote: true, atom.Pre: true,
 	atom.H1: true, atom.H2: true, atom.H3: true, atom.H4: true, atom.H5: true, atom.H6: true,
-	atom.Ul: true, atom.Ol: true, atom.Hr: true,
+	atom.Ul: true, atom.Ol: true, atom.Hr: true, atom.Listing: true,
 }
 
 // rawTextTags hold text a mail client doesn't show as text (a stylesheet, a script),
