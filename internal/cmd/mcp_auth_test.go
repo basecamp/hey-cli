@@ -111,20 +111,6 @@ func TestAuthLoginMCPKeepsTheCLIsCredentialAndStatusShowsBoth(t *testing.T) {
 	}
 }
 
-func TestAuthLoginMCPNeedsAClientID(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
-	}))
-	defer server.Close()
-	t.Setenv("HEY_MCP_CLIENT_ID", "")
-
-	_, _, err := runAuthCommand(t, t.TempDir(), server.URL, "", true, "auth", "login", "--mcp")
-	var usage *apierr.Error
-	if !errors.As(err, &usage) || !strings.Contains(usage.Hint, "HEY_MCP_CLIENT_ID") {
-		t.Fatalf("err = %#v, want a usage error naming HEY_MCP_CLIENT_ID", err)
-	}
-}
-
 func TestAuthLoginMCPTakesNoTokenOrCookie(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)

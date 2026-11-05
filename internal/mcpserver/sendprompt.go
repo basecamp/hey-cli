@@ -10,97 +10,125 @@ import (
 )
 
 // The confirmation the person reads (sending-safety D2). Every recipient field is shown,
-// Bcc included and "—" when empty. Every dynamic field is rendered inert: the subject,
-// names, attachment names and body were chosen by a model or a sender, and the host shows
-// the prompt as plain text, so a newline in a display name could forge a Bcc line and a
-// bidi override could reorder an address. Header fields are single lines, capped, and
-// come first in a fixed order; every body line is indented beneath "Body:". This is
-// presentation only: the fingerprint covers the raw values.
+// Bcc included and "—" when empty, and so is every attachment, link and image. Every
+// dynamic field is rendered inert: the subject, names, attachment names and body were
+// chosen by a model or a sender, and the host shows the prompt as plain text, so a
+// newline in a display name could forge a Bcc line and a bidi override could reorder an
+// address. Header fields are single lines and come first in a fixed order; every body
+// line is indented beneath "Body:". Whatever the text can't show is named on a "Not
+// shown here" line beside the draft's link in HEY. This is presentation only: the
+// fingerprint covers the raw values.
 
-func (s *sender) prompt(snap *draftSnapshot, outcome *reviewOutcome) string {
-	var b strings.Builder
-	if outcome.exposed {
-		fmt.Fprintf(&b, "This conversation read mail that may be from an unscreened sender (%s) in the last few minutes. Check that you asked for this email.\n\n", inertLine(outcome.exposedBy))
-	}
-	fmt.Fprintf(&b, "Send this email from %s?\n", recipientLine(snap.from, nil))
-	b.WriteString("  When:     Now (undo window applies)\n")
-	fmt.Fprintf(&b, "  To:       %s\n", recipientList(snap.to, outcome.newAddresses))
-	fmt.Fprintf(&b, "  Cc:       %s\n", recipientList(snap.cc, outcome.newAddresses))
-	fmt.Fprintf(&b, "  Bcc:      %s\n", recipientList(snap.bcc, outcome.newAddresses))
-	// Delivered text is shown whole: only display names, which aren't sent, are capped.
-	subject := snap.subject
-	if outcome.plain {
-		subject = plainSubject(subject)
-	}
-	fmt.Fprintf(&b, "  Subject:  %s\n", inertWhole(subject))
-	fmt.Fprintf(&b, "  Attached: %s\n", attachmentList(snap.body.attachments))
-	b.WriteString("  Body:\n")
-
-	text := snap.body.text
-	if outcome.plain {
-		text = snap.body.plainText
-	}
-	body := inertBody(text)
+func (s *sender) prompt(snap *draftSnapshot) string {
+	body := inertBody(snap.body.text)
 	total := utf8.RuneCountInString(body)
+	label := "  Body:\n"
 	if total > bodyPromptCap {
 		body = string([]rune(body)[:bodyPromptCap]) + " …"
+		label = fmt.Sprintf("  Body (the first %s of %s characters):\n", thousands(bodyPromptCap), thousands(total))
 	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Send this email from %s?\n", recipientLine(snap.from))
+	b.WriteString("  When:     Now (undo window applies)\n")
+	fmt.Fprintf(&b, "  To:       %s\n", recipientList(snap.to))
+	fmt.Fprintf(&b, "  Cc:       %s\n", recipientList(snap.cc))
+	fmt.Fprintf(&b, "  Bcc:      %s\n", recipientList(snap.bcc))
+	// Delivered text is shown whole: only display names, which aren't sent, are capped.
+	fmt.Fprintf(&b, "  Subject:  %s\n", inertWhole(snap.subject))
+	fmt.Fprintf(&b, "  Attached: %s\n", attachmentList(snap.body))
+	fmt.Fprintf(&b, "  Images:   %s\n", imageList(snap.body.images))
+	if unshown := unshownOf(snap.body, total); unshown != "" {
+		fmt.Fprintf(&b, "  Not shown here: %s. The whole draft is in HEY: %s\n", unshown, s.editURL(snap.id))
+	}
+	b.WriteString(label)
 	for line := range strings.SplitSeq(body, "\n") {
 		b.WriteString("    " + line + "\n")
-	}
-	if total > bodyPromptCap {
-		fmt.Fprintf(&b, "    [first %s characters of %s · open the full draft in HEY: %s]\n", thousands(bodyPromptCap), thousands(total), s.editURL(snap.id))
-	}
-	switch {
-	case outcome.plain:
-		b.WriteString("  Goes as plain text: the draft's formatting isn't sent, so what's above is all of it.\n")
-	case !snap.body.lossless:
-		fmt.Fprintf(&b, "  Some of this draft can't be shown here; open it in HEY to see all of it: %s\n", s.editURL(snap.id))
-	}
-	if len(outcome.newAddresses) > 0 {
-		b.WriteString("\nRecipients marked (new) haven't been emailed from this account before hey mcp was signed in.\n")
 	}
 	return b.String()
 }
 
+// unshownOf names what the prompt can't show of a body, "" when it shows all of it.
+func unshownOf(body reviewedBody, shownLength int) string {
+	var out []string
+	if shownLength > bodyPromptCap {
+		out = append(out, fmt.Sprintf("the last %s characters of the body", thousands(shownLength-bodyPromptCap)))
+	}
+	switch n := len(body.attachments) + body.unnamed; {
+	case n == 1:
+		out = append(out, "what the attachment holds")
+	case n > 1:
+		out = append(out, "what the "+thousands(n)+" attachments hold")
+	}
+	if n := len(body.images); n > 0 {
+		out = append(out, plural(n, "image", "images"))
+	}
+	if body.unshown != "" {
+		out = append(out, "formatting the text leaves out ("+body.unshown+")")
+	}
+	return strings.Join(out, "; ")
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return thousands(n) + " " + many
+}
+
 // recipientLine shows a recipient as "Name" <address>, so the address the mail goes to is
 // always visible beside whatever name the draft carries.
-func recipientLine(c generated.Contact, fresh map[string]bool) string {
+func recipientLine(c generated.Contact) string {
 	// The address is escaped but never truncated: the person has to see all of where
 	// the mail goes.
 	address := "<" + escapeInvisible(c.EmailAddress, false) + ">"
-	line := address
 	if name := strings.TrimSpace(c.Name); name != "" && !strings.EqualFold(name, c.EmailAddress) {
-		line = `"` + strings.ReplaceAll(inertLine(name), `"`, `\"`) + `" ` + address
+		return `"` + strings.ReplaceAll(inertLine(name), `"`, `\"`) + `" ` + address
 	}
-	if fresh[normalizedAddress(c.EmailAddress)] {
-		line += " (new: never emailed before)"
-	}
-	return line
+	return address
 }
 
-func recipientList(contacts []generated.Contact, fresh map[string]bool) string {
+func recipientList(contacts []generated.Contact) string {
 	if len(contacts) == 0 {
 		return "—"
 	}
 	lines := make([]string, 0, len(contacts))
 	for _, c := range contacts {
-		lines = append(lines, recipientLine(c, fresh))
+		lines = append(lines, recipientLine(c))
 	}
 	return strings.Join(lines, ", ")
 }
 
-func attachmentList(attachments []attachment) string {
-	if len(attachments) == 0 {
+// imageList shows each image's whole target, which is where a mail client fetches it
+// from when the email is opened.
+func imageList(images []string) string {
+	if len(images) == 0 {
 		return "—"
 	}
-	names := make([]string, 0, len(attachments))
-	for _, a := range attachments {
+	shown := make([]string, 0, len(images))
+	for _, src := range images {
+		if src == "" {
+			src = "(no source)"
+		}
+		shown = append(shown, "<"+inertWhole(src)+">")
+	}
+	return strings.Join(shown, ", ")
+}
+
+func attachmentList(body reviewedBody) string {
+	if len(body.attachments)+body.unnamed == 0 {
+		return "—"
+	}
+	names := make([]string, 0, len(body.attachments)+1)
+	for _, a := range body.attachments {
 		name := fmt.Sprintf("%s (%s)", inertWhole(a.Filename), humanSize(a.Size))
 		if a.Caption != "" {
 			name += `, captioned "` + inertWhole(a.Caption) + `"`
 		}
 		names = append(names, name)
+	}
+	if body.unnamed > 0 {
+		names = append(names, plural(body.unnamed, "attachment this confirmation can't name", "attachments this confirmation can't name"))
 	}
 	return strings.Join(names, ", ")
 }

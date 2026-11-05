@@ -41,12 +41,6 @@ func errMCPNotSignedIn() *apierr.Error {
 	return err
 }
 
-func errMCPClientUnconfigured() *apierr.Error {
-	err := apierr.ErrUsage("hey mcp's sign-in isn't available for this HEY yet: no HEY MCP (local) client id is configured")
-	err.Hint = "Set HEY_MCP_CLIENT_ID, or mcp_client_ids in ~/.config/hey-cli/config.json, to the client id HEY provisioned"
-	return err
-}
-
 // requireMCPCredentials loads hey mcp's credential, refusing when there is none. It never
 // falls back to the CLI's credential: that one holds full, and serving hey mcp on it would
 // undo what the scoped sign-in contains.
@@ -76,9 +70,9 @@ func checkMCPCredentials(creds *auth.Credentials, err error) (*auth.Credentials,
 }
 
 // mcpCanSend is whether hey mcp serves send_draft on creds: the grant holds send, and
-// write, without which hey mcp serves reads only (and read, which write implies). The
-// sign-in's local key is the principal send safety counts against, so a credential
-// without one can't send.
+// write, without which hey mcp serves reads only (and read, which write implies). A
+// send confirmation is bound to the sign-in's local key, so a credential without one
+// can't send.
 func mcpCanSend(creds *auth.Credentials) bool {
 	return auth.HasScope(creds.Scope, "write", "send") && creds.GrantKey != ""
 }
@@ -94,9 +88,6 @@ func loginMCP(cmd *cobra.Command, noBrowser bool) error {
 	defer cancel()
 
 	method, err := mcpAuthMgr.LoginMCP(ctx, auth.LoginOptions{NoBrowser: noBrowser})
-	if errors.Is(err, auth.ErrMCPClientUnconfigured) {
-		return errMCPClientUnconfigured()
-	}
 	if err != nil {
 		return apierr.ErrAuth(fmt.Sprintf("hey mcp sign-in failed: %v", err))
 	}

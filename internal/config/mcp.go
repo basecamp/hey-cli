@@ -8,15 +8,10 @@ import (
 )
 
 // DefaultMCPClientID is the client id of "HEY MCP (local)", the OAuth row `hey mcp`
-// signs in as (haystack#9041), for every HEY environment.
-//
-// TODO(provision): empty until the production row exists. Jeremy provisions production
-// first with `bin/rails oauth:provision_local_mcp_client`, which prints a generated
-// id; beta runs on production's database and shares that row, and staging and dev are
-// then provisioned with CLIENT_ID=<that id>, so this one constant serves them all, as
-// the CLI's own id does. Until it is set, `hey auth login --mcp` needs HEY_MCP_CLIENT_ID
-// or a configured id (MCPClientID).
-const DefaultMCPClientID = ""
+// signs in as (haystack#9041), pinned by haystack's first-party client registry
+// (haystack#9215, Oauth::Client::Mcp) to this one id in every HEY environment, as the
+// CLI's own id is. HEY_MCP_CLIENT_ID or a configured id (MCPClientID) overrides it.
+const DefaultMCPClientID = "vd96nBiRFXz1AjTXbADAtkrg"
 
 // mcpClientIDPattern is what haystack's provisioning accepts for a client id: letters
 // and digits.
@@ -32,7 +27,7 @@ func Origin(baseURL string) (string, error) {
 // from: HEY_MCP_CLIENT_ID, then the global config's "mcp_client_ids" entry for that
 // origin, then DefaultMCPClientID. It is read from the global config only, never a
 // repository's .hey/config.json, so a checkout can't point hey mcp's sign-in at another
-// client. An empty id means none is configured.
+// client.
 func MCPClientID(baseURL string) (string, Source, error) {
 	if env := os.Getenv("HEY_MCP_CLIENT_ID"); env != "" {
 		if !mcpClientIDPattern.MatchString(env) {

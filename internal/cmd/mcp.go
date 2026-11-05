@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -44,10 +43,11 @@ func newMCPCommand() *mcpCommand {
 			"to send, schedule or triage in the same call is refused before HEY is contacted.\n" +
 			"Updating a scheduled draft clears its schedule. hey_send's send_draft is the one\n" +
 			"way to deliver: it asks you to confirm each email in your MCP client, showing its\n" +
-			"recipients, subject and body, and sends exactly what you approved, once. A client\n" +
-			"that can't show a confirmation gets the draft's link in HEY instead. send_draft\n" +
-			"is served only when the sign-in was granted sending. --read-only drops every\n" +
-			"write action, drafts and sending included.\n\n" +
+			"recipients, subject and body and naming anything it can't show, and sends exactly\n" +
+			"what you approved, once. It is served only when the sign-in was granted sending,\n" +
+			"and listed only to a client that can show a confirmation; any other client is\n" +
+			"pointed at the draft's page in HEY. --read-only drops every write action, drafts\n" +
+			"and sending included.\n\n" +
 			"Register it with an MCP client as a stdio server, e.g.:\n\n" +
 			"  claude mcp add hey -- hey mcp",
 		Args: cobra.NoArgs,
@@ -103,9 +103,8 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	// Whatever it may do, this process authenticates only as the sign-in it starts on:
-	// one that started without send must not move onto a later send-capable sign-in
-	// whose exposure it doesn't record.
+	// This process authenticates only as the sign-in it starts on: the tools it serves
+	// follow that sign-in's grant, and a confirmation is bound to it.
 	mcpAuthMgr.PinGrant(creds.GrantKey)
 
 	ctx := cmd.Context()
@@ -122,24 +121,11 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	// send, no hey_send.
 	readOnly := c.readOnly || !auth.HasScope(creds.Scope, "write")
 	serverCfg := mcpserver.Config{ReadOnly: readOnly, Domains: c.domains}
-	// Send safety is configured whenever the sign-in can send, read-only or not: this
-	// process records exposure for any other hey mcp on the same sign-in that sends.
 	canSend := mcpCanSend(creds)
-	if canSend {
-		// Claims are keyed by origin, so it has one spelling: https://app.hey.com and
-		// https://app.hey.com:443 are the same HEY.
+	if canSend && !readOnly {
 		origin, originErr := config.Origin(cfg.BaseURL)
 		if originErr != nil {
 			return originErr
-		}
-		state, stateErr := mcpserver.OpenSendState(config.StateDir())
-		if stateErr != nil {
-			return stateErr
-		}
-		// An undated sign-in makes no recipient known: only mail sent before it does.
-		var grantedAt time.Time
-		if creds.GrantedAt > 0 {
-			grantedAt = time.Unix(creds.GrantedAt, 0)
 		}
 		// The delivery goes through a client of its own that can't resend: the SDK
 		// answers a 401 by refreshing and resending once, and a send is one request
@@ -149,10 +135,9 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 			return sendsErr
 		}
 		serverCfg.Send = &mcpserver.SendConfig{
-			Drafts: mcpDrafts{reads: reads, sends: sends},
-			State:  state,
-			Grant:  mcpserver.Grant{Key: creds.GrantKey, GrantedAt: grantedAt},
-			Origin: origin,
+			Drafts:   mcpDrafts{reads: reads, sends: sends},
+			GrantKey: creds.GrantKey,
+			Origin:   origin,
 			CurrentGrant: func(ctx context.Context) (string, error) {
 				// Renew a token about to expire now, before the claim, rather than
 				// after it: a renewal can narrow the grant, and the send then must
@@ -232,12 +217,4 @@ func (d mcpDrafts) SendDraft(ctx context.Context, draftID int64, draft hey.Draft
 	// The token was renewed just before the claim (CurrentGrant), so this one request
 	// goes out on a live one.
 	return d.sends.Messages().SendDraft(ctx, draftID, draft)
-}
-
-func (d mcpDrafts) Identity(ctx context.Context) (*generated.Identity, error) {
-	return d.reads.Identity().GetIdentity(ctx)
-}
-
-func (d mcpDrafts) Search(ctx context.Context, params hey.SearchParams) (*generated.AdvancedSearchResult, error) {
-	return d.reads.Search().Search(ctx, params)
 }

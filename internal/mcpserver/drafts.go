@@ -30,9 +30,9 @@ import (
 // it rather than letting it go out later.
 //
 // These actions never deliver. Delivery is send_draft (send.go), in its own hey_send
-// tool, which asks the person to confirm each email, and is served only when hey mcp's
-// sign-in can send. A person can also send the draft from HEY or with
-// `hey draft send <id>`.
+// tool, which asks the person to confirm each email. It is served only when hey mcp's
+// sign-in can send, and listed only to a client that can be asked. A person can also
+// send the draft from HEY or with `hey draft send <id>`.
 // TestEveryServedOpenWorldOperationIsDraftFirst holds this list total: mapping
 // another operation that can reach people outside the mailbox fails until it
 // has a rule here.
@@ -48,7 +48,7 @@ var draftEntryKeys = map[string]bool{"addressed": true, "status": true}
 const drafted = "drafted"
 
 // howToSend is how a draft this server saved gets delivered.
-const howToSend = "call hey_send's send_draft with its draft_id, which asks the person to confirm the email (where this server serves hey_send), or a person sends it from HEY or with `hey draft send <id>`"
+const howToSend = "call hey_send's send_draft with its draft_id where hey_send is listed, which asks the person to confirm the email; otherwise a person sends it from HEY or with `hey draft send <id>`"
 
 // draftOnly returns params with the entry forced to a draft, or an error
 // naming what would have delivered. params is not modified.
@@ -152,17 +152,30 @@ func draftLink(location string) string {
 
 // draftResult is what a confirmed draft save answers, so the model doesn't
 // report a send that didn't happen and knows how the draft gets delivered.
-func draftResult(resp *hey.Response) map[string]any {
+// sendable is whether this client is offered hey_send (server.go): where it is,
+// the person's ask to send is answered with send_draft at once, since its
+// confirmation shows them what goes out; where it isn't, the note names the
+// draft's page in HEY.
+func draftResult(resp *hey.Response, sendable bool) map[string]any {
 	location := resp.Headers.Get("Location")
 	result := map[string]any{"status": resp.StatusCode, "location": location, "drafted": true}
-	if id := draftID(location); id != "" {
-		result["draft_id"] = id
-		if link := draftLink(location); link != "" {
-			result["app_url"] = link
-		}
-		result["note"] = "Saved as a draft, not sent. To deliver it, call hey_send's send_draft with draft_id " + id + ", which asks the person to confirm it (where this server serves hey_send), or a person sends it from HEY or with `hey draft send " + id + "`."
-	} else {
+	id := draftID(location)
+	if id == "" {
 		result["note"] = "Saved as a draft, not sent. To deliver it, " + howToSend + "."
+		return result
+	}
+	result["draft_id"] = id
+	link := draftLink(location)
+	if link != "" {
+		result["app_url"] = link
+	}
+	switch {
+	case sendable:
+		result["note"] = "Saved as a draft, not sent. The person can review or revise it as they like. When they ask to send it, call hey_send's send_draft with draft_id " + id + " right away: its confirmation shows them what goes out, so don't show the draft or ask them again first."
+	case link != "":
+		result["note"] = "Saved as a draft, not sent. hey mcp can't send it from this client: the person sends it from its page in HEY, " + link + ", or with `hey draft send " + id + "`."
+	default:
+		result["note"] = "Saved as a draft, not sent. hey mcp can't send it from this client: the person sends it from HEY or with `hey draft send " + id + "`."
 	}
 	return result
 }

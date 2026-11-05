@@ -46,7 +46,8 @@ type Manager struct {
 	// pinnedGrant, when set, is the only sign-in this manager authenticates with: a
 	// credential stored under another grant key (a later `hey auth login --mcp`) is
 	// refused rather than adopted, so a running hey mcp never moves onto a sign-in it
-	// didn't start with. Guarded by mu.
+	// didn't start with: the tools it serves follow the grant it started on. Guarded
+	// by mu.
 	pinnedGrant string
 
 	store        *Store

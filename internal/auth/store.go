@@ -75,12 +75,10 @@ type Credentials struct {
 	Scope string `json:"scope,omitempty"`
 	// ClientID is the OAuth client the tokens were issued to, which a refresh names.
 	ClientID string `json:"client_id,omitempty"`
-	// GrantKey names this sign-in locally. hey mcp keys its send safety state (caps and
-	// exposure) on it, so a new sign-in, which took the person through consent again,
-	// starts a new budget.
+	// GrantKey names this sign-in locally. A running hey mcp stays on the sign-in it
+	// started with, and binds each send confirmation to it.
 	GrantKey string `json:"grant_key,omitempty"`
-	// GrantedAt is when the sign-in completed, in Unix seconds. hey mcp counts a
-	// recipient as known only from mail sent before it.
+	// GrantedAt is when the sign-in completed, in Unix seconds, for hey auth status.
 	GrantedAt int64 `json:"granted_at,omitempty"`
 }
 

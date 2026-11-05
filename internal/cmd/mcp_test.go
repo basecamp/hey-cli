@@ -163,6 +163,15 @@ func runMCPCommandWith(t *testing.T, upstream *httptest.Server, scope string, cl
 	return session
 }
 
+// askingClient is an MCP client that can be asked (it declares elicitation, and
+// declines), so hey_send is listed to it wherever it's served: hey_send is listed only
+// to a client that can answer its confirmation.
+func askingClient() *mcp.ClientOptions {
+	return &mcp.ClientOptions{ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+		return &mcp.ElicitResult{Action: "decline"}, nil
+	}}
+}
+
 func TestMCPCommandServesMCP(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/boxes.json" {
@@ -179,7 +188,7 @@ func TestMCPCommandServesMCP(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 
-	session := runMCPCommand(t, upstream)
+	session := runMCPCommandWith(t, upstream, auth.MCPScope, askingClient())
 
 	if got := session.InitializeResult().ServerInfo.Name; got != "hey-cli" {
 		t.Errorf("server name = %q, want hey-cli", got)
@@ -367,13 +376,13 @@ func TestMCPCommandServesWhatTheGrantAllows(t *testing.T) {
 	t.Cleanup(upstream.Close)
 
 	t.Run("send unchecked", func(t *testing.T) {
-		names := toolNames(t, runMCPCommandWith(t, upstream, "read write", nil))
+		names := toolNames(t, runMCPCommandWith(t, upstream, "read write", askingClient()))
 		if slices.Contains(names, "hey_send") || len(names) != 7 {
 			t.Errorf("tools = %v, want the 7 domain tools and no hey_send", names)
 		}
 	})
 	t.Run("read only", func(t *testing.T) {
-		session := runMCPCommandWith(t, upstream, "read", nil)
+		session := runMCPCommandWith(t, upstream, "read", askingClient())
 		for tool, err := range session.Tools(context.Background(), nil) {
 			if err != nil {
 				t.Fatal(err)
@@ -384,8 +393,13 @@ func TestMCPCommandServesWhatTheGrantAllows(t *testing.T) {
 		}
 	})
 	t.Run("--read-only", func(t *testing.T) {
-		if names := toolNames(t, runMCPCommand(t, upstream, "--read-only")); slices.Contains(names, "hey_send") {
+		if names := toolNames(t, runMCPCommandWith(t, upstream, auth.MCPScope, askingClient(), "--read-only")); slices.Contains(names, "hey_send") {
 			t.Errorf("--read-only serves hey_send: %v", names)
+		}
+	})
+	t.Run("a client that can't be asked", func(t *testing.T) {
+		if names := toolNames(t, runMCPCommand(t, upstream)); slices.Contains(names, "hey_send") || len(names) != 7 {
+			t.Errorf("tools = %v, want the 7 domain tools and no hey_send for a client that can't confirm a send", names)
 		}
 	})
 }
@@ -404,10 +418,6 @@ func TestMCPCommandSendsAConfirmedDraftOnce(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/messages/5/edit.json":
 			_, _ = w.Write([]byte(`{"id":5,"subject":"Re: Q3 plan","content":"<div>Hi Ann</div>","sender":{"id":77,"name":"Jeremy Daer","email_address":"jeremy@hey.example"},"addressed":{"directly":[{"id":1,"name":"Ann Example","email_address":"ann@example.com"}]}}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
-			_, _ = w.Write([]byte(`{"id":1,"primary_contact":{"id":77,"email_address":"jeremy@hey.example"},"senders":[{"id":77,"email_address":"jeremy@hey.example"}]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/advanced_search.json":
-			_, _ = w.Write([]byte(`{"matches":[]}`))
 		case r.Method == http.MethodPut && r.URL.Path == "/messages/5.json":
 			puts.Add(1)
 			var body map[string]any
@@ -444,7 +454,7 @@ func TestMCPCommandSendsAConfirmedDraftOnce(t *testing.T) {
 	if sent.IsError {
 		t.Fatalf("send_draft failed: %v", sent.Content)
 	}
-	if !strings.Contains(prompt, `"Ann Example" <ann@example.com> (new: never emailed before)`) {
+	if !strings.Contains(prompt, `To:       "Ann Example" <ann@example.com>`) || !strings.Contains(prompt, "    Hi Ann") {
 		t.Errorf("prompt = %s", prompt)
 	}
 	body, _ := putBody.Load().(map[string]any)
@@ -471,10 +481,6 @@ func TestMCPCommandNeverResendsADeliveryAfterA401(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/messages/5/edit.json":
 			_, _ = w.Write([]byte(`{"id":5,"subject":"Re: Q3 plan","content":"<div>Hi Ann</div>","sender":{"id":77,"email_address":"jeremy@hey.example"},"addressed":{"directly":[{"id":1,"email_address":"ann@example.com"}]}}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
-			_, _ = w.Write([]byte(`{"id":1,"senders":[{"id":77,"email_address":"jeremy@hey.example"}]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/advanced_search.json":
-			_, _ = w.Write([]byte(`{"matches":[]}`))
 		case r.Method == http.MethodPut && r.URL.Path == "/messages/5.json":
 			puts.Add(1)
 			w.WriteHeader(http.StatusUnauthorized)
@@ -518,10 +524,6 @@ func TestMCPCommandDoesntClaimWhenTheTokenCantBeRenewed(t *testing.T) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/messages/5/edit.json":
 			_, _ = w.Write([]byte(`{"id":5,"subject":"Re: Q3 plan","content":"<div>Hi Ann</div>","sender":{"id":77,"email_address":"jeremy@hey.example"},"addressed":{"directly":[{"id":1,"email_address":"ann@example.com"}]}}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/identity.json":
-			_, _ = w.Write([]byte(`{"id":1,"senders":[{"id":77,"email_address":"jeremy@hey.example"}]}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/advanced_search.json":
-			_, _ = w.Write([]byte(`{"matches":[]}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/oauth/tokens":
 			refreshes.Add(1)
 			w.WriteHeader(http.StatusServiceUnavailable)

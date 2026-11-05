@@ -90,10 +90,10 @@ but serves no way to send them; sign in again to allow it. Without write it serv
 reads. `hey auth status` shows both sign-ins, and `hey auth logout --mcp` revokes hey mcp's
 at HEY and removes it, leaving the CLI signed in.
 
-The app's client id comes from `HEY_MCP_CLIENT_ID`, or from `mcp_client_ids` in
-`~/.config/hey-cli/config.json`, keyed by HEY origin
-(`{"mcp_client_ids": {"https://app.hey.com": "..."}}`). A repository's `.hey/config.json`
-can't set it.
+The app's client id is the same in every HEY. `HEY_MCP_CLIENT_ID`, or `mcp_client_ids`
+in `~/.config/hey-cli/config.json` keyed by HEY origin
+(`{"mcp_client_ids": {"https://app.hey.com": "..."}}`), overrides it. A repository's
+`.hey/config.json` can't set it.
 
 Each domain is one gateway tool (`hey_boxes`, `hey_search`, `hey_threads`,
 `hey_contacts`, `hey_todos`, `hey_calendar`, `hey_identity`) dispatching actions
@@ -128,38 +128,28 @@ its error says to check Drafts before retrying.
 
 Delivery is one action in a tool of its own: `hey_send`'s `send_draft`, with the draft's
 id. Each call asks you to confirm the email in your MCP client (an MCP elicitation),
-showing the sending address, To, Cc and Bcc (a dash when empty), the subject, attachments
-and the body's first 1,500 characters, with every control and invisible character
-escaped so a display name can't forge a line. Recipients you hadn't emailed before
-`hey mcp` was signed in are marked new. What you approve is what goes: the draft is
-fetched again after you answer, and if its recipients, sender, subject, body or
-attachments changed it isn't sent. Each draft is sent through `hey mcp` once; another
-attempt in the next 24 hours, even after a failure, is refused, and the send is never
-retried, so an unclear outcome says to check Sent.
+showing the sending address, To, Cc and Bcc (a dash when empty), the subject, attachments,
+images and the body's first 1,500 characters, with links' targets beside their text and
+every control and invisible character escaped so a display name can't forge a line.
+Whatever it can't show (the rest of a long body, what attachments hold, images, hidden
+parts or formatting the text leaves out) is named on a `Not shown here` line beside the
+draft's link in HEY. What you approve is what goes: the draft is fetched again after you
+answer, and if its recipients, sender, subject, body or attachments changed it isn't
+sent. Each draft is sent through a `hey mcp` process once; another attempt in the next 24
+hours, even after a failure, is refused, and the send is never retried, so an unclear
+outcome says to check Sent.
 
-To someone you hadn't emailed before, or within ten minutes of a read that may have
-returned an unscreened sender's mail, the draft goes as the plain text the confirmation
-shows: its formatting isn't sent, and invisible characters and trailing spaces are
-dropped, so what goes is exactly what you read. To people you've emailed before, it
-goes as it is. `send_draft` refuses, pointing at the
-draft in HEY:
+So when you ask your agent to send a draft, it calls `send_draft` straight away: the
+confirmation is where you check what goes out, and saying yes in the chat doesn't send
+anything. You can still have it show or revise the draft first as you like.
 
-- any draft, from a client that can't show a confirmation (it answers with the draft's
-  link, and saying yes in the chat doesn't send it);
-- a draft that is already scheduled, or has no recipients, or more than 20;
-- a draft with a reference a mail client loads by itself, such as a remote image;
-- a draft with an attachment, or more than 1,500 characters, when it goes to someone
-  new or within the ten minutes below (otherwise such a draft goes, and the
-  confirmation says how much it can't show);
-- a draft to someone new within ten minutes of a read that may have returned an
-  unscreened sender's mail (search, threads, messages, drafts, contacts, the Screener,
-  calendar recordings; box reads don't count);
-- past 50 sends, or 10 new addresses, in a day on one sign-in.
-
-That state (claims, the daily counts and the ten-minute marker) lives in
-`~/.local/state/hey-cli/mcp-send-state.json`, under a file lock and fsynced, so two
-`hey mcp` processes can't both send one draft. `send_draft` is served only when the
-sign-in was granted sending, and never under `--read-only`.
+`hey_send` is served only when the sign-in was granted sending, never under `--read-only`,
+and is listed only to an MCP client that can show a confirmation. A client that can't is
+told to send each draft from its page in HEY (`app_url`) or with `hey draft send <id>`,
+and a call to `send_draft` from it answers with that link and sends nothing.
+`send_draft` also refuses a draft that is already scheduled or has no recipients. Nothing
+else a draft holds refuses it: how much your agent sends, and to whom, is yours to decide
+once you've granted sending.
 
 Earlier releases delivered mail when a call omitted `entry.status`, and then saved
 drafts only. `describe` for the draft actions serves the draft-only schema, and the

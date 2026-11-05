@@ -304,11 +304,11 @@ func TestDraftLinkReadsTheLocation(t *testing.T) {
 			t.Errorf("draftLink(%q) = %q, want %q", location, got, want)
 		}
 	}
-	result := draftResult(draftSaved("https://app.hey.com/messages/77"))
+	result := draftResult(draftSaved("https://app.hey.com/messages/77"), false)
 	if result["app_url"] != "https://app.hey.com/messages/77/edit" {
 		t.Errorf("result = %v, want the draft's page as app_url", result)
 	}
-	if result := draftResult(draftSaved("/messages/77")); result["app_url"] != nil {
+	if result := draftResult(draftSaved("/messages/77"), false); result["app_url"] != nil {
 		t.Errorf("result = %v, want no app_url for a Location with no origin", result)
 	}
 }

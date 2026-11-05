@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -13,8 +14,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -23,59 +24,56 @@ import (
 	"github.com/basecamp/mcp/gateway"
 )
 
-// send_draft: delivery, confirmed by the person and single-use (sending-safety D2-D6).
+// send_draft: delivery, confirmed by the person and single-use (sending-safety D2-D3).
 //
 // It is served in a tool of its own, hey_send, so its annotations can say what it is
 // (destructive, open world) without marking every mail read so (D7). It is served only
-// when hey mcp's credential holds send and read, and never under --read-only.
+// when hey mcp's credential holds send and read, never under --read-only, and is listed
+// only to a client that can be asked (server.go): a client that can't answer an
+// elicitation isn't offered a tool it can't complete.
 //
-// A call runs in two rounds. The first fetches the draft, applies the recipient and
-// exposure policy (D4, D6), and asks the person to confirm through MCP elicitation, with
-// the draft's fingerprint signed into the request state. The second, carrying the
-// person's answer and that state, fetches the draft again, refuses it if anything the
-// fingerprint covers changed, applies the policy again, claims the draft and charges the
-// caps in one locked update of the state file, and sends once, writing every delivered
-// field from the snapshot it just verified. A client on the 2026-07-28 protocol carries
-// the rounds itself (SEP-2322); for an older client the SDK elicits and calls back in
-// the same request. A client that declares no elicitation gets a draft and a link (D3).
+// A call runs in two rounds. The first fetches the draft and asks the person to confirm
+// it through MCP elicitation, with the draft's fingerprint signed into the request
+// state. The prompt shows the draft and names whatever its text can't show
+// (sendprompt.go). The second, carrying the person's answer and that state, fetches the
+// draft again, refuses it if anything the fingerprint covers changed, claims the draft,
+// and sends once, writing every delivered field from the snapshot it just verified. A
+// client on the 2026-07-28 protocol carries the rounds itself (SEP-2322); for an older
+// client the SDK elicits and calls back in the same request. A client that declares no
+// elicitation and calls from a cached list gets a draft and a link (D3).
+//
+// How much a person's agent sends, to whom and when is the person's call once they've
+// granted send: sending-safety D4 (caps, new recipients) and D6 (the exposure window)
+// were withdrawn on 2026-10-31, and send_draft refuses no draft for what it holds. The
+// claim is per process. Across processes (two MCP clients each running hey mcp), HEY's
+// own draft lock delivers a draft once (haystack#9163); the claim keeps this process from
+// asking HEY twice, or asking the person again about a draft it sent.
 //
 // What isn't here yet: send_at (scheduled delivery, which D2 also routes through
 // send_draft). A draft that's already scheduled is refused.
 
-// Drafts is the slice of hey-sdk send_draft drives. GetEdit, Identity and Search read;
-// SendDraft must go through a client that never retries, because a retried send can
-// deliver twice (D2.4).
+// Drafts is the slice of hey-sdk send_draft drives. SendDraft must go through a client
+// that never retries, because a retried send can deliver twice (D2.4).
 type Drafts interface {
 	GetEdit(ctx context.Context, draftID int64) (*generated.MessageEditState, error)
 	SendDraft(ctx context.Context, draftID int64, draft hey.DraftContent) (*generated.SentMessage, error)
-	Identity(ctx context.Context) (*generated.Identity, error)
-	Search(ctx context.Context, params hey.SearchParams) (*generated.AdvancedSearchResult, error)
-}
-
-// Grant is the security principal on stdio: hey mcp's sign-in (D4).
-type Grant struct {
-	// Key names the sign-in; caps and exposure are counted per key.
-	Key string
-	// GrantedAt is when it was made. Only mail sent before it makes a recipient known.
-	GrantedAt time.Time
 }
 
 // SendConfig serves send_draft. Nil serves none.
 type SendConfig struct {
 	Drafts Drafts
-	State  *SendState
-	Grant  Grant
-	// Origin is the HEY this runs against, e.g. https://app.hey.com: links point there,
-	// and claims are keyed by it.
+	// GrantKey names hey mcp's sign-in this process started on. A confirmation is bound
+	// to it, so an answer given under one sign-in isn't redeemed under another.
+	GrantKey string
+	// Origin is the HEY this runs against, e.g. https://app.hey.com: links point there.
 	Origin string
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 	// CurrentGrant answers the sign-in's key as stored now, renewing a token about to
-	// expire first, so the send that may follow goes out on a live one. When it no longer matches
-	// Grant.Key (hey mcp was signed in again or out since this process started, and the
-	// token the client authenticates with may be the new one), sends and exposing reads
-	// are refused until hey mcp restarts, so caps and exposure never count against a
-	// sign-in other than the one the requests ride. Nil skips the check.
+	// expire first, so the send that may follow goes out on a live one. When it no
+	// longer matches GrantKey (hey mcp was signed in again or out since this process
+	// started, or a renewal narrowed the grant below sending), sends are refused until
+	// hey mcp restarts. Nil skips the check.
 	CurrentGrant func(context.Context) (string, error)
 }
 
@@ -92,10 +90,9 @@ const (
 	// confirmTTL: a send confirmation should not outlive the person's attention (D2).
 	confirmTTL = 5 * time.Minute
 
-	// D4's caps. Starting values to tune from beta usage.
-	maxRecipients         = 20
-	maxSendsPerDay        = 50
-	maxNewAddressesPerDay = 10
+	// claimTTL is how long a claimed draft stays claimed: well past the confirmation's
+	// TTL and HEY's undo window (D2.3).
+	claimTTL = 24 * time.Hour
 
 	// bodyPromptCap is how much of the body the confirmation shows (D2).
 	bodyPromptCap = 1500
@@ -105,33 +102,70 @@ const (
 
 type sender struct {
 	cfg SendConfig
-	key []byte
+	// key signs confirmations. It lives as long as the process: both rounds of a send
+	// reach the same hey mcp, and a confirmation that outlives a restart is asked again.
+	key    []byte
+	claims *sendClaims
 }
 
 func newSender(cfg SendConfig) (*sender, error) {
 	switch {
-	case cfg.Drafts == nil || cfg.State == nil:
-		return nil, errors.New("send_draft needs HEY's drafts and a state file")
-	case cfg.Grant.Key == "":
-		return nil, errors.New("send_draft needs a sign-in to key its state on")
+	case cfg.Drafts == nil:
+		return nil, errors.New("send_draft needs HEY's drafts")
+	case cfg.GrantKey == "":
+		return nil, errors.New("send_draft needs the sign-in it sends on")
 	case cfg.Origin == "":
 		return nil, errors.New("send_draft needs the HEY origin")
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	key, err := cfg.State.ConfirmKey(context.Background())
-	if err != nil {
-		return nil, err
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, fmt.Errorf("make the confirmation key: %w", err)
 	}
-	return &sender{cfg: cfg, key: key}, nil
+	return &sender{cfg: cfg, key: key, claims: newSendClaims()}, nil
+}
+
+// sendClaims claims each draft id once per process (D2.3). A claim is never released,
+// even when HEY refuses the send, so there's no rollback to get wrong.
+type sendClaims struct {
+	mu     sync.Mutex
+	claims map[int64]time.Time
+}
+
+func newSendClaims() *sendClaims {
+	return &sendClaims{claims: map[int64]time.Time{}}
+}
+
+// claimed reports whether a draft was claimed within claimTTL.
+func (c *sendClaims) claimed(id int64, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	at, ok := c.claims[id]
+	return ok && now.Sub(at) < claimTTL
+}
+
+// claim takes a draft id, or reports it already taken.
+func (c *sendClaims) claim(id int64, now time.Time) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k, at := range c.claims {
+		if now.Sub(at) >= claimTTL {
+			delete(c.claims, k)
+		}
+	}
+	if _, taken := c.claims[id]; taken {
+		return false
+	}
+	c.claims[id] = now
+	return true
 }
 
 const sendDescription = "Send a saved draft: the only way hey mcp delivers mail. " +
-	"Each send asks the person to confirm it in this app, showing who it goes to (To, Cc and Bcc), the subject, attachments and the body. " +
-	"The confirmation is bound to that exact draft, so a draft changed after it was approved isn't sent, and each draft can be sent through hey mcp once. " +
-	"A client that can't show a confirmation gets the draft's link in HEY instead, and nothing is sent: saying yes in the chat doesn't send it. " +
-	"Drafts to someone this account hasn't emailed before are capped per day, and refused for a while after reading mail that may be from an unscreened sender. " +
+	"Call it as soon as the person asks to send a draft. It asks them to confirm in this app, showing who it goes to (To, Cc and Bcc), the subject, attachments, links, images and the body, and naming anything it can't show, so don't show the draft again or ask them again first. " +
+	"Only their answer to that confirmation sends it: a yes in the chat doesn't. " +
+	"The confirmation is bound to that exact draft, so a draft changed after it was approved isn't sent, and each draft is sent once. " +
 	"A draft that is already scheduled isn't sent here. Actions: send_draft (params: draft_id, the id create_message or create_reply returned), describe."
 
 func (s *sender) tool() *mcp.Tool {
@@ -196,7 +230,7 @@ func (s *sender) handle(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 	// A host that can't show the person a confirmation can't send (D3). There is no
 	// "I confirm" parameter: a value the model supplies is what an injected
 	// instruction would supply.
-	if !canElicitForm(req.Session) {
+	if !canElicitForm(req) {
 		return s.notSent(draftID, "This MCP client can't show a confirmation, so hey mcp can't send from it."), nil
 	}
 
@@ -208,23 +242,30 @@ func (s *sender) handle(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 
 // ask is the first round: review the draft and ask the person to confirm it.
 func (s *sender) ask(ctx context.Context, draftID int64) (*mcp.CallToolResult, error) {
-	snap, outcome, refusal := s.review(ctx, draftID)
+	// A draft this process sent isn't put to the person again.
+	if s.claims.claimed(draftID, s.cfg.Now()) {
+		return alreadySent(), nil
+	}
+	snap, refusal := s.review(ctx, draftID)
 	if refusal != nil {
 		return refusal, nil
 	}
 
 	state := s.sign(confirmState{
 		Kind: confirmKind, Method: confirmMethod,
-		Grant: s.cfg.Grant.Key, Origin: s.cfg.Origin, Draft: draftID,
+		Grant: s.cfg.GrantKey, Origin: s.cfg.Origin, Draft: draftID,
 		Fingerprint: snap.fingerprint,
-		Plain:       outcome.plain,
 		Expires:     s.cfg.Now().Add(confirmTTL).Unix(),
 	})
 
 	return &mcp.CallToolResult{
-		InputRequests: mcp.InputRequestMap{confirmInputID: confirmElicitation(s.prompt(snap, outcome))},
+		InputRequests: mcp.InputRequestMap{confirmInputID: confirmElicitation(s.prompt(snap))},
 		RequestState:  state,
 	}, nil
+}
+
+func alreadySent() *mcp.CallToolResult {
+	return gateway.ErrorResult("not sent: hey mcp already sent this draft, or a send of it is in progress or failed; it won't send it again for 24 hours. Check Sent in HEY")
 }
 
 // confirmAndSend is the second round: the person's answer, then the checks again, the
@@ -234,7 +275,7 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 	if err != nil {
 		return gateway.ErrorResult("the confirmation for this send isn't valid (%v), so nothing was sent; call send_draft again to ask again", err), nil
 	}
-	if state.Draft != draftID || state.Grant != s.cfg.Grant.Key || state.Origin != s.cfg.Origin {
+	if state.Draft != draftID || state.Grant != s.cfg.GrantKey || state.Origin != s.cfg.Origin {
 		return gateway.ErrorResult("the confirmation was for a different draft or sign-in, so nothing was sent; call send_draft again"), nil
 	}
 
@@ -243,13 +284,9 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 		return s.notSent(draftID, "The send wasn't approved."), nil
 	}
 
-	// The approval covers content, never a policy decision: the policy runs again.
-	snap, outcome, refusal := s.review(ctx, draftID)
+	snap, refusal := s.review(ctx, draftID)
 	if refusal != nil {
 		return refusal, nil
-	}
-	if outcome.plain != state.Plain {
-		return gateway.ErrorResult("not sent: since you approved it, this conversation read unscreened mail or the recipients' history changed, which changes how the draft would go. Call send_draft again to review it as it would go now"), nil
 	}
 	if !hmac.Equal([]byte(snap.fingerprint), []byte(state.Fingerprint)) {
 		return gateway.ErrorResult("not sent: the draft changed since you approved it (its recipients, sender, subject, body or attachments differ). Call send_draft again to review it as it is now"), nil
@@ -261,17 +298,13 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 	if err = s.checkGrant(ctx); err != nil {
 		return gateway.ErrorResult("not sent: %v", err), nil
 	}
-	if err = s.cfg.State.claim(ctx, s.cfg.Origin, draftID, s.cfg.Grant.Key, outcome.newList, !outcome.plain, s.cfg.Now()); err != nil {
-		var refused *refusalError
-		if errors.As(err, &refused) {
-			return gateway.ErrorResult("%s", refused.reason), nil
-		}
-		return gateway.ErrorResult("not sent: hey mcp couldn't record the send (%v), so it didn't risk sending it twice. Send it from HEY", err), nil
+	if !s.claims.claim(draftID, s.cfg.Now()) {
+		return alreadySent(), nil
 	}
 
 	// From here the draft is claimed for good: the claim is never released, even when
 	// HEY refuses, so there's no rollback to get wrong (D2.3).
-	sent, err := s.cfg.Drafts.SendDraft(ctx, draftID, snap.content(outcome.plain))
+	sent, err := s.cfg.Drafts.SendDraft(ctx, draftID, snap.content())
 	if err != nil {
 		if refusedByHEY(err) {
 			return gateway.ErrorResult("HEY refused the send: %v. The draft is still a draft, and hey mcp won't send it again for 24 hours; send it from HEY: %s", err, s.editURL(draftID)), nil
@@ -311,19 +344,10 @@ func (s *sender) checkGrant(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("hey mcp couldn't read its sign-in (%w)", err)
 	}
-	if current != s.cfg.Grant.Key {
-		return errors.New("hey mcp was signed in again, or signed out, since it started; restart it")
+	if current != s.cfg.GrantKey {
+		return errors.New("hey mcp was signed in again, or signed out, since it started, or its sign-in can no longer send; restart it")
 	}
 	return nil
-}
-
-// markExposed records an exposing read against this process's sign-in, refusing when
-// the stored sign-in has changed under it.
-func (s *sender) markExposed(ctx context.Context, action string) error {
-	if err := s.checkGrant(ctx); err != nil {
-		return err
-	}
-	return s.cfg.State.MarkExposed(ctx, s.cfg.Grant.Key, action, s.cfg.Now())
 }
 
 // notSent is D3's answer: not an error, a draft and where to send it.
@@ -368,18 +392,25 @@ func draftIDParam(params map[string]any) (int64, error) {
 	return id, nil
 }
 
-// canElicitForm reports whether the client declared form elicitation. A client that
-// declares the capability with neither mode is read as form, as the SDK does.
-func canElicitForm(session *mcp.ServerSession) bool {
-	if session == nil {
+// clientRequest is any request that says what its client can do: a 2026-07-28 request
+// carries it in _meta, an older one has it from the session's initialize.
+type clientRequest interface {
+	ClientCapabilities() *mcp.ClientCapabilities
+}
+
+// canElicitForm reports whether the client can be asked: it declared form elicitation.
+// A client that declares the capability with neither mode is read as form, as the SDK
+// does.
+func canElicitForm(req mcp.Request) bool {
+	r, ok := req.(clientRequest)
+	if !ok {
 		return false
 	}
-	params := session.InitializeParams()
-	if params == nil || params.Capabilities == nil || params.Capabilities.Elicitation == nil {
+	caps := r.ClientCapabilities()
+	if caps == nil || caps.Elicitation == nil {
 		return false
 	}
-	caps := params.Capabilities.Elicitation
-	return caps.Form != nil || caps.URL == nil
+	return caps.Elicitation.Form != nil || caps.Elicitation.URL == nil
 }
 
 func confirmElicitation(message string) *mcp.ElicitParams {
@@ -418,16 +449,11 @@ type draftSnapshot struct {
 // landing after the final fetch is overwritten by what was approved (D2). HEY replaces
 // the whole recipient set when addressed is present (haystack Entry::Addressed#address),
 // so a Bcc added concurrently is dropped rather than delivered. The body is the one the
-// fingerprint hashed, attachments rebuilt from their identity, or, when plain, the
-// plain text the confirmation showed (sendbody.go).
-func (d *draftSnapshot) content(plain bool) hey.DraftContent {
-	body, subject := d.body.delivered, d.subject
-	if plain {
-		body, subject = d.body.plainHTML, plainSubject(d.subject)
-	}
+// fingerprint hashed, attachments rebuilt from their identity (sendbody.go).
+func (d *draftSnapshot) content() hey.DraftContent {
 	return hey.DraftContent{
-		Subject:        subject,
-		Content:        body,
+		Subject:        d.subject,
+		Content:        d.body.delivered,
 		To:             emails(d.to),
 		CC:             emails(d.cc),
 		BCC:            emails(d.bcc),
@@ -503,22 +529,13 @@ func snapshotOf(edit *generated.MessageEditState) (*draftSnapshot, error) {
 	return snap, nil
 }
 
-// reviewOutcome is what the policy found, for the prompt.
-type reviewOutcome struct {
-	// plain: the draft goes as the plain text the confirmation shows (sendbody.go),
-	// because it's to someone new or the sign-in is exposed. Otherwise it goes as it is.
-	plain        bool
-	newList      []string
-	newAddresses map[string]bool
-	exposed      bool
-	exposedBy    string
-}
-
-// review fetches the draft and applies the policy, returning a refusal as the call's
-// result when the draft can't be sent here.
-func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *reviewOutcome, *mcp.CallToolResult) {
-	refuse := func(format string, a ...any) (*draftSnapshot, *reviewOutcome, *mcp.CallToolResult) {
-		return nil, nil, gateway.ErrorResult(format, a...)
+// review fetches the draft, returning a refusal as the call's result when the draft
+// can't be sent here: one HEY no longer serves for editing, one already scheduled, or
+// one with no recipients. Nothing the draft holds refuses it; the prompt names what it
+// can't show.
+func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *mcp.CallToolResult) {
+	refuse := func(format string, a ...any) (*draftSnapshot, *mcp.CallToolResult) {
+		return nil, gateway.ErrorResult(format, a...)
 	}
 
 	edit, err := s.cfg.Drafts.GetEdit(ctx, draftID)
@@ -546,147 +563,20 @@ func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *re
 		return refuse("not sent: this draft is already scheduled; change or send it in HEY: %s", s.editURL(draftID))
 	case len(recipients) == 0:
 		return refuse("not sent: the draft has no recipients; add them with update_message (entry.addressed)")
-	case len(recipients) > maxRecipients:
-		return refuse("not sent: hey mcp sends to at most %d recipients across To, Cc and Bcc, and this draft has %d. Send it from HEY: %s", maxRecipients, len(recipients), s.editURL(draftID))
-	case snap.body.unverifiable != "":
-		return refuse("not sent: the draft's body has an attachment hey mcp can't verify (%s), so the confirmation couldn't show what it sends. Send it from HEY: %s", snap.body.unverifiable, s.editURL(draftID))
-	case snap.body.remote != "":
-		return refuse("not sent: the draft's body has a reference a mail client loads by itself (%s), which can carry mailbox data to whoever hosts it. Send it from HEY: %s", snap.body.remote, s.editURL(draftID))
 	}
 	for _, r := range recipients {
 		if normalizedAddress(r.EmailAddress) == "" {
 			return refuse("not sent: a recipient has no email address")
 		}
 	}
-
-	newAddresses := s.newAddresses(ctx, snap)
-	exposed, by, err := s.cfg.State.exposure(ctx, s.cfg.Grant.Key, s.cfg.Now())
-	if err != nil {
-		// Without the marker the server can't know, so it treats the grant as exposed
-		// (D6), and the claim would need the same file anyway.
-		return refuse("not sent: hey mcp couldn't read its send state (%v). Send it from HEY", err)
-	}
-	if exposed && len(newAddresses) > 0 {
-		return refuse("not sent: this conversation read mail that may be from an unscreened sender (%s) in the last %d minutes, and the draft is addressed to someone you haven't emailed before (%s). Send it from HEY: %s",
-			by, int(exposureWindow/time.Minute), newAddresses[0], s.editURL(draftID))
-	}
-
-	// Measured on the escaped text the prompt shows: escapes lengthen it, and what
-	// falls past the cut is unseen however short the raw text was.
-	// To someone new, or while exposed, nothing may go that the person didn't read
-	// (D2): the draft goes as the plain text the confirmation shows, so it has to fit
-	// there whole, and an attachment, which a name and a size don't show, can't go.
-	plain := len(newAddresses) > 0 || exposed
-	if plain && (len(snap.body.attachments) > 0 || utf8.RuneCountInString(snap.body.plainText) > bodyPromptCap) {
-		return refuse("not sent: the draft can't be fully reviewed here (it has an attachment, or more than %d characters), and it goes to someone you haven't emailed before or this conversation read unscreened mail. Send it from HEY: %s",
-			bodyPromptCap, s.editURL(draftID))
-	}
-
-	sends, charged, err := s.cfg.State.budget(ctx, s.cfg.Grant.Key, s.cfg.Now())
-	if err != nil {
-		return refuse("not sent: hey mcp couldn't read its send state (%v). Send it from HEY", err)
-	}
-	if sends >= maxSendsPerDay {
-		return refuse("not sent: hey mcp sends at most %d messages a day on one sign-in, and this one has reached it. Send it from HEY: %s", maxSendsPerDay, s.editURL(draftID))
-	}
-	uncharged := 0
-	for _, address := range newAddresses {
-		if !charged[address] {
-			uncharged++
-		}
-	}
-	if len(charged)+uncharged > maxNewAddressesPerDay {
-		return refuse("not sent: hey mcp sends to at most %d new addresses a day on one sign-in, and this draft would go past it. Send it from HEY: %s", maxNewAddressesPerDay, s.editURL(draftID))
-	}
-
-	outcome := &reviewOutcome{plain: plain, newList: newAddresses, newAddresses: map[string]bool{}, exposed: exposed, exposedBy: by}
-	for _, address := range newAddresses {
-		outcome.newAddresses[address] = true
-	}
-	return snap, outcome, nil
-}
-
-// --- known recipients (D4) ---
-
-// newAddresses returns the draft's recipients that aren't known, normalized and in
-// order. Known means history the agent can't manufacture: mail this account sent to the
-// address before the sign-in existed. Contact records don't count, since a model could
-// create one. Anything send_draft can't prove known, a failed lookup included, is new.
-func (s *sender) newAddresses(ctx context.Context, snap *draftSnapshot) []string {
-	var addresses []string
-	for _, r := range snap.recipients() {
-		address := normalizedAddress(r.EmailAddress)
-		if !slices.Contains(addresses, address) {
-			addresses = append(addresses, address)
-		}
-	}
-
-	known := s.knownAddresses(ctx, addresses)
-	var fresh []string
-	for _, address := range addresses {
-		if !known[address] {
-			fresh = append(fresh, address)
-		}
-	}
-	return fresh
-}
-
-// knownAddresses looks each address up in HEY's search for a message to it from one of
-// this identity's addresses, delivered before the sign-in. The search only narrows: each
-// match is checked here against the entry's own creator, time and recipients, so a
-// search that matches loosely can't make an address known.
-func (s *sender) knownAddresses(ctx context.Context, addresses []string) map[string]bool {
-	known := map[string]bool{}
-	if s.cfg.Grant.GrantedAt.IsZero() || len(addresses) == 0 {
-		return known
-	}
-	identity, err := s.cfg.Drafts.Identity(ctx)
-	if err != nil || identity == nil {
-		return known
-	}
-	mine := map[string]bool{}
-	if address := normalizedAddress(identity.PrimaryContact.EmailAddress); address != "" {
-		mine[address] = true
-	}
-	for _, sender := range identity.Senders {
-		if address := normalizedAddress(sender.EmailAddress); address != "" {
-			mine[address] = true
-		}
-	}
-
-	for _, address := range addresses {
-		result, err := s.cfg.Drafts.Search(ctx, hey.SearchParams{To: address})
-		if err != nil || result == nil {
-			continue
-		}
-		known[address] = sentBefore(result, address, mine, s.cfg.Grant.GrantedAt)
-	}
-	return known
-}
-
-func sentBefore(result *generated.AdvancedSearchResult, address string, mine map[string]bool, before time.Time) bool {
-	for _, match := range result.Matches {
-		for _, entry := range match.Entries {
-			// ActiveAt is when the entry went out; CreatedAt would count a draft made
-			// before the sign-in and sent after it. No delivery time, no proof.
-			if !mine[normalizedAddress(entry.Creator.EmailAddress)] || entry.ActiveAt.IsZero() || !entry.ActiveAt.Before(before) {
-				continue
-			}
-			for _, r := range slices.Concat(entry.Addressed.Directly, entry.Addressed.Copied, entry.Addressed.Blindcopied) {
-				if normalizedAddress(r.EmailAddress) == address {
-					return true
-				}
-			}
-		}
-	}
-	return false
+	return snap, nil
 }
 
 // --- the signed confirmation state ---
 
 // confirmState is what the request state carries between the rounds: the draft's
 // fingerprint, bound to the sign-in and the HEY, with an expiry. It is signed with the
-// installation's key, because a 2026-07-28 client holds it between the rounds.
+// process's key, because a 2026-07-28 client holds it between the rounds.
 type confirmState struct {
 	Kind        string `json:"k"`
 	Method      string `json:"m"`
@@ -694,7 +584,6 @@ type confirmState struct {
 	Origin      string `json:"o"`
 	Draft       int64  `json:"d"`
 	Fingerprint string `json:"f"`
-	Plain       bool   `json:"p,omitempty"`
 	Expires     int64  `json:"e"`
 }
 

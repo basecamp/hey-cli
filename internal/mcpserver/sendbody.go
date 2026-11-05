@@ -6,60 +6,50 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
-	"golang.org/x/text/unicode/norm"
 )
 
 // What send_draft reads out of a draft's body (sending-safety D2): the text the
-// confirmation shows, whether that text is everything the mail carries, its
-// attachments, any reference a mail client would load by itself, the body it delivers,
-// and the hash the confirmation binds.
+// confirmation shows, what that text leaves out, its attachments, links and images, the
+// body it delivers, and the hash the confirmation binds.
 //
 // The body is the Trix editing HTML GetMessageEdit serves. Its attachments are
 // <figure data-trix-attachment="{json}"> (or <action-text-attachment>) elements whose
 // JSON names the blob's sgid, filename, size and type beside a signed URL, wrapped
 // around a preview image and a caption HEY renders from the blob.
 //
-// An attachment is delivered as its identity alone: the element is rebuilt from the
+// A blob attachment is delivered as its identity alone: the element is rebuilt from the
 // sgid, filename, size, type and caption, with nothing inside it, which is what HEY
 // keeps of one anyway (Action Text resolves an attachment from those attributes and
-// renders its markup afresh). Nothing in the wrapper (a preview URL, a caption's
-// markup, an attribute) is sent, so none of it has to be checked, shown or bound. The
-// hash is over exactly the body that is delivered.
+// renders its markup afresh). So two fetches of an unchanged draft hash alike, whatever
+// signed URLs its wrapper carries, and nothing in the wrapper is sent. An attachment
+// that isn't a plain blob is delivered as it is and named in the prompt as one it can't
+// name. The hash is over exactly the body that is delivered.
+//
+// Nothing here refuses a draft: what the text can't show is named on the prompt's
+// "Not shown here" line, beside the draft's link in HEY.
 
 // reviewedBody is one draft body, analyzed.
 type reviewedBody struct {
 	// text is the plain-text rendering the confirmation shows, links with their targets.
 	text string
-	// lossless reports whether text shows everything the body transmits. Any tag or
-	// attribute outside the plain set below, which may style text out of sight, makes it
-	// false; so does any attachment, since a name and a size don't show a file.
-	lossless bool
-	// attachments are the body's attachments, in order.
+	// attachments are the body's blob attachments, in order.
 	attachments []attachment
-	// remote names the first reference a mail client would fetch on open, or "".
-	remote string
-	// unverifiable names the first attachment that isn't a plain blob (no sgid or
-	// filename, or embedded HTML content, as Trix carries an embedded email body), or
-	// "". It can't be delivered as an identity, so such a draft isn't sent.
-	unverifiable string
-	// delivered is the body send_draft sends to known recipients: the draft's, with
-	// each attachment rebuilt from its identity.
+	// unnamed counts attachments that aren't plain blobs (no sgid or filename, or
+	// embedded content, as Trix carries an embedded email body). They go as they are.
+	unnamed int
+	// images are the targets of the body's images, in order.
+	images []string
+	// unshown names the first markup the text rendering doesn't show, or "".
+	unshown string
+	// delivered is the body send_draft sends: the draft's, comments dropped, each blob
+	// attachment rebuilt from its identity.
 	delivered string
-	// plainText and plainHTML are the body as plain text, and the HTML made from that
-	// text alone. A draft to someone new, or sent while exposed, goes as plainHTML, and
-	// the confirmation shows plainText, so what goes is exactly what was shown: no
-	// markup choice (a list's type, bold against italic, a line break against a new
-	// paragraph) is left to carry anything the person didn't read.
-	plainText, plainHTML string
-	// hash is the sha256 of delivered. Two fetches of an unchanged draft hash alike
-	// (signed URLs aren't in it), and a changed attachment doesn't.
+	// hash is the sha256 of delivered.
 	hash string
 }
 
@@ -71,36 +61,33 @@ type attachment struct {
 	Caption     string `json:"caption,omitempty"`
 }
 
-// plainTags are the elements Trix writes for text, which the text rendering shows in
-// full. Anything else is treated as able to hide content.
-var plainTags = map[atom.Atom]bool{
-	atom.Div: true, atom.P: true, atom.Br: true, atom.Strong: true, atom.B: true,
-	atom.Em: true, atom.I: true, atom.Del: true, atom.S: true, atom.Strike: true,
+// shownTags are the elements the text rendering shows whole: text structure and links,
+// nothing that loads, styles or hides. Anything else is named on the prompt's "Not
+// shown here" line. It is an allowlist on purpose: it says what the rendering covers,
+// so whatever a mail client does with the rest is named without one more selector.
+var shownTags = map[atom.Atom]bool{
+	atom.Div: true, atom.P: true, atom.Br: true, atom.Span: true, atom.Strong: true, atom.B: true,
+	atom.Em: true, atom.I: true, atom.U: true, atom.Del: true, atom.S: true, atom.Strike: true,
 	atom.A: true, atom.Ul: true, atom.Ol: true, atom.Li: true, atom.Blockquote: true,
-	atom.Pre: true, atom.H1: true, atom.Code: true,
+	atom.Pre: true, atom.H1: true, atom.H2: true, atom.H3: true, atom.H4: true, atom.H5: true,
+	atom.H6: true, atom.Hr: true, atom.Code: true,
 	// html.Parse wraps a fragment in these.
 	atom.Html: true, atom.Head: true, atom.Body: true,
 }
 
 // blockTags end a line in the text rendering.
 var blockTags = map[atom.Atom]bool{
-	atom.Div: true, atom.P: true, atom.Li: true, atom.Blockquote: true, atom.Pre: true, atom.H1: true,
-	atom.Ul: true, atom.Ol: true,
+	atom.Div: true, atom.P: true, atom.Li: true, atom.Blockquote: true, atom.Pre: true,
+	atom.H1: true, atom.H2: true, atom.H3: true, atom.H4: true, atom.H5: true, atom.H6: true,
+	atom.Ul: true, atom.Ol: true, atom.Hr: true,
 }
 
-// loadingTags fetch something when a mail client renders them, can make it, or hold
-// markup a client may parse differently (noscript, template and the raw-text
-// fallbacks), which is refused rather than second-guessed.
-var loadingTags = map[atom.Atom]bool{
-	atom.Img: true, atom.Image: true, atom.Iframe: true, atom.Frame: true, atom.Video: true,
-	atom.Audio: true, atom.Source: true, atom.Track: true, atom.Embed: true, atom.Object: true,
-	atom.Link: true, atom.Picture: true, atom.Svg: true, atom.Style: true, atom.Script: true,
-	atom.Meta: true, atom.Base: true, atom.Input: true, atom.Noscript: true, atom.Template: true,
-	atom.Noembed: true, atom.Noframes: true, atom.Xmp: true, atom.Plaintext: true, atom.Math: true,
+// rawTextTags hold text a mail client doesn't show as text (a stylesheet, a script),
+// so the rendering leaves it out rather than showing it as the body's.
+var rawTextTags = map[atom.Atom]bool{
+	atom.Style: true, atom.Script: true, atom.Template: true, atom.Title: true,
+	atom.Xmp: true, atom.Noembed: true, atom.Noframes: true, atom.Plaintext: true, atom.Textarea: true,
 }
-
-// loadingAttributes name a URL a client loads by itself.
-var loadingAttributes = []string{"src", "srcset", "background", "poster", "lowsrc", "dynsrc", "data", "xlink:href", "action", "formaction"}
 
 // analyzeBody reads a draft's raw content.
 func analyzeBody(content string) (reviewedBody, error) {
@@ -113,11 +100,13 @@ func analyzeBody(content string) (reviewedBody, error) {
 		return reviewedBody{}, fmt.Errorf("read the draft's body: %w", err)
 	}
 
-	w := &bodyWalker{lossless: true}
+	w := &bodyWalker{}
 	for _, n := range nodes {
 		w.walk(n)
 	}
 
+	// A comment is never shown, so it isn't sent: a conditional comment is markup
+	// Outlook renders (<!--[if mso]><img src=...><![endif]-->).
 	for _, c := range w.comments {
 		if c.Parent != nil {
 			c.Parent.RemoveChild(c)
@@ -133,28 +122,31 @@ func analyzeBody(content string) (reviewedBody, error) {
 		}
 	}
 	sum := sha256.Sum256(delivered.Bytes())
-	text, hidesWhitespace := plainText(w.text.String())
-	shown := plainOf(text)
 	return reviewedBody{
-		text:         text,
-		plainText:    shown,
-		plainHTML:    plainHTML(shown),
-		lossless:     w.lossless && len(w.attachments) == 0 && !hidesWhitespace,
-		attachments:  w.attachments,
-		remote:       w.remote,
-		unverifiable: w.unverifiable,
-		delivered:    delivered.String(),
-		hash:         hex.EncodeToString(sum[:]),
+		text:        strings.TrimSuffix(strings.ReplaceAll(w.text.String(), "\r\n", "\n"), "\n"),
+		attachments: w.attachments,
+		unnamed:     w.unnamed,
+		images:      w.images,
+		unshown:     w.unshown,
+		delivered:   delivered.String(),
+		hash:        hex.EncodeToString(sum[:]),
 	}, nil
 }
 
 type bodyWalker struct {
-	comments     []*html.Node
-	text         strings.Builder
-	lossless     bool
-	attachments  []attachment
-	remote       string
-	unverifiable string
+	comments    []*html.Node
+	text        strings.Builder
+	attachments []attachment
+	unnamed     int
+	images      []string
+	unshown     string
+}
+
+// note keeps the first markup the rendering doesn't show.
+func (w *bodyWalker) note(what string) {
+	if w.unshown == "" {
+		w.unshown = what
+	}
 }
 
 func (w *bodyWalker) walk(n *html.Node) {
@@ -163,8 +155,6 @@ func (w *bodyWalker) walk(n *html.Node) {
 		w.text.WriteString(n.Data)
 		return
 	case html.CommentNode:
-		// Never shown, and not sent: a conditional comment is markup Outlook renders
-		// (<!--[if mso]><img src=...><![endif]-->).
 		w.comments = append(w.comments, n)
 		return
 	case html.ElementNode:
@@ -175,11 +165,10 @@ func (w *bodyWalker) walk(n *html.Node) {
 		return
 	}
 
-	if a, isAttachment, problem := attachmentOf(n); isAttachment {
-		if problem != "" {
-			if w.unverifiable == "" {
-				w.unverifiable = problem
-			}
+	if a, isAttachment, plainBlob := attachmentOf(n); isAttachment {
+		if !plainBlob {
+			w.unnamed++
+			w.text.WriteString("\n[attachment]\n")
 			return
 		}
 		rebuildAttachment(n, a)
@@ -188,19 +177,20 @@ func (w *bodyWalker) walk(n *html.Node) {
 		return
 	}
 
-	if !plainTags[n.DataAtom] {
-		w.lossless = false
-	}
-	if loadingTags[n.DataAtom] && w.remote == "" {
-		w.remote = elementName(n)
+	switch {
+	case n.DataAtom == atom.Img:
+		w.images = append(w.images, strings.TrimSpace(attrValue(n, "src")))
+	case !shownTags[n.DataAtom]:
+		w.note(elementName(n))
 	}
 	for _, attr := range n.Attr {
-		if n.DataAtom != atom.A || attr.Key != "href" {
-			w.lossless = false
+		shown := (n.DataAtom == atom.A && attr.Key == "href") || (n.DataAtom == atom.Img && attr.Key == "src")
+		if !shown {
+			w.note(attributeName(attr) + " on " + elementName(n))
 		}
-		if w.remote == "" && loadsByItself(attr) {
-			w.remote = attr.Key + " on " + elementName(n)
-		}
+	}
+	if rawTextTags[n.DataAtom] {
+		return
 	}
 
 	if n.DataAtom == atom.Br {
@@ -214,7 +204,6 @@ func (w *bodyWalker) walk(n *html.Node) {
 	}
 	if n.DataAtom == atom.A {
 		if href := attrValue(n, "href"); href != "" {
-			// A link doesn't load itself, so it's seen content once its target shows.
 			w.text.WriteString(" <" + href + ">")
 		}
 	}
@@ -223,10 +212,9 @@ func (w *bodyWalker) walk(n *html.Node) {
 	}
 }
 
-// elementName names n for a refusal the model reads. Only an element HTML knows is
-// named: a custom element's name is the draft's own text (<ignore-previous-instructions
-// src=...>), and the refusal must carry none of it. An attribute that loads is named by
-// its key alone, which loadingAttributes or style has already fixed.
+// elementName names n for the prompt. Only an element HTML knows is named: a custom
+// element's name is the draft's own text (<ignore-previous-instructions>), and the
+// prompt's own lines must carry none of it.
 func elementName(n *html.Node) string {
 	if n.DataAtom == 0 {
 		return "a custom element"
@@ -234,35 +222,28 @@ func elementName(n *html.Node) string {
 	return "<" + n.DataAtom.String() + ">"
 }
 
-// loadsByItself reports whether an attribute makes a mail client fetch a URL on open:
-// a loading attribute, or a style that names one.
-func loadsByItself(attr html.Attribute) bool {
-	key := strings.ToLower(attr.Key)
-	if slices.Contains(loadingAttributes, key) {
-		return true
+// attributeName names an attribute HTML knows by its key, and any other as "an
+// attribute", for the same reason.
+func attributeName(attr html.Attribute) string {
+	if attr.Namespace != "" || atom.Lookup([]byte(attr.Key)) == 0 {
+		return "an attribute"
 	}
-	if key == "style" {
-		// CSS escapes spell url( without its letters (u\72l(...)), so a style with an
-		// escape, or any function call at all, counts as loading. Trix writes no style.
-		value := strings.ToLower(attr.Val)
-		return strings.ContainsAny(value, "\\(") || strings.Contains(value, "@import")
-	}
-	return false
+	return attr.Key
 }
 
 // attachmentOf reads a Trix attachment element: a figure carrying data-trix-attachment,
-// or an action-text-attachment. It answers whether n is one, and a problem when it is
-// one that isn't a plain blob: no sgid or filename, or embedded content (Trix carries
-// an embedded email body as a filename-less text/html attachment whose markup is in
-// its JSON).
-func attachmentOf(n *html.Node) (attachment, bool, string) {
+// or an action-text-attachment. It answers whether n is one, and whether it is a plain
+// blob that can be delivered as its identity: one with an sgid and a filename and no
+// embedded content (Trix carries an embedded email body as a filename-less text/html
+// attachment whose markup is in its JSON).
+func attachmentOf(n *html.Node) (attachment, bool, bool) {
 	var a attachment
 	var embedded bool
 	switch {
 	case n.DataAtom == atom.Figure && hasAttr(n, "data-trix-attachment"):
 		var data map[string]any
 		if json.Unmarshal([]byte(attrValue(n, "data-trix-attachment")), &data) != nil {
-			return a, true, "an attachment's data doesn't parse"
+			return a, true, false
 		}
 		var attributes map[string]any
 		_ = json.Unmarshal([]byte(attrValue(n, "data-trix-attributes")), &attributes)
@@ -273,18 +254,9 @@ func attachmentOf(n *html.Node) (attachment, bool, string) {
 		embedded = hasAttr(n, "content")
 		a = attachment{SGID: attrValue(n, "sgid"), Filename: attrValue(n, "filename"), Size: size, ContentType: attrValue(n, "content-type"), Caption: attrValue(n, "caption")}
 	default:
-		return a, false, ""
+		return a, false, false
 	}
-
-	// The problem names no filename: it reaches the model, and a filename is the
-	// draft's text, not this server's.
-	switch {
-	case embedded:
-		return a, true, "an attachment carries embedded content"
-	case a.SGID == "" || a.Filename == "":
-		return a, true, "an attachment has no blob identity"
-	}
-	return a, true, ""
+	return a, true, !embedded && a.SGID != "" && a.Filename != ""
 }
 
 // rebuildAttachment replaces an attachment element's attributes with its identity and
@@ -354,84 +326,4 @@ func hasAttr(n *html.Node, key string) bool {
 func asText(v any) string {
 	s, _ := v.(string)
 	return s
-}
-
-// plainOf is text as it goes when sent as plain text: every invisible character
-// removed, compatibility-normalized (NFKC, so a no-break space is a space and a
-// decomposed letter is one letter, and two spellings that look alike are one), and
-// trailing whitespace dropped from each line, so nothing in it is unseen.
-func plainOf(text string) string {
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		lines[i] = plainLine(line)
-	}
-	return strings.Join(lines, "\n")
-}
-
-// plainLine is one line of plainOf. Invisible characters go first, so none can shield
-// whitespace from the trim.
-func plainLine(line string) string {
-	visible := strings.Map(func(r rune) rune {
-		if invisible(r) {
-			return -1
-		}
-		return r
-	}, line)
-	return strings.TrimRightFunc(norm.NFKC.String(visible), unicode.IsSpace)
-}
-
-// plainSubject is a subject as it goes on the plain path: one plain line.
-func plainSubject(subject string) string {
-	return plainLine(strings.ReplaceAll(strings.ReplaceAll(subject, "\r", " "), "\n", " "))
-}
-
-// plainHTML is the body made from plain text: its lines, escaped, with a break between
-// each, in one block.
-func plainHTML(text string) string {
-	var b strings.Builder
-	b.WriteString("<div>")
-	for i, line := range strings.Split(text, "\n") {
-		if i > 0 {
-			b.WriteString("<br>")
-		}
-		b.WriteString(keepSpaces(html.EscapeString(line)))
-	}
-	b.WriteString("</div>")
-	return b.String()
-}
-
-// keepSpaces makes the spaces HTML would collapse hold: a leading space, and every
-// space after another, become non-breaking, and a tab becomes four, so the recipient
-// sees the spacing the confirmation showed.
-func keepSpaces(line string) string {
-	var b strings.Builder
-	previous := ' ' // a line's first space is leading
-	for _, r := range line {
-		switch {
-		case r == '\t':
-			b.WriteString("&nbsp;&nbsp;&nbsp;&nbsp;")
-			r = ' '
-		case r == ' ' && previous == ' ':
-			b.WriteString("&nbsp;")
-		default:
-			b.WriteRune(r)
-		}
-		previous = r
-	}
-	return b.String()
-}
-
-// plainText is the text the prompt shows: the rendering with its line endings
-// normalized and the one newline its last block ends with dropped, and nothing else changed,
-// so every space and blank line the body delivers is in what the prompt shows and is
-// measured. hidesWhitespace reports trailing spaces or tabs on a line, which a prompt
-// can't show and a <pre> can carry data in.
-func plainText(s string) (string, bool) {
-	s = strings.TrimSuffix(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
-	for line := range strings.SplitSeq(s, "\n") {
-		if strings.TrimRight(line, " \t") != line {
-			return s, true
-		}
-	}
-	return s, false
 }
