@@ -91,13 +91,34 @@ func TestEveryParameterReachesTheRequest(t *testing.T) {
 	}
 }
 
-// The catalog serves every parameter the vendored model gives a served
-// operation, so a parameter can't drop out of the surface and out of the
-// test above together. The model is read here as plain JSON, apart from
+// The catalog serves every operation and parameter the vendored model
+// has, so neither can drop out of the surface and out of the test above
+// together. The model is read here as plain JSON, apart from
 // the toolkit's derivation.
 func TestCatalogServesEveryModelParameter(t *testing.T) {
 	cat := loadForTest(t)
 	model := modelParameters(t)
+
+	// Every model operation is served or left unmapped on purpose
+	// (TestCatalogUnmappedTagsArePinned), so an operation can't drop out
+	// with its parameters either.
+	accounted := map[string]bool{}
+	for _, domain := range cat.Domains {
+		for _, op := range domain.Operations {
+			accounted[op.ID] = true
+		}
+	}
+	for _, ids := range cat.Unmapped {
+		for _, id := range ids {
+			accounted[id] = true
+		}
+	}
+	for id := range model {
+		if !accounted[id] {
+			t.Errorf("the model's %s is neither served nor unmapped", id)
+		}
+	}
+
 	for _, domain := range cat.Domains {
 		for _, op := range domain.Operations {
 			var served []string
