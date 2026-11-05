@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -35,13 +38,13 @@ func TestEveryParameterReachesTheRequest(t *testing.T) {
 			base := map[string]any{}
 			for i, p := range op.Params {
 				if p.In == "path" || (p.In == "query" && p.Required) {
-					base[p.Name] = sentinel(p.Name, 1000+i)
+					base[p.Name] = sentinel(p, 1000+i)
 				}
 			}
 			for i, p := range op.Params {
 				checked++
 				params := clone(base)
-				params[p.Name] = sentinel(p.Name, 2000+i)
+				params[p.Name] = sentinel(p, 2000+i)
 				if reached, refusal := send(t, domain, op, params); refusal != "" {
 					refused[domain.Key+"."+op.Action+"."+p.Name] = true
 				} else if !reached(p.In, p.Name, params[p.Name]) {
@@ -77,8 +80,8 @@ func TestEveryParameterReachesTheRequest(t *testing.T) {
 			}
 		}
 	}
-	if checked < 100 {
-		t.Errorf("checked %d parameters; the catalog has more than that", checked)
+	if want := modelParameterCount(t, cat); checked != want {
+		t.Errorf("checked %d parameters, but the served operations take %d in the model", checked, want)
 	}
 	// Nothing is refused before HEY is called: every sentinel is a value
 	// the action takes, so a refusal here is a parameter the server won't
@@ -86,6 +89,104 @@ func TestEveryParameterReachesTheRequest(t *testing.T) {
 	if len(refused) > 0 {
 		t.Errorf("refused before calling HEY: %v", refused)
 	}
+}
+
+// The catalog serves every parameter the vendored model gives a served
+// operation, so a parameter can't drop out of the surface and out of the
+// test above together. The model is read here as plain JSON, apart from
+// the toolkit's derivation.
+func TestCatalogServesEveryModelParameter(t *testing.T) {
+	cat := loadForTest(t)
+	model := modelParameters(t)
+	for _, domain := range cat.Domains {
+		for _, op := range domain.Operations {
+			var served []string
+			for _, p := range op.Params {
+				served = append(served, p.In+":"+p.Name)
+			}
+			properties, _ := op.Body["properties"].(map[string]any)
+			for name := range properties {
+				served = append(served, "body:"+name)
+			}
+			sort.Strings(served)
+			if !reflect.DeepEqual(served, model[op.ID]) {
+				t.Errorf("%s serves %v; the model gives it %v", op.Action, served, model[op.ID])
+			}
+		}
+	}
+}
+
+func modelParameterCount(t *testing.T, cat *catalog.Catalog) int {
+	t.Helper()
+	model := modelParameters(t)
+	n := 0
+	for _, domain := range cat.Domains {
+		for _, op := range domain.Operations {
+			n += len(model[op.ID])
+		}
+	}
+	return n
+}
+
+// modelParameters reads each operation's path and query parameters and its
+// JSON body's top-level properties from model/openapi.json, by operationId.
+func modelParameters(t *testing.T) map[string][]string {
+	t.Helper()
+	data, err := os.ReadFile("model/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Paths      map[string]map[string]json.RawMessage `json:"paths"`
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]any `json:"properties"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string][]string{}
+	for _, methods := range doc.Paths {
+		for _, raw := range methods {
+			var op struct {
+				ID     string `json:"operationId"`
+				Params []struct {
+					Name string `json:"name"`
+					In   string `json:"in"`
+				} `json:"parameters"`
+				Body struct {
+					Content map[string]struct {
+						Schema struct {
+							Ref        string         `json:"$ref"`
+							Properties map[string]any `json:"properties"`
+						} `json:"schema"`
+					} `json:"content"`
+				} `json:"requestBody"`
+			}
+			if json.Unmarshal(raw, &op) != nil || op.ID == "" {
+				continue
+			}
+			var names []string
+			for _, p := range op.Params {
+				if p.In == "path" || p.In == "query" {
+					names = append(names, p.In+":"+p.Name)
+				}
+			}
+			schema := op.Body.Content["application/json"].Schema
+			properties := schema.Properties
+			if ref, ok := strings.CutPrefix(schema.Ref, "#/components/schemas/"); ok {
+				properties = doc.Components.Schemas[ref].Properties
+			}
+			for name := range properties {
+				names = append(names, "body:"+name)
+			}
+			sort.Strings(names)
+			out[op.ID] = names
+		}
+	}
+	return out
 }
 
 type reachFunc func(in, name string, value any) bool
@@ -114,10 +215,12 @@ func send(t *testing.T, domain *catalog.Domain, op *catalog.Operation, params ma
 	query, _ := url.ParseQuery(rawQuery)
 	body := decoded(t, api.body)
 	return func(in, name string, value any) bool {
-		want := fmt.Sprint(value)
+		want := wire(value)
 		switch in {
 		case "path":
-			return strings.Contains(path+"/", "/"+url.PathEscape(want)+"/") || strings.Contains(path, "/"+url.PathEscape(want)+".")
+			// Every path parameter fills its own segment: the path HEY got
+			// is the operation's template with each one in its place.
+			return path == expandPath(t, op, params)
 		case "query":
 			return query.Get(name) == want
 		default:
@@ -127,9 +230,14 @@ func send(t *testing.T, domain *catalog.Domain, op *catalog.Operation, params ma
 	}, ""
 }
 
-func sentinel(name string, n int) any {
-	if strings.HasSuffix(name, "Id") || strings.HasSuffix(name, "_id") || strings.HasSuffix(name, "_ids") {
-		return fmt.Sprint(n)
+// sentinel is a value of the parameter's declared type, as an MCP client
+// sends it from the advertised schema: JSON numbers decode as float64.
+func sentinel(p catalog.Param, n int) any {
+	switch p.Schema["type"] {
+	case "integer", "number":
+		return float64(n)
+	case "boolean":
+		return true
 	}
 	return fmt.Sprintf("s%d", n)
 }
@@ -159,6 +267,26 @@ func bodySentinel(schema any, n int) any {
 		return out
 	}
 	return fmt.Sprintf("s%d", n)
+}
+
+func expandPath(t *testing.T, op *catalog.Operation, params map[string]any) string {
+	t.Helper()
+	path := op.Path
+	for _, p := range op.Params {
+		if p.In == "path" {
+			path = strings.ReplaceAll(path, "{"+p.Name+"}", url.PathEscape(wire(params[p.Name])))
+		}
+	}
+	return path
+}
+
+// wire is how a path or query value reads on the wire, written out here
+// rather than taken from dispatch.go, so the test doesn't share its bugs.
+func wire(v any) string {
+	if f, ok := v.(float64); ok {
+		return strconv.FormatInt(int64(f), 10)
+	}
+	return fmt.Sprint(v)
 }
 
 func clone(m map[string]any) map[string]any {
