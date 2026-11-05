@@ -145,22 +145,25 @@ type bodyWalker struct {
 	pre int
 }
 
-// collapseSpace is text as HTML lays it out: each run of ASCII whitespace one space.
-func collapseSpace(s string) string {
-	var b strings.Builder
-	space := false
+// flow writes text as HTML lays it out outside <pre>: each run of ASCII whitespace is
+// one space, across text nodes too (a run split by inline markup or a comment is still
+// one run), and none follows a line break.
+func (w *bodyWalker) flow(s string) {
 	for _, r := range s {
 		if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f' {
-			if !space {
-				b.WriteByte(' ')
+			if !w.spaced() {
+				w.text.WriteByte(' ')
 			}
-			space = true
 			continue
 		}
-		space = false
-		b.WriteRune(r)
+		w.text.WriteRune(r)
 	}
-	return b.String()
+}
+
+// spaced reports whether the text so far ends in a space or a line break, or is empty.
+func (w *bodyWalker) spaced() bool {
+	t := w.text.String()
+	return t == "" || strings.HasSuffix(t, " ") || strings.HasSuffix(t, "\n")
 }
 
 // note keeps the first markup the rendering doesn't show.
@@ -178,7 +181,7 @@ func (w *bodyWalker) walk(n *html.Node) {
 		if w.pre > 0 {
 			w.text.WriteString(n.Data)
 		} else {
-			w.text.WriteString(collapseSpace(n.Data))
+			w.flow(n.Data)
 		}
 		return
 	case html.CommentNode:
@@ -219,7 +222,7 @@ func (w *bodyWalker) walk(n *html.Node) {
 	if rawTextTags[n.DataAtom] {
 		return
 	}
-	if n.DataAtom == atom.Pre || n.DataAtom == atom.Textarea || n.DataAtom == atom.Xmp || n.DataAtom == atom.Plaintext {
+	if n.DataAtom == atom.Pre || n.DataAtom == atom.Listing || n.DataAtom == atom.Textarea || n.DataAtom == atom.Xmp || n.DataAtom == atom.Plaintext {
 		w.pre++
 		defer func() { w.pre-- }()
 	}

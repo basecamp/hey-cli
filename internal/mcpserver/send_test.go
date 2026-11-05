@@ -888,3 +888,10 @@ func TestTheBodyShowsWhitespaceAsItRenders(t *testing.T) {
 	prompt := promptFor(t, "<div>A     B\nC</div><pre>x    y</pre>")
 	mustContain(t, prompt, "    A B C\n", "    x    y")
 }
+
+// A run of whitespace split by inline markup or a comment is still one space, and a
+// <listing> keeps its spacing as <pre> does.
+func TestWhitespaceCollapsesAcrossInlineMarkup(t *testing.T) {
+	prompt := promptFor(t, "<div>A  <strong>  B</strong> <!-- x -->  C</div><listing>x    y</listing>")
+	mustContain(t, prompt, "    A B C\n", "    x    y")
+}
