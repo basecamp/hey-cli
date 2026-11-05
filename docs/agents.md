@@ -145,13 +145,14 @@ anything. You can still have it show or revise the draft first as you like.
 
 `hey_send` is served only when the sign-in was granted sending, never under `--read-only`,
 and is listed only to an MCP client that can show a confirmation. A client that can't is
-told to send each draft from its page in HEY (`app_url`) or with `hey draft send <id>`,
-and a call to `send_draft` from it answers with that link and sends nothing.
-`send_draft` also refuses a draft that is already scheduled or has no recipients. Nothing
+told to send each draft from its page in HEY (the draft save's `app_url`) or with
+`hey draft send <id>`, and a call to `send_draft` from it answers with that link, as
+`edit_url`, and sends nothing. `send_draft` also refuses a draft that is already
+scheduled, has no recipients, or has a recipient with no address. Nothing
 else a draft holds refuses it: how much your agent sends, and to whom, is yours to decide
 once you've granted sending.
 
-Earlier releases delivered mail when a call omitted `entry.status`, and then saved
-drafts only. `describe` for the draft actions serves the draft-only schema, and the
+Earlier releases delivered mail when a call omitted `entry.status`; these actions now
+save drafts only. `describe` for the draft actions serves the draft-only schema, and the
 `hey_threads` tool description says the same. A person can still send any draft from HEY
 or with `hey draft send <draft_id>`.

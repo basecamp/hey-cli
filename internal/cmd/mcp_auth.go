@@ -59,7 +59,7 @@ func checkMCPCredentials(creds *auth.Credentials, err error) (*auth.Credentials,
 	if err != nil {
 		return nil, auth.CredentialStorageError("could not read hey mcp's credentials", err)
 	}
-	if creds.AccessToken == "" && creds.RefreshToken == "" {
+	if creds == nil || (creds.AccessToken == "" && creds.RefreshToken == "") {
 		return nil, errMCPNotSignedIn()
 	}
 	if creds.GrantKey == "" {
@@ -145,7 +145,9 @@ func mcpCredentialStatus() map[string]any {
 		}
 		return status
 	}
-	if creds.AccessToken == "" && creds.RefreshToken == "" {
+	// The same test hey mcp starts on (checkMCPCredentials), so status never reports a
+	// sign-in hey mcp would refuse.
+	if creds == nil || (creds.AccessToken == "" && creds.RefreshToken == "") || creds.GrantKey == "" {
 		return status
 	}
 	status["authenticated"] = true

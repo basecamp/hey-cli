@@ -20,11 +20,14 @@ import (
 // fingerprint covers the raw values.
 
 func (s *sender) prompt(snap *draftSnapshot) string {
-	body := inertBody(snap.body.text)
-	total := utf8.RuneCountInString(body)
+	// Cut on the draft's own characters, then escape, so an escape is never cut in
+	// half and the counts are of what the draft holds.
+	text := []rune(snap.body.text)
+	total := len(text)
+	body := inertBody(string(text))
 	label := "  Body:\n"
 	if total > bodyPromptCap {
-		body = string([]rune(body)[:bodyPromptCap]) + " …"
+		body = inertBody(string(text[:bodyPromptCap])) + " …"
 		label = fmt.Sprintf("  Body (the first %s of %s characters):\n", thousands(bodyPromptCap), thousands(total))
 	}
 

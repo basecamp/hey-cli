@@ -555,7 +555,24 @@ func TestMCPCommandDoesntClaimWhenTheTokenCantBeRenewed(t *testing.T) {
 	if !result.IsError || puts.Load() != 0 {
 		t.Fatalf("sent (%d PUTs) on a token that couldn't be renewed: %v", puts.Load(), result.Content)
 	}
-	if strings.Contains(result.Content[0].(*mcp.TextContent).Text, "already sent") {
-		t.Error("the draft was claimed")
+	if refreshes.Load() == 0 {
+		t.Fatal("the renewal was never tried, so this doesn't test a failed one")
+	}
+	// A claimed draft would answer "already sent" from here on; an unclaimed one is
+	// reviewed again and refused for the token again.
+	again, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_send",
+		Arguments: map[string]any{"action": "send_draft", "params": map[string]any{"draft_id": 5}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []*mcp.CallToolResult{result, again} {
+		if strings.Contains(r.Content[0].(*mcp.TextContent).Text, "already sent") {
+			t.Errorf("the draft was claimed: %v", r.Content)
+		}
+	}
+	if puts.Load() != 0 {
+		t.Errorf("sent (%d PUTs) on a token that couldn't be renewed", puts.Load())
 	}
 }

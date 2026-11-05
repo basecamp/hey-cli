@@ -83,10 +83,11 @@ var blockTags = map[atom.Atom]bool{
 }
 
 // rawTextTags hold text a mail client doesn't show as text (a stylesheet, a script),
-// so the rendering leaves it out rather than showing it as the body's.
+// so the rendering leaves it out rather than showing it as the body's. Elements whose
+// text a client may show (textarea, xmp, plaintext, the fallbacks) are walked like any
+// other, so their text is in the prompt, and named as formatting it leaves out.
 var rawTextTags = map[atom.Atom]bool{
 	atom.Style: true, atom.Script: true, atom.Template: true, atom.Title: true,
-	atom.Xmp: true, atom.Noembed: true, atom.Noframes: true, atom.Plaintext: true, atom.Textarea: true,
 }
 
 // analyzeBody reads a draft's raw content.
@@ -195,6 +196,9 @@ func (w *bodyWalker) walk(n *html.Node) {
 
 	if n.DataAtom == atom.Br {
 		w.text.WriteString("\n")
+	}
+	if n.DataAtom == atom.Hr {
+		w.text.WriteString("\n---")
 	}
 	if n.DataAtom == atom.Li {
 		w.text.WriteString("- ")

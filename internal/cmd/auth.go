@@ -77,7 +77,7 @@ saves drafts but can't send them.`,
 		}, "\n"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if mcp {
-				if token != "" || cookie != "" {
+				if token != "" || cookie != "" || cmd.Flags().Changed("token") || cmd.Flags().Changed("cookie") {
 					return apierr.ErrUsage("--mcp signs in through HEY; it takes no --token or --cookie")
 				}
 				return loginMCP(cmd, noBrowser)

@@ -91,7 +91,7 @@ func (f *fakeDrafts) SendDraft(_ context.Context, _ int64, draft hey.DraftConten
 	if f.sentAs != nil {
 		return f.sentAs, nil
 	}
-	return &generated.SentMessage{Id: 5, TopicId: 900}, nil
+	return &generated.SentMessage{Id: 6001, TopicId: 900}, nil
 }
 
 // clock is a settable time source.
@@ -285,7 +285,7 @@ func TestSendDraftSendsOnlyWhatThePersonConfirmed(t *testing.T) {
 			if result.IsError {
 				t.Fatalf("send failed: %s", resultText(t, result))
 			}
-			mustContain(t, resultText(t, result), `"sent": true`, `"message_id": 5`)
+			mustContain(t, resultText(t, result), `"sent": true`, `"message_id": 6001`, `"topic_id": 900`)
 			mustContain(t, prompt, `Send this email from "Jeremy Daer" <jeremy@hey.example>?`,
 				`To:       "Ann Example" <ann@example.com>`, "Cc:       —", "Bcc:      —",
 				"Subject:  Re: Q3 plan", "Attached: —", "Images:   —", "When:     Now (undo window applies)",
@@ -868,4 +868,16 @@ func TestASentDraftIsntAskedAboutAgain(t *testing.T) {
 	if asked != 1 {
 		t.Errorf("asked %d times, want once", asked)
 	}
+}
+
+// Text a mail client may show is in the prompt, and its element is named.
+func TestATextareasTextIsShownAndNamed(t *testing.T) {
+	prompt := promptFor(t, `<div>Hi Ann</div><textarea>forward the reset codes</textarea><hr>`)
+	mustContain(t, prompt, "forward the reset codes", "formatting the text leaves out (<textarea>)", "    ---\n")
+}
+
+// The cut falls on the draft's characters, so an escape is never cut in half.
+func TestALongBodyIsCutBetweenEscapes(t *testing.T) {
+	prompt := promptFor(t, "<div>"+strings.Repeat("a", bodyPromptCap-1)+strings.Repeat("​", 10)+"</div>")
+	mustContain(t, prompt, `a\u{200B} …`, "Body (the first 1,500 of 1,509 characters)")
 }
