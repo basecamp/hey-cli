@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -143,12 +144,19 @@ func buildLogoutCommand(path string) *cobra.Command {
 
 // status subcommand
 
+func writeAuthOrigins(w io.Writer) {
+	fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+	if cfg.APIURL != "" {
+		fmt.Fprintf(w, "API URL:   %s\n", cfg.APIURL)
+	}
+}
+
 func newAuthStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show authentication status",
 		Annotations: map[string]string{
-			"agent_notes": "Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing, so authenticated true does not prove HEY still accepts them. JSON answers authenticated, base_url, mail_account, account_source and install_id; method env_var when HEY_TOKEN is set; otherwise storage (keyring or file), auth_type, and expires_at, expired and refresh_available for a token. An expired token with refresh_available is refreshed by the next data command.",
+			"agent_notes": "Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing, so authenticated true does not prove HEY still accepts them. JSON answers authenticated, base_url, api_url when API requests go to an origin of their own, mail_account, account_source and install_id; method env_var when HEY_TOKEN is set; otherwise storage (keyring or file), auth_type, and expires_at, expired and refresh_available for a token. An expired token with refresh_available is refreshed by the next data command.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			status := map[string]any{
@@ -156,6 +164,9 @@ func newAuthStatusCommand() *cobra.Command {
 				"mail_account":   cfg.AccountID,
 				"account_source": cfg.SourceOf("account_id"),
 				"authenticated":  false,
+			}
+			if cfg.APIURL != "" {
+				status["api_url"] = cfg.APIURL
 			}
 
 			// The install identifier is install-scoped: it survives logout and
@@ -174,7 +185,7 @@ func newAuthStatusCommand() *cobra.Command {
 
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
-					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+					writeAuthOrigins(w)
 					fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
 					if installID != "" {
 						fmt.Fprintf(w, "Install:   %s\n", installID)
@@ -193,7 +204,7 @@ func newAuthStatusCommand() *cobra.Command {
 			if errors.Is(err, auth.ErrCredentialsNotFound) || (creds.AccessToken == "" && creds.SessionCookie == "") {
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
-					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+					writeAuthOrigins(w)
 					fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
 					if installID != "" {
 						fmt.Fprintf(w, "Install:   %s\n", installID)
@@ -229,7 +240,7 @@ func newAuthStatusCommand() *cobra.Command {
 			}
 			if writer.IsStyled() {
 				w := cmd.OutOrStdout()
-				fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
+				writeAuthOrigins(w)
 				fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
 				fmt.Fprintln(w, "Status:    Logged in")
 

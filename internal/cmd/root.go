@@ -120,7 +120,7 @@ func newRootCmd() *cobra.Command {
 			// whatever command happened to send it. Cached mail must not outlive
 			// that credential any more than it outlives a logout.
 			authMgr.OnCredentialCleared(func() { clearHTTPCache(cmd.ErrOrStderr()) })
-			initSDK(authMgr, cfg.BaseURL)
+			initSDK(authMgr, cfg.APIOrigin())
 
 			// The agent-local setup subcommands and skill commands never read
 			// credentials and never rewrite the global config, so they defer

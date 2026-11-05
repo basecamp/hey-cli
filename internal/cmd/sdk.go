@@ -75,10 +75,12 @@ func (h *statsHooks) TotalLatency() time.Duration { return time.Duration(h.total
 
 var sdkStats *statsHooks
 
-// initSDK creates the SDK client, bridging the CLI's auth and config.
-func initSDK(authMgr *auth.Manager, baseURL string) {
+// initSDK creates the SDK client, bridging the CLI's auth and config. The SDK knows only
+// the API origin; authMgr holds the login origin, and refreshes there whichever server
+// answered a 401.
+func initSDK(authMgr *auth.Manager, apiOrigin string) {
 	sdkCfg := &hey.Config{
-		BaseURL: baseURL,
+		BaseURL: apiOrigin,
 	}
 
 	// The SDK cache is a revalidation cache: every read still asks the server,

@@ -57,6 +57,7 @@ JSON failures also carry a machine-readable error code and an actionable hint wh
 CONNECTION & AUTHENTICATION
   HEY_TOKEN          Use a bearer token instead of stored credentials.
   HEY_BASE_URL       Override the HEY server URL.
+  HEY_API_URL        Send API requests to this origin. Signing in stays on the server URL.
   HEY_ACCOUNT_ID     Select a linked mail account ID or all.
   HEY_NO_KEYRING     Store credentials in the config directory instead of a keyring.
 

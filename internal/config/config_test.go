@@ -768,3 +768,246 @@ func TestSaveGlobalConfigSurvivesNullFile(t *testing.T) {
 		t.Fatalf("reload: %v, onboarded=%v", err, reloaded.Onboarded)
 	}
 }
+
+func TestAPIURLIsUnsetByDefault(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HEY_API_URL", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.APIURL != "" || cfg.APIOrigin() != defaultBase {
+		t.Errorf("APIURL = %q, APIOrigin = %q", cfg.APIURL, cfg.APIOrigin())
+	}
+}
+
+func writeGlobalConfig(t *testing.T, home, contents string) {
+	t.Helper()
+	dir := filepath.Join(home, configDirName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, configFile), []byte(contents), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+
+// A saved API origin belongs to the login origin it was saved under, so a token from any
+// other server never goes to it, however that server came to be in effect.
+func TestSavedAPIURLFollowsItsLoginOrigin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HEY_API_URL", "")
+	t.Setenv("HEY_BASE_URL", "")
+	writeGlobalConfig(t, home, `{"api_urls":{"https://APP.hey.com:443":"https://api.hey.com/"}}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.APIOrigin() != "https://api.hey.com" || cfg.SourceOf("api_url") != SourceGlobal {
+		t.Errorf("APIOrigin = %q from %q", cfg.APIOrigin(), cfg.SourceOf("api_url"))
+	}
+
+	if err = cfg.SetFromFlag("base_url", "http://app.hey.localhost:3003"); err != nil {
+		t.Fatalf("SetFromFlag: %v", err)
+	}
+	if cfg.APIOrigin() != "http://app.hey.localhost:3003" {
+		t.Errorf("after --base-url, APIOrigin = %q", cfg.APIOrigin())
+	}
+	if err = cfg.SetFromFlag("base_url", "https://app.hey.com"); err != nil {
+		t.Fatalf("SetFromFlag: %v", err)
+	}
+	if cfg.APIOrigin() != "https://api.hey.com" {
+		t.Errorf("back on the login origin, APIOrigin = %q", cfg.APIOrigin())
+	}
+
+	t.Setenv("HEY_BASE_URL", "http://app.hey.localhost:3003")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.APIURL != "" || cfg.APIOrigin() != "http://app.hey.localhost:3003" {
+		t.Errorf("under HEY_BASE_URL, APIURL = %q, APIOrigin = %q", cfg.APIURL, cfg.APIOrigin())
+	}
+}
+
+func TestAPIURLEnvironmentBeatsSavedAndYieldsToBaseURLFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HEY_API_URL", "http://api.hey.localhost:3004/")
+	writeGlobalConfig(t, home, `{"api_urls":{"https://app.hey.com":"https://api.hey.com"}}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.APIOrigin() != "http://api.hey.localhost:3004" || cfg.SourceOf("api_url") != SourceEnv {
+		t.Errorf("APIOrigin = %q from %q", cfg.APIOrigin(), cfg.SourceOf("api_url"))
+	}
+
+	if err = cfg.SetFromFlag("base_url", "https://staging.hey.example"); err != nil {
+		t.Fatalf("SetFromFlag: %v", err)
+	}
+	if cfg.APIOrigin() != "https://staging.hey.example" {
+		t.Errorf("after --base-url, APIOrigin = %q", cfg.APIOrigin())
+	}
+}
+
+func TestRepositoryConfigCannotSetAnAPIURL(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HEY_API_URL", "")
+
+	local := filepath.Join(t.TempDir(), "config.json")
+	contents := `{"api_url":"https://collector.example","api_urls":{"https://app.hey.com":"https://collector.example"}}`
+	if err := os.WriteFile(local, []byte(contents), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := load(local)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.APIURL != "" || cfg.APIOrigin() != defaultBase {
+		t.Errorf("APIURL = %q, APIOrigin = %q", cfg.APIURL, cfg.APIOrigin())
+	}
+	if cfg.LocalConfig() != nil {
+		t.Errorf("a file setting nothing it may set asked for trust: %+v", cfg.LocalConfig())
+	}
+}
+
+func TestInvalidAPIURLIsRefused(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_BASE_URL", "")
+	for _, value := range []string{
+		"http://api.hey.example",
+		"api.hey.example",
+		"https://api.hey.example/v1",
+		"https://api.hey.example?token=1",
+		"https://api.hey.example#top",
+		"https://api.hey.example?",
+		"https://api.hey.example#",
+		"https://api.hey.example/%2F",
+		"https://someone:secret@api.hey.example",
+	} {
+		t.Setenv("HEY_API_URL", value)
+		if _, err := Load(); err == nil {
+			t.Errorf("HEY_API_URL=%q was accepted", value)
+		}
+	}
+}
+
+func TestInvalidSavedAPIURLIsRefusedOnlyWhenItApplies(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HEY_API_URL", "")
+	t.Setenv("HEY_BASE_URL", "")
+	writeGlobalConfig(t, home, `{"api_urls":{"https://app.hey.com":"http://api.hey.example"}}`)
+
+	if _, err := Load(); err == nil {
+		t.Error("a plain-HTTP API URL was accepted")
+	}
+
+	t.Setenv("HEY_BASE_URL", "http://app.hey.localhost:3003")
+	if _, err := Load(); err != nil {
+		t.Errorf("another server's bad API URL failed this one: %v", err)
+	}
+}
+
+func TestSaveAPIURLKeepsOtherServersAndSettings(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HEY_API_URL", "")
+	t.Setenv("HEY_BASE_URL", "")
+	writeGlobalConfig(t, home, `{"cover":"dunes","api_urls":{"http://app.hey.localhost:3003":"http://api.hey.localhost:3004"},"unknown_key":1}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if err = cfg.SaveAPIURL("https://api.hey.com/"); err != nil {
+		t.Fatalf("SaveAPIURL: %v", err)
+	}
+
+	file, err := loadGlobalFileConfig()
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if file.Cover != "dunes" || file.APIURLs["https://app.hey.com"] != "https://api.hey.com" || file.APIURLs["http://app.hey.localhost:3003"] != "http://api.hey.localhost:3004" {
+		t.Errorf("saved = %+v", file)
+	}
+
+	if err = cfg.SaveAPIURL(""); err != nil {
+		t.Fatalf("SaveAPIURL empty: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(home, configDirName, configFile))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var written map[string]json.RawMessage
+	if err = json.Unmarshal(data, &written); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if string(written["unknown_key"]) != "1" {
+		t.Errorf("unknown key lost: %s", data)
+	}
+	file, err = loadGlobalFileConfig()
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if _, kept := file.APIURLs["https://app.hey.com"]; kept || file.APIURLs["http://app.hey.localhost:3003"] == "" {
+		t.Errorf("after clearing = %+v", file.APIURLs)
+	}
+
+	cfg.BaseURL = "http://app.hey.localhost:3003"
+	if err = cfg.SaveAPIURL(""); err != nil {
+		t.Fatalf("SaveAPIURL last: %v", err)
+	}
+	data, err = os.ReadFile(filepath.Join(home, configDirName, configFile))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var rewritten map[string]json.RawMessage
+	if err = json.Unmarshal(data, &rewritten); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, kept := rewritten["api_urls"]; kept {
+		t.Errorf("the last API URL cleared left %s", data)
+	}
+}
+
+func TestConflictingSavedAPIURLsAreRefused(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HEY_API_URL", "")
+	t.Setenv("HEY_BASE_URL", "")
+	writeGlobalConfig(t, home, `{"api_urls":{"https://app.hey.com":"https://api.hey.com","https://APP.hey.com:443":"https://elsewhere.hey.example"}}`)
+
+	if _, err := Load(); err == nil {
+		t.Error("two API origins for one login origin were accepted")
+	}
+}
+
+func TestRepositoryConfigsAPIURLsCannotFailLoading(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_API_URL", "")
+	t.Setenv("HEY_BASE_URL", "")
+
+	local := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(local, []byte(`{"api_urls":{"not an origin":"http://plain.example"}}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := load(local)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.APIOrigin() != defaultBase {
+		t.Errorf("APIOrigin = %q", cfg.APIOrigin())
+	}
+}

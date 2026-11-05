@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1494,5 +1495,62 @@ func TestNotLoggedInHintInsideCodexSandbox(t *testing.T) {
 				t.Errorf("hint = %q, want it to contain %q", classified.Hint, tt.want)
 			}
 		})
+	}
+}
+
+// A redirect from the token endpoint would carry the form to wherever it named, and a
+// 307 or 308 keeps the refresh token or code in it. Nothing reaches the other origin, and
+// the login is kept: a redirect says nothing about the grant.
+func TestTokenEndpointRedirectsAreNotFollowed(t *testing.T) {
+	flows := map[string]func(*testing.T, *Manager, string) error{
+		"a refresh": func(t *testing.T, mgr *Manager, loginOrigin string) error {
+			t.Helper()
+			if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{
+				AccessToken:   "old-access",
+				RefreshToken:  "old-refresh",
+				OAuthType:     "oauth",
+				TokenEndpoint: loginOrigin + "/oauth/tokens",
+			}); err != nil {
+				t.Fatalf("seed credentials: %v", err)
+			}
+			err := mgr.Refresh(t.Context())
+			if stored, loadErr := mgr.GetStore().Load(mgr.CredentialKey()); loadErr != nil || stored.AccessToken != "old-access" || stored.RefreshToken != "old-refresh" {
+				t.Errorf("stored = %+v, %v; want the login kept", stored, loadErr)
+			}
+			return err
+		},
+		"a sign-in": func(t *testing.T, mgr *Manager, _ string) error {
+			t.Helper()
+			mgr.callbackWait = func(context.Context, string, string, net.Listener, LoginOptions) (string, error) {
+				return "callback-code", nil
+			}
+			return mgr.Login(t.Context(), LoginOptions{NoBrowser: true})
+		},
+	}
+	for name, flow := range flows {
+		for _, status := range []int{http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+			t.Run(fmt.Sprintf("%s %d", name, status), func(t *testing.T) {
+				var heardElsewhere atomic.Int32
+				elsewhere := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+					heardElsewhere.Add(1)
+				}))
+				defer elsewhere.Close()
+				login := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					w.Header().Set("Location", elsewhere.URL+"/oauth/tokens")
+					w.WriteHeader(status)
+				}))
+				defer login.Close()
+				t.Setenv("HEY_NO_KEYRING", "1")
+				t.Setenv("HEY_TOKEN", "")
+				mgr := NewManager(login.URL, http.DefaultClient, t.TempDir())
+
+				if err := flow(t, mgr, login.URL); err == nil {
+					t.Error("a redirect from the token endpoint was taken for success")
+				}
+				if heard := heardElsewhere.Load(); heard != 0 {
+					t.Errorf("the other origin heard %d requests", heard)
+				}
+			})
+		}
 	}
 }

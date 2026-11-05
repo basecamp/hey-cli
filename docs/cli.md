@@ -59,6 +59,15 @@ hey auth refresh  # force token refresh
 hey auth logout   # clear credentials
 ```
 
+API requests can go to an origin of their own while signing in stays where it was. With
+`hey config set api_url https://api.hey.com`, or `HEY_API_URL` for one process, every API
+request goes there with the base URL's stored token, or `HEY_TOKEN` when it's set. Signing in, refreshing, the stored
+credentials, `/cable` and draft links stay on the base URL. The setting belongs to the base URL
+it was saved under, so another server, by `HEY_BASE_URL` or a repository's `.hey/config.json`,
+doesn't send its token there. `--base-url` ignores `HEY_API_URL` too. A repository's
+`.hey/config.json` can't set it. `hey config set api_url ""` goes back to the base URL,
+unless `HEY_API_URL` is set, which outranks what's saved.
+
 `hey login` and `hey logout` are top-level shortcuts for `hey auth login` and `hey auth logout`.
 
 ### Linked accounts
