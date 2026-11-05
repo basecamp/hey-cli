@@ -156,7 +156,7 @@ func Defaults() *Config {
 func load(localPath string) (*Config, error) {
 	cfg := Defaults()
 
-	global, err := readFileConfig(globalConfigPath())
+	global, err := loadGlobalFileConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -268,17 +268,6 @@ func readFileConfig(path string) (fileConfig, error) {
 			normalizedDefaults[normalizedOrigin] = normalized
 		}
 		file.AccountDefaults = normalizedDefaults
-	}
-	if len(file.APIURLs) > 0 {
-		normalizedAPIURLs := make(map[string]string, len(file.APIURLs))
-		for origin, apiURL := range file.APIURLs {
-			normalizedOrigin, originErr := serverOrigin(origin)
-			if originErr != nil {
-				return fileConfig{}, fmt.Errorf("could not parse API URL origin %s in %s: %w", origin, path, originErr)
-			}
-			normalizedAPIURLs[normalizedOrigin] = apiURL
-		}
-		file.APIURLs = normalizedAPIURLs
 	}
 	return file, nil
 }
@@ -572,7 +561,36 @@ func (c *Config) SaveAccountID(accountID string) error {
 }
 
 func loadGlobalFileConfig() (fileConfig, error) {
-	return readFileConfig(globalConfigPath())
+	path := globalConfigPath()
+	file, err := readFileConfig(path)
+	if err != nil {
+		return fileConfig{}, err
+	}
+	file.APIURLs, err = normalizeAPIURLs(file.APIURLs, path)
+	if err != nil {
+		return fileConfig{}, err
+	}
+	return file, nil
+}
+
+// normalizeAPIURLs keys saved API origins by canonical login origin. It's for the global
+// file alone: a repository's file has no say in them, so nothing in it can fail here.
+func normalizeAPIURLs(apiURLs map[string]string, path string) (map[string]string, error) {
+	if len(apiURLs) == 0 {
+		return apiURLs, nil
+	}
+	normalized := make(map[string]string, len(apiURLs))
+	for origin, apiURL := range apiURLs {
+		normalizedOrigin, err := serverOrigin(origin)
+		if err != nil {
+			return nil, fmt.Errorf("could not parse API URL origin %s in %s: %w", origin, path, err)
+		}
+		if existing, duplicate := normalized[normalizedOrigin]; duplicate && existing != apiURL {
+			return nil, fmt.Errorf("conflicting API URLs for %s in %s", normalizedOrigin, path)
+		}
+		normalized[normalizedOrigin] = apiURL
+	}
+	return normalized, nil
 }
 
 func migrateLegacyAccountDefault(file *fileConfig) error {
@@ -762,7 +780,7 @@ func validateAPIURL(apiURL string) error {
 	if err != nil {
 		return err
 	}
-	if u.User != nil || strings.Trim(u.Path, "/") != "" || u.RawQuery != "" || u.Fragment != "" {
+	if u.User != nil || strings.Trim(u.EscapedPath(), "/") != "" || strings.ContainsAny(apiURL, "?#") {
 		return apierr.ErrUsage(fmt.Sprintf("API URL must be only a scheme and a host (got %q)", apiURL))
 	}
 	return nil

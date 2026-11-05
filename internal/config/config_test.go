@@ -890,6 +890,9 @@ func TestInvalidAPIURLIsRefused(t *testing.T) {
 		"https://api.hey.example/v1",
 		"https://api.hey.example?token=1",
 		"https://api.hey.example#top",
+		"https://api.hey.example?",
+		"https://api.hey.example#",
+		"https://api.hey.example/%2F",
 		"https://someone:secret@api.hey.example",
 	} {
 		t.Setenv("HEY_API_URL", value)
@@ -975,5 +978,36 @@ func TestSaveAPIURLKeepsOtherServersAndSettings(t *testing.T) {
 	}
 	if _, kept := rewritten["api_urls"]; kept {
 		t.Errorf("the last API URL cleared left %s", data)
+	}
+}
+
+func TestConflictingSavedAPIURLsAreRefused(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", home)
+	t.Setenv("HEY_API_URL", "")
+	t.Setenv("HEY_BASE_URL", "")
+	writeGlobalConfig(t, home, `{"api_urls":{"https://app.hey.com":"https://api.hey.com","https://APP.hey.com:443":"https://elsewhere.hey.example"}}`)
+
+	if _, err := Load(); err == nil {
+		t.Error("two API origins for one login origin were accepted")
+	}
+}
+
+func TestRepositoryConfigsAPIURLsCannotFailLoading(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HEY_API_URL", "")
+	t.Setenv("HEY_BASE_URL", "")
+
+	local := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(local, []byte(`{"api_urls":{"not an origin":"http://plain.example"}}`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	cfg, err := load(local)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if cfg.APIOrigin() != defaultBase {
+		t.Errorf("APIOrigin = %q", cfg.APIOrigin())
 	}
 }

@@ -1514,7 +1514,7 @@ func TestTokenEndpointRedirectsAreNotFollowed(t *testing.T) {
 				t.Fatalf("seed credentials: %v", err)
 			}
 			err := mgr.Refresh(t.Context())
-			if stored, loadErr := mgr.GetStore().Load(mgr.CredentialKey()); loadErr != nil || stored.RefreshToken != "old-refresh" {
+			if stored, loadErr := mgr.GetStore().Load(mgr.CredentialKey()); loadErr != nil || stored.AccessToken != "old-access" || stored.RefreshToken != "old-refresh" {
 				t.Errorf("stored = %+v, %v; want the login kept", stored, loadErr)
 			}
 			return err
