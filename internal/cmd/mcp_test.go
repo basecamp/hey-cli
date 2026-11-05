@@ -576,3 +576,26 @@ func TestMCPCommandDoesntClaimWhenTheTokenCantBeRenewed(t *testing.T) {
 		t.Errorf("sent (%d PUTs) on a token that couldn't be renewed", puts.Load())
 	}
 }
+
+// A token due for renewal is renewed before the tools are chosen, so a renewal that
+// narrows the grant is what the tools follow.
+func TestMCPCommandChoosesItsToolsAfterRenewing(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/oauth/tokens" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"` + mcpTestToken + `","refresh_token":"mcp-refresh-2","token_type":"bearer","expires_in":3600,"scope":"read"}`))
+			return
+		}
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(upstream.Close)
+
+	orig := mcpTokenExpiresIn
+	mcpTokenExpiresIn = -time.Minute
+	t.Cleanup(func() { mcpTokenExpiresIn = orig })
+	names := toolNames(t, runMCPCommandWith(t, upstream, auth.MCPScope, askingClient()))
+	if slices.Contains(names, "hey_send") {
+		t.Errorf("tools = %v: hey_send served on a grant renewed down to read", names)
+	}
+}

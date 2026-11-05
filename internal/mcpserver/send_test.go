@@ -881,3 +881,10 @@ func TestALongBodyIsCutBetweenEscapes(t *testing.T) {
 	prompt := promptFor(t, "<div>"+strings.Repeat("a", bodyPromptCap-1)+strings.Repeat("\u200b", 10)+"</div>")
 	mustContain(t, prompt, `a\u{200B} …`, "Body (the first 1,500 of 1,509 characters)")
 }
+
+// The body shows as a mail client lays it out: outside <pre>, a run of whitespace is
+// one space; inside, it's kept.
+func TestTheBodyShowsWhitespaceAsItRenders(t *testing.T) {
+	prompt := promptFor(t, "<div>A     B\nC</div><pre>x    y</pre>")
+	mustContain(t, prompt, "    A B C\n", "    x    y")
+}

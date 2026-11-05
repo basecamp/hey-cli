@@ -503,3 +503,12 @@ func TestAPinnedManagerRefusesAnotherSignIn(t *testing.T) {
 		t.Errorf("a refresh adopted another sign-in: %v", err)
 	}
 }
+
+// One HEY has one hey mcp credential however its URL is spelled.
+func TestMCPCredentialKeyIsTheCanonicalOrigin(t *testing.T) {
+	a := NewMCPManager("https://app.hey.com/", http.DefaultClient, t.TempDir(), "LocalMcpClient0000000001")
+	b := NewMCPManager("https://APP.HEY.COM:443", http.DefaultClient, t.TempDir(), "LocalMcpClient0000000001")
+	if a.CredentialKey() != b.CredentialKey() || a.CredentialKey() != "mcp::https://app.hey.com" {
+		t.Errorf("keys %q and %q, want both mcp::https://app.hey.com", a.CredentialKey(), b.CredentialKey())
+	}
+}

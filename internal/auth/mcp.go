@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
@@ -38,7 +39,13 @@ var ErrMCPClientUnconfigured = errors.New("no HEY MCP (local) client id is confi
 // the local MCP client clientID.
 func NewMCPManager(baseURL string, httpClient *http.Client, configDir, clientID string) *Manager {
 	m := NewManager(baseURL, httpClient, configDir)
-	m.storeKey = mcpStoreKeyPrefix + m.baseURL
+	// Keyed by the canonical origin, so https://APP.HEY.COM:443 finds the credential
+	// https://app.hey.com stored, as the client id lookup does.
+	origin := m.baseURL
+	if canonical, err := config.Origin(baseURL); err == nil {
+		origin = canonical
+	}
+	m.storeKey = mcpStoreKeyPrefix + origin
 	m.clientID = clientID
 	m.scope = MCPScope
 	m.honorEnvToken = false

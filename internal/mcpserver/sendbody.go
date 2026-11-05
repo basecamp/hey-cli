@@ -141,6 +141,26 @@ type bodyWalker struct {
 	unnamed     int
 	images      []string
 	unshown     string
+	// pre counts the whitespace-preserving elements the walk is inside.
+	pre int
+}
+
+// collapseSpace is text as HTML lays it out: each run of ASCII whitespace one space.
+func collapseSpace(s string) string {
+	var b strings.Builder
+	space := false
+	for _, r := range s {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\f' {
+			if !space {
+				b.WriteByte(' ')
+			}
+			space = true
+			continue
+		}
+		space = false
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // note keeps the first markup the rendering doesn't show.
@@ -153,7 +173,13 @@ func (w *bodyWalker) note(what string) {
 func (w *bodyWalker) walk(n *html.Node) {
 	switch n.Type {
 	case html.TextNode:
-		w.text.WriteString(n.Data)
+		// Shown as a mail client renders it: outside <pre>, a run of whitespace is one
+		// space.
+		if w.pre > 0 {
+			w.text.WriteString(n.Data)
+		} else {
+			w.text.WriteString(collapseSpace(n.Data))
+		}
 		return
 	case html.CommentNode:
 		w.comments = append(w.comments, n)
@@ -192,6 +218,10 @@ func (w *bodyWalker) walk(n *html.Node) {
 	}
 	if rawTextTags[n.DataAtom] {
 		return
+	}
+	if n.DataAtom == atom.Pre || n.DataAtom == atom.Textarea || n.DataAtom == atom.Xmp || n.DataAtom == atom.Plaintext {
+		w.pre++
+		defer func() { w.pre-- }()
 	}
 
 	if n.DataAtom == atom.Br {

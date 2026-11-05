@@ -108,6 +108,15 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	mcpAuthMgr.PinGrant(creds.GrantKey)
 
 	ctx := cmd.Context()
+	// The tools are chosen once, from the grant's scope, so renew a token about to
+	// expire first: a renewal can narrow the grant, and the tools should follow what it
+	// granted. A renewal that fails here (HEY unreachable) leaves the stored grant; the
+	// first request reports it.
+	if _, renewErr := mcpAuthMgr.AccessToken(ctx); renewErr == nil {
+		if creds, err = requireMCPCredentials(); err != nil {
+			return err
+		}
+	}
 	reads, err := clientForAccountSelection(ctx, newMCPSDKClient(), cfg.AccountID)
 	if err != nil {
 		return err
