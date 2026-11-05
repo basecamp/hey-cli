@@ -243,10 +243,26 @@ func mcpClientForAccountSelection(ctx context.Context, client *hey.Client, accou
 		return nil, &apierr.Error{
 			Code:       apierr.CodeNotFound,
 			Message:    fmt.Sprintf("hey mcp's sign-in wasn't given access to account %s, the one hey is set to use", accountID),
-			Hint:       "Run `hey auth login --mcp` to choose the accounts it can reach, or `hey account use all` (or --account <id>) to serve the ones it was given.",
+			Hint:       "Run `hey auth login --mcp` to choose the accounts it can reach, or " + mcpAccountRemedy(cfg.SourceOf("account_id")) + ".",
 			HTTPStatus: cliErr.HTTPStatus,
 			Cause:      err,
 		}
 	}
 	return scoped, err
+}
+
+// mcpAccountRemedy says how to point hey mcp at the accounts its sign-in was given,
+// for wherever the account selection came from: `hey account use` saves only the
+// global default, which a flag, HEY_ACCOUNT_ID or a local .hey/config.json outranks.
+func mcpAccountRemedy(source config.Source) string {
+	switch source {
+	case config.SourceFlag:
+		return "pass --account all (or the id of an account it was given)"
+	case config.SourceEnv:
+		return "set HEY_ACCOUNT_ID to all (or the id of an account it was given)"
+	case config.SourceLocal:
+		return "change account_id in this directory's .hey/config.json, or run hey mcp --account all"
+	default:
+		return "run `hey account use all` (or `hey account use <id>` for an account it was given)"
+	}
 }
