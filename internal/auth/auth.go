@@ -63,10 +63,18 @@ const defaultRefreshHold = 15 * time.Minute
 // NewManager creates a new auth manager.
 func NewManager(baseURL string, httpClient *http.Client, configDir string) *Manager {
 	listenConfig := &net.ListenConfig{}
+	// The client carries only the token endpoint's requests, and a token endpoint never
+	// redirects: a 307 or 308 would resend the refresh token or code to wherever it named,
+	// which is how it would reach an API origin. The 3xx is the answer, and an error.
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	unredirected := *httpClient
+	unredirected.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Manager{
 		baseURL:    normalizeBaseURL(baseURL),
 		store:      NewStore(configDir),
-		httpClient: httpClient,
+		httpClient: &unredirected,
 		listen:     listenConfig.Listen,
 	}
 }
