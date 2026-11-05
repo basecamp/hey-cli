@@ -82,7 +82,7 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		if !savedAsDraft(resp) {
 			return gateway.ErrorResult("%s", unconfirmedDraft(full.Action, resp)), nil
 		}
-		return gateway.JSONResult(draftResult(resp))
+		return gateway.JSONResult(draftResult(resp, sendable(ctx)))
 	}
 	if want, ok := acknowledgedBy[full.ID]; ok && resp.StatusCode != want {
 		return gateway.ErrorResult("%s was not acknowledged: HEY answered HTTP %d, not %d, so nothing was changed",

@@ -89,10 +89,10 @@ The setup wizard connects the agents it finds. To do it yourself:
 ```bash
 hey setup claude                        # skill + the hey@37signals plugin for Claude Code
 hey setup codex                         # skill for Codex
-claude mcp add hey -- hey mcp           # HEY as MCP tools, on your signed-in account
+hey auth login --mcp && claude mcp add hey -- hey mcp   # HEY as MCP tools, on hey mcp's own sign-in
 ```
 
-`hey mcp` saves drafts and never sends mail. You send a draft from HEY or with `hey draft send <id>`.
+`hey mcp` saves drafts, and sends one only when you confirm that email in your MCP client.
 
 ## Docs
 

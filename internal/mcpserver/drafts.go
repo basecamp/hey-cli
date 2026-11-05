@@ -29,8 +29,10 @@ import (
 // schedule when an update omits it, so editing a scheduled draft unschedules
 // it rather than letting it go out later.
 //
-// MCP has no way to deliver mail yet: there is no send_draft action. A person
-// sends the draft from HEY or with `hey draft send <id>`.
+// These actions never deliver. Delivery is send_draft (send.go), in its own hey_send
+// tool, which asks the person to confirm each email. It is served only when hey mcp's
+// sign-in can send, and listed only to a client that can be asked. A person can also
+// send the draft from HEY or with `hey draft send <id>`.
 // TestEveryServedOpenWorldOperationIsDraftFirst holds this list total: mapping
 // another operation that can reach people outside the mailbox fails until it
 // has a rule here.
@@ -45,8 +47,8 @@ var draftEntryKeys = map[string]bool{"addressed": true, "status": true}
 
 const drafted = "drafted"
 
-// howToSend is how a person delivers a draft this server saved.
-const howToSend = "a person sends it from HEY or with `hey draft send <id>`"
+// howToSend is how a draft this server saved gets delivered.
+const howToSend = "call hey_send's send_draft with its draft_id where hey_send is listed, which asks the person to confirm the email; otherwise a person sends it from HEY or with `hey draft send <id>`"
 
 // draftOnly returns params with the entry forced to a draft, or an error
 // naming what would have delivered. params is not modified.
@@ -59,12 +61,12 @@ func draftOnly(action string, params map[string]any) (map[string]any, error) {
 		}
 		for _, key := range slices.Sorted(maps.Keys(given)) {
 			if !draftEntryKeys[key] {
-				return nil, fmt.Errorf("%s saves a draft and doesn't take entry.%s: hey mcp never sends or schedules mail, and triage has its own actions (allowed: entry.%s). Nothing was sent to HEY. To deliver, save the draft, then %s",
+				return nil, fmt.Errorf("%s saves a draft and doesn't take entry.%s: it never sends or schedules mail, and triage has its own actions (allowed: entry.%s). Nothing was sent to HEY. To deliver, save the draft, then %s",
 					action, key, strings.Join(slices.Sorted(maps.Keys(draftEntryKeys)), ", entry."), howToSend)
 			}
 		}
 		if status, ok := given["status"]; ok && status != drafted {
-			return nil, fmt.Errorf("%s saves a draft: entry.status can only be %q, because hey mcp never sends mail. Nothing was sent to HEY. To deliver, save the draft, then %s",
+			return nil, fmt.Errorf("%s saves a draft: entry.status can only be %q, because it never sends mail. Nothing was sent to HEY. To deliver, save the draft, then %s",
 				action, drafted, howToSend)
 		}
 		maps.Copy(entry, given)
@@ -150,17 +152,30 @@ func draftLink(location string) string {
 
 // draftResult is what a confirmed draft save answers, so the model doesn't
 // report a send that didn't happen and knows how the draft gets delivered.
-func draftResult(resp *hey.Response) map[string]any {
+// sendable is whether this client is offered hey_send (server.go): where it is,
+// the person's ask to send is answered with send_draft at once, since its
+// confirmation shows them what goes out; where it isn't, the note names the
+// draft's page in HEY.
+func draftResult(resp *hey.Response, sendable bool) map[string]any {
 	location := resp.Headers.Get("Location")
 	result := map[string]any{"status": resp.StatusCode, "location": location, "drafted": true}
-	if id := draftID(location); id != "" {
-		result["draft_id"] = id
-		if link := draftLink(location); link != "" {
-			result["app_url"] = link
-		}
-		result["note"] = "Saved as a draft, not sent. hey mcp doesn't deliver mail: a person reviews and sends it from HEY, or with `hey draft send " + id + "`."
-	} else {
-		result["note"] = "Saved as a draft, not sent. hey mcp doesn't deliver mail: " + howToSend + "."
+	id := draftID(location)
+	if id == "" {
+		result["note"] = "Saved as a draft, not sent. To deliver it, " + howToSend + "."
+		return result
+	}
+	result["draft_id"] = id
+	link := draftLink(location)
+	if link != "" {
+		result["app_url"] = link
+	}
+	switch {
+	case sendable:
+		result["note"] = "Saved as a draft, not sent. The person can review or revise it as they like. When they ask to send it, call hey_send's send_draft with draft_id " + id + " right away: its confirmation shows them what goes out, so don't show the draft or ask them again first."
+	case link != "":
+		result["note"] = "Saved as a draft, not sent. hey mcp can't send it from this client: the person sends it from its page in HEY, " + link + ", or with `hey draft send " + id + "`."
+	default:
+		result["note"] = "Saved as a draft, not sent. hey mcp can't send it from this client: the person sends it from HEY or with `hey draft send " + id + "`."
 	}
 	return result
 }
