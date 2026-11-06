@@ -163,10 +163,8 @@ func draftResult(resp *hey.Response, sendable bool) map[string]any {
 	result := map[string]any{"status": resp.StatusCode, "location": location, "drafted": true}
 	id := draftID(location)
 	if id == "" {
-		result["note"] = "Saved as a draft, not sent. hey mcp can't send it from this client: the person sends it from HEY."
-		if sendable {
-			result["note"] = "Saved as a draft, not sent. To deliver it, call hey_send's send_draft with its draft_id, which asks the person to confirm it."
-		}
+		// Without a draft_id there's nothing to pass send_draft, whatever the client.
+		result["note"] = "Saved as a draft, not sent. The person sends it from Drafts in HEY."
 		return result
 	}
 	result["draft_id"] = id

@@ -802,6 +802,29 @@ func TestADraftSaveSaysHowThisClientSendsIt(t *testing.T) {
 	if cant["app_url"] != testOrigin+"/messages/77/edit" {
 		t.Errorf("app_url = %v", cant["app_url"])
 	}
+
+	// A save whose Location names no draft has no draft_id to send, so either client
+	// is pointed at HEY, never at send_draft.
+	for name, elicit := range map[string]answer{"asks": approve, "can't ask": nil} {
+		rig := newSendRig(t)
+		rig.api.resp = draftSaved(testOrigin + "/topics/3")
+		result, err := rig.connect(t, elicit, "", false).CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "hey_threads",
+			Arguments: map[string]any{"action": "create_message", "params": map[string]any{"message": map[string]any{"subject": "Q3", "content": "Hi"}, "entry": map[string]any{"addressed": map[string]any{"directly": "ann@example.com"}}}},
+		})
+		if err != nil || result.IsError {
+			t.Fatalf("%s: create_message: %v %v", name, err, result)
+		}
+		var out map[string]any
+		if err := json.Unmarshal([]byte(textContent(t, result)), &out); err != nil {
+			t.Fatal(err)
+		}
+		note, _ := out["note"].(string)
+		mustContain(t, note, "not sent", "Drafts in HEY")
+		if _, ok := out["draft_id"]; ok || strings.Contains(note, sendDraftName) || strings.Contains(note, sendToolName) {
+			t.Errorf("%s: a save without a draft id: %v", name, out)
+		}
+	}
 }
 
 // --- nothing a draft holds refuses it; the prompt names what it can't show ---
