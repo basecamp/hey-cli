@@ -56,7 +56,7 @@ Tokens refresh automatically on expiry. Credentials are stored in the system key
 hey auth status   # check auth status
 hey auth token    # print the bearer token for scripting (refuses a --cookie login)
 hey auth refresh  # force token refresh
-hey auth logout   # revoke the sign-in at HEY and clear credentials
+hey auth logout   # revoke the CLI's OAuth sign-in at HEY (best effort) and clear credentials
 ```
 
 `hey login` and `hey logout` are top-level shortcuts for `hey auth login` and `hey auth logout`.

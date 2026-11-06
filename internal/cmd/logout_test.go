@@ -41,11 +41,15 @@ func (f *fakeRevocation) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // login` would. The environment must already point at the test's config home.
 func storeCLIOAuthCredential(t *testing.T, baseURL string) {
 	t.Helper()
-	mgr := auth.NewManager(baseURL, http.DefaultClient, config.ConfigDir())
-	creds := &auth.Credentials{
+	storeCLICredential(t, baseURL, &auth.Credentials{
 		AccessToken: "cli-access", RefreshToken: "cli-refresh", OAuthType: "oauth",
 		ExpiresAt: time.Now().Add(time.Hour).Unix(), TokenEndpoint: baseURL + "/oauth/tokens",
-	}
+	})
+}
+
+func storeCLICredential(t *testing.T, baseURL string, creds *auth.Credentials) {
+	t.Helper()
+	mgr := auth.NewManager(baseURL, http.DefaultClient, config.ConfigDir())
 	if err := mgr.GetStore().Save(mgr.CredentialKey(), creds); err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +59,7 @@ func storeCLIOAuthCredential(t *testing.T, baseURL string) {
 // returning stdout and stderr.
 func runLogout(t *testing.T, baseURL string) (string, string, error) {
 	t.Helper()
+	t.Setenv("HEY_TOKEN", "")
 	root := newRootCmd()
 	var stdout, stderr bytes.Buffer
 	root.SetOut(&stdout)
@@ -174,5 +179,79 @@ func TestLogoutWhenSignedOutAsksHEYNothing(t *testing.T) {
 	}
 	if logout.Summary != "Logged out" {
 		t.Errorf("logout summary = %q", logout.Summary)
+	}
+}
+
+// Credentials migrated from the old config.json carry no OAuthType, and refreshes keep
+// it empty; they're the CLI's own sign-in all the same. The revocation goes to the
+// endpoint the credential refreshes at.
+func TestLogoutRevokesAMigratedSignIn(t *testing.T) {
+	hey := &fakeRevocation{t: t, status: http.StatusOK}
+	server := httptest.NewServer(hey)
+	defer server.Close()
+	configHome := t.TempDir()
+	signedOut(t, configHome, server.URL)
+	storeCLICredential(t, server.URL, &auth.Credentials{AccessToken: "cli-access", RefreshToken: "cli-refresh"})
+
+	_, logout, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "logout")
+	if err != nil {
+		t.Fatalf("auth logout: %v", err)
+	}
+	if data, _ := logout.Data.(map[string]any); data["revoked"] != true {
+		t.Errorf("logout data = %v, want revoked", logout.Data)
+	}
+	if len(hey.revocations) != 1 || hey.revocations[0].Get("token") != "cli-refresh" {
+		t.Errorf("revocations = %d, want the migrated refresh token once", len(hey.revocations))
+	}
+}
+
+// An OAuth record holding no token has nothing to revoke: no request, no warning, and
+// revoked false rather than a claim that something was revoked.
+func TestLogoutOfAnEmptySignInRevokesNothing(t *testing.T) {
+	hey := &fakeRevocation{t: t, status: http.StatusOK}
+	server := httptest.NewServer(hey)
+	defer server.Close()
+	configHome := t.TempDir()
+	signedOut(t, configHome, server.URL)
+	storeCLICredential(t, server.URL, &auth.Credentials{OAuthType: "oauth"})
+
+	stdout, stderr, err := runLogout(t, server.URL)
+	if err != nil {
+		t.Fatalf("auth logout: %v", err)
+	}
+	if len(hey.revocations) != 0 {
+		t.Errorf("revocations = %d, want none", len(hey.revocations))
+	}
+	if !strings.Contains(stdout, `"revoked": false`) && !strings.Contains(stdout, `"revoked":false`) {
+		t.Errorf("logout output = %s, want revoked false", stdout)
+	}
+	if strings.Contains(stderr, "couldn't revoke") {
+		t.Errorf("stderr = %q, want no revocation warning", stderr)
+	}
+}
+
+// HEY_TOKEN outlives the logout: the answer says the CLI is still signed in with it.
+func TestLogoutWarnsThatHEYTokenStaysInUse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+	configHome := t.TempDir()
+	signedOut(t, configHome, server.URL)
+	t.Setenv("HEY_TOKEN", "environment-token")
+
+	root := newRootCmd()
+	var stdout, stderr bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	root.SetArgs([]string{"--base-url", server.URL, "--json", "auth", "logout"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("auth logout: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "env_token_active") {
+		t.Errorf("logout output = %s, want env_token_active", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "HEY_TOKEN is set") {
+		t.Errorf("stderr = %q, want the HEY_TOKEN warning", stderr.String())
 	}
 }
