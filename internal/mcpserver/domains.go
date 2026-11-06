@@ -26,7 +26,7 @@ var DomainSpecs = []catalog.DomainSpec{
 	{
 		Key:   "threads",
 		Tags:  []string{"Topics", "Entries", "Messages"},
-		Blurb: "HEY email threads: topics and their entries, renaming a thread, full message content, replies and forwards, drafts, and triage (trash, spam, restore, move). create_message, create_reply and update_message only ever save drafts: they never send or schedule mail, and a request to send, schedule or triage in the same call is refused. Updating a scheduled draft clears its schedule. The person can have a draft shown or revised as they like. When they ask to send it, call hey_send's send_draft at once where hey_send is listed: its confirmation shows them what goes out, so don't show the draft again or ask them again first. Where hey_send isn't listed, the person sends the draft from its page in HEY (app_url) or with `hey draft send <id>`.",
+		Blurb: "HEY email threads: topics and their entries, renaming a thread, full message content, replies and forwards, drafts, and triage (trash, spam, restore, move). create_message, create_reply and update_message only ever save drafts: they never send or schedule mail, and a request to send, schedule or triage in the same call is refused. Updating a scheduled draft clears its schedule. The person can have a draft shown or revised as they like, and sends it with one press of their own: from its page in HEY (app_url), with `hey draft send <id>`, or on a confirmation this assistant asks for, where it can. Each draft save's note says which this client has.",
 	},
 	{
 		Key:   "contacts",

@@ -17,6 +17,8 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/basecamp/mcp/mcptest"
 )
 
 // --- fixtures ---
@@ -743,8 +745,26 @@ func TestHeySendIsListedOnlyToClientsThatCanAsk(t *testing.T) {
 			if !listsTool(t, rig.connect(t, approve, era.version, false), sendToolName) {
 				t.Error("a client that can be asked isn't offered hey_send")
 			}
-			if listsTool(t, rig.connect(t, nil, era.version, false), sendToolName) {
+			cant := rig.connect(t, nil, era.version, false)
+			if listsTool(t, cant, sendToolName) {
 				t.Error("a client that can't be asked is offered hey_send")
+			}
+			// What every client reads names no tool that isn't listed to all of them.
+			for tool, err := range cant.Tools(context.Background(), nil) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(tool.Description, sendToolName) || strings.Contains(tool.Description, sendDraftName) {
+					t.Errorf("%s's description names hey_send to a client it isn't listed: %s", tool.Name, tool.Description)
+				}
+			}
+			for _, action := range []string{"create_message", "create_reply", "update_message"} {
+				text, isError := mcptest.CallText(t, cant, "hey_threads", map[string]any{
+					"action": "describe", "params": map[string]any{"action": action},
+				})
+				if isError || strings.Contains(text, sendToolName) || strings.Contains(text, sendDraftName) {
+					t.Errorf("describe %s names hey_send to a client it isn't listed: %s", action, text)
+				}
 			}
 		})
 	}
@@ -781,6 +801,29 @@ func TestADraftSaveSaysHowThisClientSendsIt(t *testing.T) {
 	}
 	if cant["app_url"] != testOrigin+"/messages/77/edit" {
 		t.Errorf("app_url = %v", cant["app_url"])
+	}
+
+	// A save whose Location names no draft has no draft_id to send, so either client
+	// is pointed at HEY, never at send_draft.
+	for name, elicit := range map[string]answer{"asks": approve, "can't ask": nil} {
+		rig := newSendRig(t)
+		rig.api.resp = draftSaved(testOrigin + "/topics/3")
+		result, err := rig.connect(t, elicit, "", false).CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "hey_threads",
+			Arguments: map[string]any{"action": "create_message", "params": map[string]any{"message": map[string]any{"subject": "Q3", "content": "Hi"}, "entry": map[string]any{"addressed": map[string]any{"directly": "ann@example.com"}}}},
+		})
+		if err != nil || result.IsError {
+			t.Fatalf("%s: create_message: %v %v", name, err, result)
+		}
+		var out map[string]any
+		if err := json.Unmarshal([]byte(textContent(t, result)), &out); err != nil {
+			t.Fatal(err)
+		}
+		note, _ := out["note"].(string)
+		mustContain(t, note, "not sent", "Drafts in HEY")
+		if _, ok := out["draft_id"]; ok || strings.Contains(note, sendDraftName) || strings.Contains(note, sendToolName) {
+			t.Errorf("%s: a save without a draft id: %v", name, out)
+		}
 	}
 }
 

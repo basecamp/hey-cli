@@ -47,8 +47,10 @@ var draftEntryKeys = map[string]bool{"addressed": true, "status": true}
 
 const drafted = "drafted"
 
-// howToSend is how a draft this server saved gets delivered.
-const howToSend = "call hey_send's send_draft with its draft_id where hey_send is listed, which asks the person to confirm the email; otherwise a person sends it from HEY or with `hey draft send <id>`"
+// howToSend is how a draft this server saved gets delivered, as every client is
+// told it: it names no tool, since hey_send is listed only to a client that can be
+// asked (server.go). The draft saves' notes name hey_send to a client it is listed.
+const howToSend = "the person sends it with one press of their own: from its page in HEY, with `hey draft send <id>`, or, where this assistant can ask them to confirm a send, on that confirmation"
 
 // draftOnly returns params with the entry forced to a draft, or an error
 // naming what would have delivered. params is not modified.
@@ -161,7 +163,8 @@ func draftResult(resp *hey.Response, sendable bool) map[string]any {
 	result := map[string]any{"status": resp.StatusCode, "location": location, "drafted": true}
 	id := draftID(location)
 	if id == "" {
-		result["note"] = "Saved as a draft, not sent. To deliver it, " + howToSend + "."
+		// Without a draft_id there's nothing to pass send_draft, whatever the client.
+		result["note"] = "Saved as a draft, not sent. The person sends it from Drafts in HEY."
 		return result
 	}
 	result["draft_id"] = id
