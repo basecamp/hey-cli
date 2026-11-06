@@ -37,9 +37,9 @@ authentication/12	skill	When an agent harness runs commands under a PTY, set `HE
 authentication/13	help:hey auth status	Show authentication status
 authentication/14	skill	set `HEY_NONINTERACTIVE=1` so a missing login returns the same actionable auth error instead of opening an interactive prompt.
 authentication/15	help:hey auth login	Opens a browser for OAuth authentication against HEY's own OAuth server, using PKCE.
-authentication/16	help:hey auth logout	when it can, and clear stored credentials
+authentication/16	help:hey auth logout	revoke the CLI's OAuth sign-in at HEY when it can, and clear stored credentials
 authentication/17	help:hey login	Authenticate with the HEY server
-authentication/17	help:hey logout	when it can, and clear stored credentials
+authentication/17	help:hey logout	revoke the CLI's OAuth sign-in at HEY when it can, and clear stored credentials
 authentication/18	help:hey setup omarchy	Install hey into the Omarchy desktop: the 37signals.hey bar plugin
 authentication/18	help:hey setup omarchy	Only meaningful on Omarchy Linux.
 authentication/19	help:hey setup omarchy	The bar-plugin offer at sign-in never fires for an agent (machine output, HEY_NONINTERACTIVE, a non-TTY, or a --token/--cookie login), so this command is how an agent installs the plugin
