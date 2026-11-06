@@ -1496,3 +1496,28 @@ func TestNotLoggedInHintInsideCodexSandbox(t *testing.T) {
 		})
 	}
 }
+
+// Only an OAuth sign-in is the CLI's to revoke: a stored bearer token or session cookie
+// is refused without a request, since revoking it would end something outside the CLI.
+func TestRevokeRefusesCredentialsThatAreNotAnOAuthSignIn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	for name, login := range map[string]func(*Manager) error{
+		"token":  func(m *Manager) error { return m.LoginWithToken("stored-token") },
+		"cookie": func(m *Manager) error { return m.LoginWithCookie("cookie-value") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			mgr := testManager(t, server)
+			if err := login(mgr); err != nil {
+				t.Fatal(err)
+			}
+			if err := mgr.Revoke(t.Context()); !errors.Is(err, ErrNotRevocable) {
+				t.Errorf("Revoke = %v, want ErrNotRevocable", err)
+			}
+		})
+	}
+}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/version"
 )
 
 // Built-in OAuth client ID for the CLI app.
@@ -404,6 +405,59 @@ func (m *Manager) Logout() error {
 		return err
 	}
 	m.cachedCredentials = nil
+	return nil
+}
+
+// ErrNotRevocable means the stored credential isn't a sign-in this CLI made: a bearer
+// token stored with --token, or a browser session cookie. Revoking either would end
+// something that lives outside the CLI (the token wherever else it is used, the browser's
+// own sign-in), so a logout only forgets it.
+var ErrNotRevocable = errors.New("the stored credential isn't an OAuth sign-in, so it's forgotten here and not revoked")
+
+// Revoke asks HEY to revoke the stored OAuth sign-in (DELETE /oauth/tokens), which every
+// HEY with OAuth answers. It sends the refresh token when there is one, since revoking
+// it ends the whole grant. ErrNotRevocable means the credential isn't an OAuth sign-in,
+// ErrCredentialsNotFound that nothing is stored.
+func (m *Manager) Revoke(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	creds, err := m.store.Load(m.storeKey)
+	if err != nil {
+		return err
+	}
+	if creds.OAuthType != "oauth" {
+		return ErrNotRevocable
+	}
+	token := creds.RefreshToken
+	if token == "" {
+		token = creds.AccessToken
+	}
+	if token == "" {
+		return nil
+	}
+	clientID := creds.ClientID
+	if clientID == "" {
+		clientID = m.clientID
+	}
+
+	form := url.Values{"client_id": {clientID}, "token": {token}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, m.baseURL+"/oauth/tokens", strings.NewReader(form.Encode()))
+	if err != nil {
+		return fmt.Errorf("creating revocation request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", version.UserAgent())
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("revocation request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		// The body can echo the request, so only the status is reported.
+		return fmt.Errorf("HEY answered the revocation with HTTP %d", resp.StatusCode)
+	}
 	return nil
 }
 
