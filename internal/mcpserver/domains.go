@@ -16,7 +16,7 @@ var DomainSpecs = []catalog.DomainSpec{
 	{
 		Key:   "boxes",
 		Tags:  []string{"Boxes"},
-		Blurb: "HEY mail boxes: the Imbox, Feed, Paper Trail, Reply Later, Set Aside and Bubble Up stacks, box groups and designations, and incremental posting changes.",
+		Blurb: "HEY mail boxes: the Imbox, The Feed, the Paper Trail, Reply Later, Set Aside and Bubble Up, box groups and designations, and incremental posting changes.",
 	},
 	{
 		Key:   "search",
@@ -31,17 +31,17 @@ var DomainSpecs = []catalog.DomainSpec{
 	{
 		Key:   "contacts",
 		Tags:  []string{"Contacts"},
-		Blurb: "HEY contacts and the Screener: contact records and notes, bundling, and clearance (screening) decisions.",
+		Blurb: "HEY contacts and The Screener: contact records and notes, bundling, and clearance (screening) decisions.",
 	},
 	{
 		Key:   "todos",
 		Tags:  []string{"Calendar Todos"},
-		Blurb: "HEY Calendar todos: create, update, complete, uncomplete, and delete. Read existing todos through the calendar domain's get_calendar_recordings.",
+		Blurb: "HEY Calendar to-dos: create, update, complete, uncomplete, and delete. Read existing to-dos through the calendar domain's get_calendar_recordings.",
 	},
 	{
 		Key:   "calendar",
 		Tags:  []string{"Calendars"},
-		Blurb: "HEY Calendars: list calendars, read their recordings (todos and events — the todo read path), and toggle calendar visibility.",
+		Blurb: "HEY Calendars: list calendars, read their recordings (to-dos and events — the to-do read path), and toggle calendar visibility.",
 	},
 	{
 		Key:   "identity",
