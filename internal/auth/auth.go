@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/version"
 )
 
 // Built-in OAuth client ID for the CLI app.
@@ -404,6 +405,109 @@ func (m *Manager) Logout() error {
 		return err
 	}
 	m.cachedCredentials = nil
+	return nil
+}
+
+// ErrNotRevocable means the stored credential isn't a sign-in this CLI made: a bearer
+// token stored with --token, a browser session cookie, or a record holding no token.
+// Revoking a token or cookie would end something that lives outside the CLI (the token
+// wherever else it is used, the browser's own sign-in), so a logout only forgets it.
+var ErrNotRevocable = errors.New("the stored credential isn't an OAuth sign-in, so it's forgotten here and not revoked")
+
+// revocable reports whether creds are an OAuth sign-in the CLI made. Credentials
+// migrated from the old config.json carry no OAuthType, and refreshes keep it empty: a
+// refresh token without a session cookie is one of those.
+func revocable(creds *Credentials) bool {
+	switch creds.OAuthType {
+	case "oauth":
+		return creds.RefreshToken != "" || creds.AccessToken != ""
+	case "":
+		return creds.RefreshToken != "" && creds.SessionCookie == ""
+	default:
+		return false
+	}
+}
+
+// Revoke asks HEY to revoke the stored OAuth sign-in. ErrNotRevocable means the
+// credential isn't one, ErrCredentialsNotFound that nothing is stored.
+func (m *Manager) Revoke(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	creds, err := m.store.Load(m.storeKey)
+	if err != nil {
+		return err
+	}
+	return m.revoke(ctx, creds)
+}
+
+// LogoutRevoking revokes the stored OAuth sign-in at HEY, then removes the credential
+// whatever HEY answered. The load, the revocation and the delete hold the store's
+// cross-process lock, as a refresh does, so a refresh in another process can't save a
+// credential between them that the delete then drops unrevoked. revokeErr is why
+// nothing was revoked (ErrCredentialsNotFound, ErrNotRevocable, or the failure); err is
+// a failure to remove the credential.
+func (m *Manager) LogoutRevoking(ctx context.Context) (revokeErr, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	unlock, err := m.store.lock()
+	if err != nil {
+		return err, err
+	}
+	defer unlock()
+
+	creds, loadErr := m.store.load(m.storeKey)
+	if loadErr != nil {
+		revokeErr = loadErr
+	} else {
+		revokeErr = m.revoke(ctx, creds)
+	}
+	if err := m.store.delete(m.storeKey); err != nil {
+		return revokeErr, err
+	}
+	m.cachedCredentials = nil
+	return revokeErr, nil
+}
+
+// revoke sends HEY's revocation for creds (DELETE on the token endpoint, which every
+// HEY with OAuth answers), with the refresh token when there is one, since revoking it
+// ends the whole grant.
+func (m *Manager) revoke(ctx context.Context, creds *Credentials) error {
+	if !revocable(creds) {
+		return ErrNotRevocable
+	}
+	token := creds.RefreshToken
+	if token == "" {
+		token = creds.AccessToken
+	}
+	clientID := creds.ClientID
+	if clientID == "" {
+		clientID = m.clientID
+	}
+	// The endpoint the credential refreshes at (refreshLocked) is the one it revokes at.
+	tokenEndpoint := creds.TokenEndpoint
+	if tokenEndpoint == "" {
+		tokenEndpoint = m.baseURL + "/oauth/tokens"
+	}
+
+	form := url.Values{"client_id": {clientID}, "token": {token}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, tokenEndpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return fmt.Errorf("creating revocation request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", version.UserAgent())
+
+	resp, err := m.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("revocation request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		// The body can echo the request, so only the status is reported.
+		return fmt.Errorf("HEY answered the revocation with HTTP %d", resp.StatusCode)
+	}
 	return nil
 }
 

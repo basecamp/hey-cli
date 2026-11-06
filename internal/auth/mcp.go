@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 
 	"github.com/basecamp/hey-cli/internal/config"
-	"github.com/basecamp/hey-cli/internal/version"
 )
 
 // hey mcp's credential (haystack#9041, #9085).
@@ -99,48 +97,6 @@ func (m *Manager) checkPinnedGrant(creds *Credentials) error {
 // StoredCredentials reads this manager's stored credential.
 func (m *Manager) StoredCredentials() (*Credentials, error) {
 	return m.store.Load(m.storeKey)
-}
-
-// Revoke asks HEY to revoke the stored grant (DELETE /oauth/tokens). It sends the
-// refresh token when there is one, since revoking it ends the whole grant.
-func (m *Manager) Revoke(ctx context.Context) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	creds, err := m.store.Load(m.storeKey)
-	if err != nil {
-		return err
-	}
-	token := creds.RefreshToken
-	if token == "" {
-		token = creds.AccessToken
-	}
-	if token == "" {
-		return nil
-	}
-	clientID := creds.ClientID
-	if clientID == "" {
-		clientID = m.clientID
-	}
-
-	form := url.Values{"client_id": {clientID}, "token": {token}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, m.baseURL+"/oauth/tokens", strings.NewReader(form.Encode()))
-	if err != nil {
-		return fmt.Errorf("creating revocation request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", version.UserAgent())
-
-	resp, err := m.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("revocation request failed: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		// The body can echo the request, so only the status is reported.
-		return fmt.Errorf("HEY answered the revocation with HTTP %d", resp.StatusCode)
-	}
-	return nil
 }
 
 // scopeImplies is HEY's scope taxonomy as far as hey mcp reads it: write implies

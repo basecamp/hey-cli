@@ -145,8 +145,12 @@ func buildLogoutCommand(path string) *cobra.Command {
 	var mcp bool
 	cmd := &cobra.Command{
 		Use:   "logout",
-		Short: "Clear stored credentials",
-		Long: `Clear the CLI's stored credentials.
+		Short: "Sign out: revoke the CLI's OAuth sign-in at HEY when it can, and clear stored credentials",
+		Long: `Sign the CLI out: revoke its sign-in at HEY, then clear its stored credentials.
+
+The credentials are cleared even when HEY can't be reached; a warning then says where to
+finish the revocation. A token stored with --token or a session cookie is only cleared,
+never revoked: it isn't the CLI's own sign-in.
 
 --mcp signs hey mcp out instead: it revokes hey mcp's sign-in at HEY and removes its
 credential, leaving the CLI's alone.`,
@@ -155,16 +159,42 @@ credential, leaving the CLI's alone.`,
 			if mcp {
 				return logoutMCP(cmd)
 			}
-			if err := authMgr.Logout(); err != nil {
-				return apierr.ErrAuth(fmt.Sprintf("could not clear credentials: %v", err))
-			}
-			// Cached mail must not outlive the credentials that fetched it.
-			clearHTTPCache(cmd.ErrOrStderr())
-			return writeMutation(cmd, "Logged out", nil)
+			return logoutCLI(cmd)
 		},
 	}
 	cmd.Flags().BoolVar(&mcp, "mcp", false, "Sign hey mcp out: revoke its sign-in and remove its credential")
 	return cmd
+}
+
+// logoutCLI runs `hey auth logout`: revoke the CLI's sign-in at HEY, then forget it here.
+// The local copy goes even when the revocation can't be confirmed, and the warning says
+// where to finish it, as logoutMCP does for hey mcp's.
+func logoutCLI(cmd *cobra.Command) error {
+	ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
+	defer cancel()
+	revokeErr, err := authMgr.LogoutRevoking(ctx)
+	if warnRevocationFailed(revokeErr) {
+		fmt.Fprintf(cmd.ErrOrStderr(), "warning: couldn't revoke the CLI's sign-in at HEY (%v); remove Hey CLI in HEY's Connected Apps\n", revokeErr)
+	}
+	if err != nil {
+		return apierr.ErrAuth(fmt.Sprintf("could not clear credentials: %v", err))
+	}
+	// Cached mail must not outlive the credentials that fetched it.
+	clearHTTPCache(cmd.ErrOrStderr())
+	data := map[string]any{"revoked": revokeErr == nil}
+	if os.Getenv("HEY_TOKEN") != "" {
+		// The environment outlives this process: the CLI keeps signing in with it.
+		data["env_token_active"] = true
+		fmt.Fprintln(cmd.ErrOrStderr(), "warning: HEY_TOKEN is set, so the CLI is still signed in with it; unset HEY_TOKEN to sign out of it")
+	}
+	return writeMutation(cmd, "Logged out", data)
+}
+
+// warnRevocationFailed reports whether a logout's revocation outcome needs a warning:
+// one was due and didn't go through. Nothing stored, and a credential that isn't an
+// OAuth sign-in, need none.
+func warnRevocationFailed(revokeErr error) bool {
+	return revokeErr != nil && !errors.Is(revokeErr, auth.ErrCredentialsNotFound) && !errors.Is(revokeErr, auth.ErrNotRevocable)
 }
 
 // status subcommand
