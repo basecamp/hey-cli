@@ -188,7 +188,7 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	}
 	logger.Info("MCP server running on stdio", "tools", len(srv.Domains()), "read_only", readOnly, "send_draft", srv.ServesSend())
 	if !canSend {
-		logger.Info("send_draft isn't served: hey mcp's sign-in wasn't granted sending. To allow it, run `hey auth login --mcp` again and leave sending checked.")
+		logger.Info("send_draft isn't served: hey mcp's sign-in wasn't granted sending. To allow it, run `hey auth login --mcp` again and turn sending on.")
 	}
 
 	return session.Wait()
