@@ -17,6 +17,8 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/basecamp/mcp/mcptest"
 )
 
 // --- fixtures ---
@@ -743,8 +745,26 @@ func TestHeySendIsListedOnlyToClientsThatCanAsk(t *testing.T) {
 			if !listsTool(t, rig.connect(t, approve, era.version, false), sendToolName) {
 				t.Error("a client that can be asked isn't offered hey_send")
 			}
-			if listsTool(t, rig.connect(t, nil, era.version, false), sendToolName) {
+			cant := rig.connect(t, nil, era.version, false)
+			if listsTool(t, cant, sendToolName) {
 				t.Error("a client that can't be asked is offered hey_send")
+			}
+			// What every client reads names no tool that isn't listed to all of them.
+			for tool, err := range cant.Tools(context.Background(), nil) {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if strings.Contains(tool.Description, sendToolName) || strings.Contains(tool.Description, sendDraftName) {
+					t.Errorf("%s's description names hey_send to a client it isn't listed: %s", tool.Name, tool.Description)
+				}
+			}
+			for _, action := range []string{"create_message", "create_reply", "update_message"} {
+				text, isError := mcptest.CallText(t, cant, "hey_threads", map[string]any{
+					"action": "describe", "params": map[string]any{"action": action},
+				})
+				if isError || strings.Contains(text, sendToolName) || strings.Contains(text, sendDraftName) {
+					t.Errorf("describe %s names hey_send to a client it isn't listed: %s", action, text)
+				}
 			}
 		})
 	}
