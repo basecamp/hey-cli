@@ -430,6 +430,9 @@ func retained(message *generated.Message, retainRecipients, retainReceivedVia bo
 		Sender:    retainedContact(message.Sender),
 		CreatedAt: message.CreatedAt,
 		UpdatedAt: message.UpdatedAt,
+		// The thread's id and screening, fixed-size and inside retainedOverhead.
+		TopicId:    message.TopicId,
+		ScreenedIn: message.ScreenedIn,
 	}
 	if retainRecipients {
 		kept.Addressed = generated.Addressed{

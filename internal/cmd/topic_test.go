@@ -362,6 +362,42 @@ func TestEntriesInThreadCarryInboundDeliveryAddresses(t *testing.T) {
 
 // The entry index carries no recipients or delivery records, so an entry whose body
 // was not read says nothing about who it went to rather than claiming it went to nobody.
+// A read message carries its thread's topic_id and screened_in as HEY serves them, a
+// false screened_in included. A HEY that serves neither leaves both out rather than
+// reading an absent screened_in as false.
+func TestEntriesInThreadCarryTheThreadsTopicAndScreening(t *testing.T) {
+	server, _ := threadEntriesServerServing(t, [][]int64{{11, 12, 13}}, map[int64]string{
+		11: `{"id":11,"content":"<p>in</p>","topic_id":7,"screened_in":true}`,
+		12: `{"id":12,"content":"<p>waiting</p>","topic_id":7,"screened_in":false}`,
+		13: `{"id":13,"content":"<p>older HEY</p>"}`,
+	})
+	withSDKPointedAt(t, server)
+
+	entries, err := readThreadEntries(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := map[int64]string{11: `"topic_id":7,"screened_in":true,`, 12: `"topic_id":7,"screened_in":false,`, 13: ""}
+	if len(entries) != len(want) {
+		t.Fatalf("read %d entries, want %d", len(entries), len(want))
+	}
+	for _, entry := range entries {
+		encoded, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want[entry.ID] == "" {
+			if strings.Contains(string(encoded), `"topic_id"`) || strings.Contains(string(encoded), `"screened_in"`) {
+				t.Errorf("entry %d JSON = %s, want neither topic_id nor screened_in from a HEY that serves neither", entry.ID, encoded)
+			}
+			continue
+		}
+		if !strings.Contains(string(encoded), want[entry.ID]) {
+			t.Errorf("entry %d JSON = %s, want it to carry %s", entry.ID, encoded, want[entry.ID])
+		}
+	}
+}
+
 func TestEntriesInThreadWithoutBodiesCarryNoRecipients(t *testing.T) {
 	server, reads := threadEntriesServer(t, [][]int64{{11}}, nil)
 	withSDKPointedAt(t, server)
