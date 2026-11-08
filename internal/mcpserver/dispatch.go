@@ -66,6 +66,10 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		params = forced
 	}
 
+	if err := checkAccountFilter(d.api, params); err != nil {
+		return gateway.ErrorResult("%v", err), nil
+	}
+
 	path, body, err := buildRequest(full, params)
 	if err != nil {
 		return gateway.ErrorResult("%v", err), nil
@@ -109,6 +113,46 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		}
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(resp.Data)}}}, nil
+}
+
+// pinnedAccount is an API whose client is scoped to one account: hey mcp started
+// with an account selected. The SDK sends that account as every request's
+// filtered_account_id, replacing any the request carried.
+type pinnedAccount interface {
+	AccountID() (int64, bool)
+}
+
+// accountFilterParam is HEY's account filter, which the catalog offers as an
+// optional query parameter on the reads that take it (hey-sdk#289).
+const accountFilterParam = "filtered_account_id"
+
+// checkAccountFilter refuses an account filter the server can't honor: on a
+// server pinned to one account, the SDK would replace it with that account and
+// answer with another account's data than the one asked for. The pinned
+// account itself, or no filter, goes through; an unpinned server passes any
+// filter on to HEY.
+func checkAccountFilter(api API, params map[string]any) error {
+	raw, ok := params[accountFilterParam]
+	if !ok {
+		return nil
+	}
+	pinned, ok := api.(pinnedAccount)
+	if !ok {
+		return nil
+	}
+	accountID, scoped := pinned.AccountID()
+	if !scoped {
+		return nil
+	}
+	value, err := scalarString(raw)
+	if err != nil {
+		return fmt.Errorf("query parameter %q: %w", accountFilterParam, err)
+	}
+	if value == strconv.FormatInt(accountID, 10) {
+		return nil
+	}
+	return fmt.Errorf("%s %s can't be honored here: hey mcp is serving account %d only, and every request goes to that account. "+
+		"Leave %s out, or restart hey mcp with --account all to filter by account", accountFilterParam, value, accountID, accountFilterParam)
 }
 
 // acknowledgedBy names the mutations whose success is one exact status, because a

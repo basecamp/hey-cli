@@ -52,8 +52,13 @@ type threadReceivedVia struct {
 // records come from the message like the body does, so they are absent exactly when the
 // message was not read; received_via is also absent when HEY served none for a sent or
 // generated message. The entry index carries neither kind of message metadata.
+// TopicID and ScreenedIn are the thread's, as the message read reports them
+// (HEY serves both on a message since haystack#9161), so they too are present
+// only for a message that was read, and only from a HEY that serves them.
 type threadEntry struct {
 	ID                    int64               `json:"id"`
+	TopicID               int64               `json:"topic_id,omitempty"`
+	ScreenedIn            *bool               `json:"screened_in,omitempty"`
 	CreatedAt             string              `json:"created_at"`
 	UpdatedAt             string              `json:"updated_at"`
 	Creator               threadContact       `json:"creator"`
@@ -97,10 +102,12 @@ func newThreadsCommand() *topicCommand {
 			"creator as the entry's author (the external sender for inbound mail) and, when you sent " +
 			"from another address, include that address as sender. Entries also include To/CC/BCC recipients " +
 			"and, for inbound mail, received_via with the exact account delivery addresses HEY recorded. " +
+			"An entry whose message was read also carries its thread's topic_id and screened_in (false while " +
+			"the thread waits in the Screener, or after its sender was screened out), when HEY serves them. " +
 			"An entry's kind is message for mail; a note (comment) or share notice (access_notice) is " +
 			"internal to the thread and never emailed, and the text formats label it so.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown, converted from HEY's Trix HTML so headings, lists, quotes, tables and code survive and links keep their URLs (read a body as structure, not flattened text); the creator is the entry's author (the external sender for inbound mail, your own contact for mail you sent), while a non-default send-as address you sent from is the optional sender on a hydrated entry; take the From address from sender.email_address when sender is present and from creator.email_address otherwise. Each entry whose message was read carries recipients as to, cc and bcc contact lists. A known-empty line is []; an entry whose message was not read omits recipients. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact; received_via is omitted for sent and generated messages and for an entry whose message was not read. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. It is refused (usage error) when stdout is a terminal, so redirect it to a file or a pipe. A bundle row's own id is not a thread: hey thread read on it answers not_found with a hint naming the bundle and hey bundle view. Each entry's kind says what it is: message for mail, while comment (a note) and access_notice (a share notice) are internal — visible to everyone with access to the thread, never emailed — and --markdown, styled and --html output head them as a note or share notice rather than with a From line. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
+			"agent_notes": "Returns a thread with all entries, oldest first. Entry bodies are Markdown, converted from HEY's Trix HTML so headings, lists, quotes, tables and code survive and links keep their URLs (read a body as structure, not flattened text); the creator is the entry's author (the external sender for inbound mail, your own contact for mail you sent), while a non-default send-as address you sent from is the optional sender on a hydrated entry; take the From address from sender.email_address when sender is present and from creator.email_address otherwise. Each entry whose message was read carries recipients as to, cc and bcc contact lists. A known-empty line is []; an entry whose message was not read omits recipients. In JSON, inbound entries also carry received_via: the exact account delivery addresses HEY recorded, distinct from the visible recipients, with an optional resolved contact; received_via is omitted for sent and generated messages and for an entry whose message was not read. An entry whose message was read also carries its thread's topic_id and screened_in (false while the thread waits in the Screener, or after its sender was screened out), when HEY serves them. --html writes an HTML document instead, one <article> per entry with a From/To/CC/BCC header and HEY's original body HTML. It is refused (usage error) when stdout is a terminal, so redirect it to a file or a pipe. A bundle row's own id is not a thread: hey thread read on it answers not_found with a hint naming the bundle and hey bundle view. Each entry's kind says what it is: message for mail, while comment (a note) and access_notice (a share notice) are internal — visible to everyone with access to the thread, never emailed — and --markdown, styled and --html output head them as a note or share notice rather than with a From line. A thread that could only be read in part is refused unless --allow-partial is passed, in which case each entry's body_state says what was read. Use the topic ID with hey reply or hey forward.",
 		},
 		Example: `  hey thread read 12345
   hey thread read 12345 --json
@@ -436,6 +443,8 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 	var recipients *threadRecipients
 	var receivedVia []threadReceivedVia
 	var sender *threadContact
+	var topicID int64
+	var screenedIn *bool
 
 	if message := loaded.Message; message != nil {
 		if creator.Id == 0 {
@@ -464,12 +473,21 @@ func newThreadEntry(loaded *threadload.Entry, html bool) threadEntry {
 			contact := newThreadContact(message.Sender)
 			sender = &contact
 		}
+		// The SDK reads an absent screened_in as false, so it is believed only from a
+		// HEY that also served topic_id: the two arrived together (haystack#9161).
+		topicID = message.TopicId
+		if topicID != 0 {
+			screened := message.ScreenedIn
+			screenedIn = &screened
+		}
 		// The loaded thread's copy is released as it is converted.
 		loaded.Message = nil
 	}
 
 	return threadEntry{
 		ID:                    entry.Id,
+		TopicID:               topicID,
+		ScreenedIn:            screenedIn,
 		CreatedAt:             formatTimestamp(createdAt),
 		UpdatedAt:             formatTimestamp(updatedAt),
 		AlternativeSenderName: entry.AlternativeSenderName,
