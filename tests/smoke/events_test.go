@@ -516,7 +516,30 @@ func TestEventCommandsValidateInput(t *testing.T) {
 	heyFail(t, "event", "delete", "--json")
 	heyFail(t, "event", "edit", "not-an-id", "--json")
 	heyFail(t, "event", "delete", "not-an-id", "--json")
-	heyFail(t, "event", "add", "No end time", "--starts-on", "2099-06-01", "--start-time", "09:00",
-		"--end-time-zone", "Europe/London", "--json")
-	heyFail(t, "event", "add", "All day", "--starts-on", "2099-06-01", "--end-time-zone", "Europe/London", "--json")
+}
+
+// An end zone is refused, as a usage error and before any write, where there is no end time
+// to read in it.
+func TestEventEndTimeZoneRefusals(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no end time", []string{"--start-time", "09:00"}, "--end-time-zone needs --end-time"},
+		{"all day", nil, "an all-day event has no end time"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"event", "add", "Flight", "--starts-on", "2099-06-01", "--end-time-zone", "Europe/London", "--json"}, tt.args...)
+			_, stderr := heyFail(t, args...)
+			var resp ErrorResponse
+			if err := json.Unmarshal([]byte(stderr), &resp); err != nil {
+				t.Fatalf("stderr is not a JSON error envelope: %v\nraw: %s", err, stderr)
+			}
+			if resp.Code != "usage" || !strings.Contains(resp.Error, tt.want) {
+				t.Errorf("error = %s %q, want usage %q", resp.Code, resp.Error, tt.want)
+			}
+		})
+	}
 }
