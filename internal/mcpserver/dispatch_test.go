@@ -196,6 +196,67 @@ func TestDispatchAPIErrorIsInBand(t *testing.T) {
 	}
 }
 
+// pinnedAPI is a fakeAPI on a server started on one account.
+type pinnedAPI struct {
+	*fakeAPI
+	account int64
+}
+
+func (p pinnedAPI) AccountID() (int64, bool) { return p.account, p.account != 0 }
+
+// A server pinned to one account would have its account filter replaced by the
+// SDK, so a filter for another account is refused before HEY is asked, rather
+// than answered with the pinned account's data. The pinned account itself, and
+// any filter on an unpinned server, go through to HEY.
+func TestDispatchRefusesAnAccountFilterThePinnedServerCantHonor(t *testing.T) {
+	cat := loadForTest(t)
+	boxes := cat.Domains[0]
+	listBoxes := mustFind(t, boxes, "list_boxes")
+
+	for _, tc := range []struct {
+		name    string
+		api     API
+		filter  any
+		refused bool
+	}{
+		{"another account on a pinned server", pinnedAPI{&fakeAPI{}, 42}, float64(7), true},
+		{"another account, as a string", pinnedAPI{&fakeAPI{}, 42}, "7", true},
+		{"the pinned account", pinnedAPI{&fakeAPI{}, 42}, float64(42), false},
+		{"an unpinned server", pinnedAPI{&fakeAPI{}, 0}, float64(7), false},
+		{"a server without an account", &fakeAPI{}, float64(7), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := (dispatcher{api: tc.api}).handle(context.Background(), boxes, listBoxes,
+				map[string]any{"filtered_account_id": tc.filter})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var recorded string
+			switch api := tc.api.(type) {
+			case pinnedAPI:
+				recorded = api.path
+			case *fakeAPI:
+				recorded = api.path
+			}
+			if tc.refused {
+				if !result.IsError || !strings.Contains(textContent(t, result), "--account all") {
+					t.Fatalf("result = %v, want a refusal naming --account all", result.Content)
+				}
+				if recorded != "" {
+					t.Errorf("HEY was asked for %s, want no request", recorded)
+				}
+				return
+			}
+			if result.IsError {
+				t.Fatalf("unexpected isError: %v", result.Content)
+			}
+			if !strings.Contains(recorded, "filtered_account_id=") {
+				t.Errorf("request %s, want the filter passed on", recorded)
+			}
+		})
+	}
+}
+
 func TestDispatchSurfacesNextPageCursor(t *testing.T) {
 	cat := loadForTest(t)
 	boxes := cat.Domains[0]

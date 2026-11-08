@@ -100,6 +100,15 @@ func (a mcpAPI) Delete(ctx context.Context, path string) (*hey.Response, error) 
 	return a.writes.Delete(ctx, path)
 }
 
+// AccountID is the account hey mcp was started on, when it was started on one: its
+// clients then send that account as every request's account filter, whatever a
+// tool call asked for (mcpserver's pinnedAccount).
+func (a mcpAPI) AccountID() (int64, bool) {
+	return a.reads.AccountID()
+}
+
+var _ interface{ AccountID() (int64, bool) } = mcpAPI{}
+
 func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	// hey mcp serves on its own credential, never the CLI's (mcp_auth.go).
 	creds, err := requireMCPCredentials()
