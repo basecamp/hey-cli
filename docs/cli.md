@@ -510,12 +510,27 @@ spells them (`America/New_York`, `US/Eastern`, `Etc/GMT+5`, `UTC`). That is this
 rule, not HEY's: `Local`, a lowercase spelling and Rails' friendly names such as `Eastern
 Time (US & Canada)` are refused.
 
+`--end-time-zone` reads `--end-time` in a zone of its own, so a flight goes in as its ticket
+prints it, each end in the local time of its airport:
+
+```bash
+hey event add "SQ23 JFK to SIN" --starts-on 2026-12-16 --start-time 22:05 --time-zone America/New_York \
+  --ends-on 2026-12-18 --end-time 06:00 --end-time-zone Asia/Singapore
+```
+
+The start stays in `--time-zone` or the account's zone. On `add` it needs `--end-time`, since an
+hour after the start is a moment in the start's zone, and an all-day event has no end time to
+give it. An end in another zone may fall on an earlier date than the start, as a flight from
+Tokyo to Los Angeles does; only an end before the start, as instants, is refused.
+
 On `edit`, and on an `--occurrence` edit alike, an event saved in a time zone keeps it for
 the times you type and the times you keep. An event saved without one stays without one:
 the times you type are read in the account's zone and sent as the moment they name, and
 the ones you do not type keep theirs, so nothing you did not touch moves — a repeating
 series included. `--time-zone` gives the event that zone, and the times you do not type
-keep their moment in it. An all-day event given a time takes the account's zone, as a new
+keep their moment in it. `--end-time-zone` does the same for the end alone. A zoneless event
+needs `--time-zone` with it, since HEY takes an end's zone only beside a start's, and an
+all-day event made timed needs `--end-time` too. An all-day event given a time takes the account's zone, as a new
 event does. A typed time is placed as HEY places one: a time the clocks skip moves on an
 hour at a time until it exists, and a time they repeat as they go back is the
 daylight-saving one of its two moments, or the later where neither is. A kept time at the

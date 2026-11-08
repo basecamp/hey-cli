@@ -1105,3 +1105,145 @@ func TestEventsEditDerivesTheEndOfAnAllDayEventMadeTimed(t *testing.T) {
 		})
 	}
 }
+
+// wantZones checks the zone each end of an event write was sent in.
+func wantZones(t *testing.T, form url.Values, startZone, endZone string) {
+	t.Helper()
+	want := map[string]string{
+		"calendar_event[set_time_zone]":            "1",
+		"calendar_event[starts_at_time_zone_name]": startZone,
+		"calendar_event[ends_at_time_zone_name]":   endZone,
+	}
+	for field, value := range want {
+		if got := form.Get(field); got != value {
+			t.Errorf("%s = %q, want %q", field, got, value)
+		}
+	}
+}
+
+// A flight is entered as its ticket prints it: leaving New York at 22:05 on the 16th and
+// landing in Singapore at 06:00 on the 18th, each end in its own zone. One flying east to
+// west can land on an earlier date than it left, and only its instants are compared.
+func TestEventsAddWritesTheEndInItsOwnZone(t *testing.T) {
+	tests := []struct {
+		name                         string
+		startsOn, startTime, startTZ string
+		endsOn, endTime, endTZ       string
+	}{
+		{"eastbound", "2026-12-16", "22:05", "America/New_York", "2026-12-18", "06:00", "Asia/Singapore"},
+		{"lands the day before", "2026-10-15", "09:00", "Asia/Tokyo", "2026-10-14", "18:00", "America/Los_Angeles"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, requests := zoneServer(t, zoneFixture{})
+			_, err := runJSONCommand(t, handler, "event", "add", "Flight", "--calendar", "9",
+				"--starts-on", tt.startsOn, "--start-time", tt.startTime, "--time-zone", tt.startTZ,
+				"--ends-on", tt.endsOn, "--end-time", tt.endTime, "--end-time-zone", tt.endTZ)
+			if err != nil {
+				t.Fatalf("execute event add: %v", err)
+			}
+			form := requests.written(t)
+			for field, value := range map[string]string{
+				"calendar_event[starts_at]":      tt.startsOn,
+				"calendar_event[starts_at_time]": tt.startTime + ":00",
+				"calendar_event[ends_at]":        tt.endsOn,
+				"calendar_event[ends_at_time]":   tt.endTime + ":00",
+			} {
+				if got := form.Get(field); got != value {
+					t.Errorf("%s = %q, want %q", field, got, value)
+				}
+			}
+			wantZones(t, form, tt.startTZ, tt.endTZ)
+		})
+	}
+}
+
+// The end zone defaults to the start's, so the start may come from the account.
+func TestEventsAddEndTimeZoneBesideTheAccountZone(t *testing.T) {
+	handler, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York"})
+	_, err := runJSONCommand(t, handler, "event", "add", "Flight", "--calendar", "9",
+		"--starts-on", "2026-10-14", "--start-time", "18:00", "--ends-on", "2026-10-15", "--end-time", "06:00",
+		"--end-time-zone", "Europe/London")
+	if err != nil {
+		t.Fatalf("execute event add: %v", err)
+	}
+	wantZones(t, requests.written(t), "America/New_York", "Europe/London")
+}
+
+// An end in a zone of its own is written as its own clock time, so it is never guessed at:
+// it needs --end-time, and an all-day event has no end time to give it. An end before the
+// start is refused on its instant.
+func TestEventsAddRefusesAnEndTimeZoneItCannotUse(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"no end time", []string{"--start-time", "22:05", "--time-zone", "America/New_York", "--end-time-zone", "Asia/Singapore"}, "--end-time-zone needs --end-time"},
+		{"all day", []string{"--end-time-zone", "Asia/Singapore"}, "an all-day event has no end time"},
+		{"empty", []string{"--start-time", "10:00", "--end-time", "11:00", "--end-time-zone", ""}, "--end-time-zone needs a time zone"},
+		{"unknown", []string{"--start-time", "10:00", "--end-time", "11:00", "--end-time-zone", "Mars/Olympus"}, "invalid time-zone: Mars/Olympus"},
+		{"ends before it starts", []string{"--start-time", "09:00", "--time-zone", "America/Los_Angeles", "--ends-on", "2026-10-14", "--end-time", "11:00", "--end-time-zone", "America/New_York"},
+			"would end at 2026-10-14 11:00 America/New_York, before it starts at 2026-10-14 09:00 America/Los_Angeles"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, requests := zoneServer(t, zoneFixture{accountZone: "America/New_York"})
+			args := append([]string{"event", "add", "Flight", "--calendar", "9", "--starts-on", "2026-10-14"}, tt.args...)
+			_, err := runJSONCommand(t, handler, args...)
+			var cliErr *apierr.Error
+			if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, tt.want) {
+				t.Fatalf("error = %v, want a usage error containing %q", err, tt.want)
+			}
+			if got := requests.writes.Load(); got != 0 {
+				t.Errorf("writes = %d, want none", got)
+			}
+		})
+	}
+}
+
+// --end-time-zone on an edit keeps the moment of an end nobody retyped: 09:00Z is 11:00 in
+// Zagreb and 10:00 in London. A retyped end is read in the zone named.
+func TestEventsEditEndTimeZoneKeepsTheEndsMoment(t *testing.T) {
+	requests := runZoneEdit(t, zoneFixture{event: zonedEventJSON}, "--end-time-zone", "Europe/London")
+	form := requests.written(t)
+	wantZones(t, form, "Europe/Zagreb", "Europe/London")
+	if got := form.Get("calendar_event[starts_at_time]"); got != "10:00:00" {
+		t.Errorf("starts_at_time = %q, want 10:00:00", got)
+	}
+	if got := form.Get("calendar_event[ends_at_time]"); got != "10:00:00" {
+		t.Errorf("ends_at_time = %q, want 10:00:00", got)
+	}
+
+	requests = runZoneEdit(t, zoneFixture{event: zonedEventJSON}, "--end-time", "14:30", "--end-time-zone", "Europe/London")
+	form = requests.written(t)
+	wantZones(t, form, "Europe/Zagreb", "Europe/London")
+	if got := form.Get("calendar_event[ends_at_time]"); got != "14:30:00" {
+		t.Errorf("ends_at_time = %q, want 14:30:00", got)
+	}
+}
+
+// A zoneless event has no start zone for an end zone to sit beside, and the SDK would send
+// the end's for both, moving the start. It needs --time-zone too.
+func TestEventsEditEndTimeZoneOnAZonelessEvent(t *testing.T) {
+	handler, requests := zoneServer(t, zoneFixture{event: zonelessEventJSON, accountZone: "America/New_York"})
+	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-10-14", "--end-time-zone", "Europe/London")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "the event has no time zone") {
+		t.Fatalf("error = %v, want the zoneless event refused", err)
+	}
+	if got := requests.writes.Load(); got != 0 {
+		t.Errorf("writes = %d, want none", got)
+	}
+
+	// 14:00Z is 10:00 in New York; 15:00Z is 16:00 in London.
+	requests = runZoneEdit(t, zoneFixture{event: zonelessEventJSON}, "--time-zone", "America/New_York", "--end-time-zone", "Europe/London")
+	form := requests.written(t)
+	wantZones(t, form, "America/New_York", "Europe/London")
+	if got := form.Get("calendar_event[starts_at_time]"); got != "10:00:00" {
+		t.Errorf("starts_at_time = %q, want 10:00:00", got)
+	}
+	if got := form.Get("calendar_event[ends_at_time]"); got != "16:00:00" {
+		t.Errorf("ends_at_time = %q, want 16:00:00", got)
+	}
+}

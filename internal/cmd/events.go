@@ -33,7 +33,7 @@ func newEventsCommand() *eventsCommand {
 		Use:   "event",
 		Short: "Read and manage calendar events",
 		Annotations: map[string]string{
-			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY; without a date they, and list's window, start from today in the HEY account's time zone. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series. add and edit read clock times, and today when --starts-on is left out, in the HEY account's time zone unless --time-zone names one, and refuse when they need it and the account has none; an edit keeps a zoned event's zone and leaves a zoneless event zoneless. list, day and week answer a flat array of events in data. Each event has id, title, starts_at, ends_at and calendar; all_day and recurring appear only when true, starts_at_time_zone and ends_at_time_zone only on a zoned timed event, and description (the notes, as plain text), location, url, attached_entry and reminders only when set.",
+			"agent_notes": "Subcommands: list, day, week, add, edit, delete. \"What's on the schedule today?\" is answered by day, not list: day and week read the span as HEY draws it, with a repeating event expanded into the occurrences inside it, over the calendars switched on in HEY; without a date they, and list's window, start from today in the HEY account's time zone. list reads what calendars hold — every calendar unless --calendar names one — and a repeating event is one row, its series, on the day the series began. An edit is not a patch on HEY's side: it resends the notes, location, link, attached email, reminders and time zones the event already carries, so notes lose their formatting and a countdown is removed unless --countdown names one again. edit <series id> changes a whole series; one day of it is edit <series id> --occurrence <occurrence_id from day/week> --apply-to current|future, which keeps the countdown and refuses to flatten notes unless --allow-plain-notes or --notes is given. --apply-to future starts a new series and requires --repeat with its complete schedule; a preset alone means forever and custom copies an existing opaque schedule (a count-based rule can restart its full count). A virtual day of an opaque custom schedule is read from HEY's Day view and refused if that view no longer serves it. A realized custom day cannot be split safely; use a virtual occurrence, edit that day alone, or edit the whole series. A realized preset occurrence moved away from its series time must be moved back with --apply-to current before a future split. Read the day again afterward for the new series id. delete <series id> deletes the whole series; one day of it is delete <series id> --occurrence <occurrence_id> --apply-to current|future, whether or not HEY has written that day out. delete refuses a written-out day's own id, because HEY would draw the day again from the series. add and edit read clock times, and today when --starts-on is left out, in the HEY account's time zone unless --time-zone names one, and refuse when they need it and the account has none; --end-time-zone reads the end in a zone of its own, as a flight's arrival is printed, and needs --end-time on add; an edit keeps a zoned event's zone and leaves a zoneless event zoneless. list, day and week answer a flat array of events in data. Each event has id, title, starts_at, ends_at and calendar; all_day and recurring appear only when true, starts_at_time_zone and ends_at_time_zone only on a zoned timed event, and description (the notes, as plain text), location, url, attached_entry and reminders only when set.",
 		},
 	}
 
@@ -153,12 +153,18 @@ app uses, and so is today when --starts-on is left out, for an all-day event too
 none, the command refuses and asks for --time-zone; an all-day event on a named date needs
 no zone.
 
+--end-time-zone reads --end-time in a zone of its own, so a flight is entered as its tickets
+print it: leaving New York at 22:05 and landing in Singapore at 06:00 two days later. The
+start stays in --time-zone or the account's zone, the end may fall on an earlier date than
+the start, and only the end being before the start is refused. It needs --end-time.
+
 Without --calendar the event goes where HEY puts one by default: the first ordinary
 calendar you own that is not a subscription — never Maybe or the personal calendar.`,
 		Example: `  hey event add "Design review" --starts-on 2026-09-02 --start-time 14:00 --end-time 15:00
   hey event add "Sarah's birthday" --starts-on 2026-09-02
   hey event add "Standup" --start-time 09:15 --repeat every_weekday --calendar 123
-  hey event add "Quarterly planning" --starts-on 2026-09-14 --ends-on 2026-09-15 --remind 1d --remind 1h`,
+  hey event add "Quarterly planning" --starts-on 2026-09-14 --ends-on 2026-09-15 --remind 1d --remind 1h
+  hey event add "SQ23 JFK to SIN" --starts-on 2026-12-16 --start-time 22:05 --time-zone America/New_York --ends-on 2026-12-18 --end-time 06:00 --end-time-zone Asia/Singapore`,
 		RunE: eventsAddCommand.run,
 		Args: cobra.MaximumNArgs(1),
 	}
@@ -217,7 +223,7 @@ func (c *eventsAddCommand) run(cmd *cobra.Command, args []string) error {
 		StartTime:     schedule.startTime,
 		EndTime:       schedule.endTime,
 		StartTimeZone: schedule.zone,
-		EndTimeZone:   schedule.zone,
+		EndTimeZone:   schedule.endZone,
 		Reminders:     reminders,
 		Content: hey.EventContentParams{
 			Notes:    c.fields.notes,
@@ -273,7 +279,9 @@ one unless --countdown names it again.
 Clock times you type are read in the event's own time zone. An event saved without one
 stays without one: typed times are read in your HEY account's zone and sent as the moment
 they name, and the times you do not type keep theirs. --time-zone gives the event that
-zone, keeping the moment of every time you do not type. An all-day event given a time takes
+zone, keeping the moment of every time you do not type. --end-time-zone does the same for the
+end alone, so a flight can land in a zone other than the one it left from; it needs a timed
+event with a zone, and an all-day event made timed needs --end-time with it. An all-day event given a time takes
 the account's zone, starts at 09:00 unless --start-time says otherwise, and runs the
 default hour. If a zone is needed and the account has none, the edit refuses and asks for
 --time-zone. HEY is sent a clock time and a zone, and a clock time in the hour the clocks
@@ -360,6 +368,7 @@ answered.`,
 	flags := eventsEditCommand.cmd.Flags()
 	// An edit only falls back to the account's zone for an event that has none of its own.
 	flags.Lookup("time-zone").Usage = "IANA zone the times are written in, such as America/New_York (defaults to the event's own zone, else your HEY account's)"
+	flags.Lookup("end-time-zone").Usage = "IANA zone the end is written in, when it differs from the start's (defaults to the event's own end zone, else --time-zone)"
 	flags.Lookup("calendar").Usage = "Calendar ID to move the event to"
 	flags.StringVar(&eventsEditCommand.occurrence, "occurrence", "", "One day of a repeating event, by the occurrence_id 'hey event day' serves (<series id>_<YYYY-MM-DD>)")
 	flags.StringVar(&eventsEditCommand.applyTo, "apply-to", "", "How much of the series an --occurrence edit reaches: current (that day alone) or future (that day and every one after it)")
@@ -798,6 +807,7 @@ type eventFields struct {
 	startTime    string
 	endTime      string
 	timeZone     string
+	endTimeZone  string
 	notes        string
 	location     string
 	link         string
@@ -823,6 +833,7 @@ func (f *eventFields) registerFlags(cmd *cobra.Command) {
 	flags.StringVar(&f.startTime, "start-time", "", "Start time (HH:MM)")
 	flags.StringVar(&f.endTime, "end-time", "", "End time (HH:MM, defaults to an hour after the start)")
 	flags.StringVar(&f.timeZone, "time-zone", "", "IANA zone the times are written in, such as America/New_York (defaults to your HEY account's)")
+	flags.StringVar(&f.endTimeZone, "end-time-zone", "", "IANA zone the end time is written in, when it differs from the start's, such as Europe/London (defaults to --time-zone)")
 	flags.StringVar(&f.notes, "notes", "", "Event notes")
 	flags.StringVar(&f.location, "location", "", "Event location")
 	flags.StringVar(&f.link, "link", "", "Meeting or reference URL")
@@ -897,9 +908,22 @@ func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 			return eventSchedule{}, err
 		}
 	}
-	// A new event's ends share one zone, so dates in the wrong order are refused before the
-	// zone is read.
-	if f.startsOn != "" && f.endsOn != "" {
+	if f.endTimeZone != "" {
+		if allDay {
+			return eventSchedule{}, apierr.ErrUsageHint("--end-time-zone is for a timed event, and an all-day event has no end time",
+				"pass --start-time and --end-time, or leave out --end-time-zone")
+		}
+		// An hour after the start is a moment in the start's zone; where it lands in another
+		// is better said than guessed at.
+		if endTime == "" {
+			return eventSchedule{}, apierr.ErrUsageHint("--end-time-zone needs --end-time",
+				"pass --end-time and --ends-on as the end reads in that zone")
+		}
+	}
+	// Ends that share one zone can have their dates checked before the zone is read. An end
+	// in a zone of its own can fall on an earlier date than the start, so only its instant
+	// is checked, below.
+	if f.startsOn != "" && f.endsOn != "" && f.endTimeZone == "" {
 		if err := checkEventDates(f.startsOn, f.endsOn); err != nil {
 			return eventSchedule{}, err
 		}
@@ -936,19 +960,29 @@ func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 			return eventSchedule{}, err
 		}
 	}
-	if err := checkEventDates(startsOn, endsOn); err != nil {
-		return eventSchedule{}, err
+	if f.endTimeZone == "" {
+		if err := checkEventDates(startsOn, endsOn); err != nil {
+			return eventSchedule{}, err
+		}
 	}
 
 	if allDay {
 		return eventSchedule{startsAt: startsOn, endsAt: endsOn, allDay: true}, nil
 	}
+	endZone := clockZone{zone, loc}
+	if f.endTimeZone != "" {
+		endLoc, err := timezone.Load(f.endTimeZone)
+		if err != nil {
+			return eventSchedule{}, errInvalidTimeZone(f.endTimeZone)
+		}
+		endZone = clockZone{f.endTimeZone, endLoc}
+	}
 	schedule := eventSchedule{
 		startsAt: startsOn, endsAt: endsOn,
 		startTime: startTime, endTime: endTime,
-		zone: zone, endZone: zone,
+		zone: zone, endZone: endZone.name,
 	}
-	if err := endsAfterItStarts(schedule, clockZone{zone, loc}, clockZone{zone, loc}); err != nil {
+	if err := endsAfterItStarts(schedule, clockZone{zone, loc}, endZone); err != nil {
 		return eventSchedule{}, err
 	}
 	return schedule, nil
@@ -984,6 +1018,14 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 		}
 		if _, err := timezone.Load(f.timeZone); err != nil {
 			return errInvalidTimeZone(f.timeZone)
+		}
+	}
+	if flags.Changed("end-time-zone") {
+		if f.endTimeZone == "" {
+			return apierr.ErrUsageHint("--end-time-zone needs a time zone", "an IANA time zone name, for example Europe/London")
+		}
+		if _, err := timezone.Load(f.endTimeZone); err != nil {
+			return errInvalidTimeZone(f.endTimeZone)
 		}
 	}
 	return nil
@@ -1165,8 +1207,41 @@ func (z clockZone) readIn(event generated.Recording) *time.Location {
 // repeating series across a change of daylight saving included, as it was saved — so only
 // the times and dates somebody typed are read in the account's zone. An all-day event given
 // a time takes the account's zone, as a new event does. The account is read only when a
-// typed time or date needs it.
+// typed time or date needs it. --end-time-zone then gives the end a zone of its own.
 func (f *eventFields) editZones(ctx context.Context, cmd *cobra.Command, event generated.Recording, allDay bool) (clockZone, clockZone, error) {
+	start, end, err := f.sharedEditZones(ctx, cmd, event, allDay)
+	if err != nil || f.endTimeZone == "" {
+		return start, end, err
+	}
+	return f.ownEndZone(cmd, event, allDay, start)
+}
+
+// ownEndZone is the zone --end-time-zone gives the end of an edited event, keeping the moment
+// of an end nobody retyped. HEY takes an end's zone only beside a start's, so a zoneless event
+// needs --time-zone too: the SDK would otherwise send the end's zone for the start as well,
+// and move a start nobody asked to move.
+func (f *eventFields) ownEndZone(cmd *cobra.Command, event generated.Recording, allDay bool, start clockZone) (clockZone, clockZone, error) {
+	if allDay {
+		return clockZone{}, clockZone{}, apierr.ErrUsageHint("--end-time-zone is for a timed event, and an all-day event has no end time",
+			"pass --start-time and --end-time to make it a timed one, or leave out --end-time-zone")
+	}
+	if start.name == "" {
+		return clockZone{}, clockZone{}, apierr.ErrUsageHint("the event has no time zone, so its end cannot take one of its own",
+			"pass --time-zone for the start as well")
+	}
+	if event.AllDay && !cmd.Flags().Changed("end-time") {
+		return clockZone{}, clockZone{}, apierr.ErrUsageHint("--end-time-zone needs --end-time on an all-day event made timed",
+			"pass --end-time and --ends-on as the end reads in that zone")
+	}
+	loc, err := timezone.Load(f.endTimeZone)
+	if err != nil {
+		return clockZone{}, clockZone{}, errInvalidTimeZone(f.endTimeZone)
+	}
+	return start, clockZone{f.endTimeZone, loc}, nil
+}
+
+// sharedEditZones is the zone each end takes from --time-zone, the event, or the account.
+func (f *eventFields) sharedEditZones(ctx context.Context, cmd *cobra.Command, event generated.Recording, allDay bool) (clockZone, clockZone, error) {
 	if f.timeZone != "" {
 		name, loc, err := f.writeZone(ctx)
 		return clockZone{name, loc}, clockZone{name, loc}, err
