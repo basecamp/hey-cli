@@ -973,7 +973,7 @@ func (f *eventFields) newSchedule(ctx context.Context) (eventSchedule, error) {
 	if f.endTimeZone != "" {
 		endLoc, err := timezone.Load(f.endTimeZone)
 		if err != nil {
-			return eventSchedule{}, errInvalidTimeZone(f.endTimeZone)
+			return eventSchedule{}, errInvalidEndTimeZone(f.endTimeZone)
 		}
 		endZone = clockZone{f.endTimeZone, endLoc}
 	}
@@ -1025,7 +1025,7 @@ func (f *eventFields) validateExplicitScheduleFlags(cmd *cobra.Command) error {
 			return apierr.ErrUsageHint("--end-time-zone needs a time zone", "an IANA time zone name, for example Europe/London")
 		}
 		if _, err := timezone.Load(f.endTimeZone); err != nil {
-			return errInvalidTimeZone(f.endTimeZone)
+			return errInvalidEndTimeZone(f.endTimeZone)
 		}
 	}
 	return nil
@@ -1216,30 +1216,6 @@ func (f *eventFields) editZones(ctx context.Context, cmd *cobra.Command, event g
 	return f.ownEndZone(cmd, event, allDay, start)
 }
 
-// ownEndZone is the zone --end-time-zone gives the end of an edited event, keeping the moment
-// of an end nobody retyped. HEY takes an end's zone only beside a start's, so a zoneless event
-// needs --time-zone too: the SDK would otherwise send the end's zone for the start as well,
-// and move a start nobody asked to move.
-func (f *eventFields) ownEndZone(cmd *cobra.Command, event generated.Recording, allDay bool, start clockZone) (clockZone, clockZone, error) {
-	if allDay {
-		return clockZone{}, clockZone{}, apierr.ErrUsageHint("--end-time-zone is for a timed event, and an all-day event has no end time",
-			"pass --start-time and --end-time to make it a timed one, or leave out --end-time-zone")
-	}
-	if start.name == "" {
-		return clockZone{}, clockZone{}, apierr.ErrUsageHint("the event has no time zone, so its end cannot take one of its own",
-			"pass --time-zone for the start as well")
-	}
-	if event.AllDay && !cmd.Flags().Changed("end-time") {
-		return clockZone{}, clockZone{}, apierr.ErrUsageHint("--end-time-zone needs --end-time on an all-day event made timed",
-			"pass --end-time and --ends-on as the end reads in that zone")
-	}
-	loc, err := timezone.Load(f.endTimeZone)
-	if err != nil {
-		return clockZone{}, clockZone{}, errInvalidTimeZone(f.endTimeZone)
-	}
-	return start, clockZone{f.endTimeZone, loc}, nil
-}
-
 // sharedEditZones is the zone each end takes from --time-zone, the event, or the account.
 func (f *eventFields) sharedEditZones(ctx context.Context, cmd *cobra.Command, event generated.Recording, allDay bool) (clockZone, clockZone, error) {
 	if f.timeZone != "" {
@@ -1259,7 +1235,9 @@ func (f *eventFields) sharedEditZones(ctx context.Context, cmd *cobra.Command, e
 		if err != nil {
 			return clockZone{}, clockZone{}, err
 		}
-		if event.EndsAtTimeZone == "" {
+		// The end's moment is in EndsAt, so a stored end zone that --end-time-zone replaces
+		// is never read, and one this build cannot load is no obstacle to replacing it.
+		if event.EndsAtTimeZone == "" || f.endTimeZone != "" {
 			return start, start, nil
 		}
 		end, err := storedZone(event.EndsAtTimeZone)
@@ -1278,6 +1256,30 @@ func (f *eventFields) sharedEditZones(ctx context.Context, cmd *cobra.Command, e
 		name = ""
 	}
 	return clockZone{name, loc}, clockZone{name, loc}, nil
+}
+
+// ownEndZone is the zone --end-time-zone gives the end of an edited event, keeping the moment
+// of an end nobody retyped. HEY takes an end's zone only beside a start's, so a zoneless event
+// needs --time-zone too: the SDK would otherwise send the end's zone for the start as well,
+// and move a start nobody asked to move.
+func (f *eventFields) ownEndZone(cmd *cobra.Command, event generated.Recording, allDay bool, start clockZone) (clockZone, clockZone, error) {
+	if allDay {
+		return clockZone{}, clockZone{}, apierr.ErrUsageHint("--end-time-zone is for a timed event, and an all-day event has no end time",
+			"pass --start-time and --end-time to make it a timed one, or leave out --end-time-zone")
+	}
+	if start.name == "" {
+		return clockZone{}, clockZone{}, apierr.ErrUsageHint("the event has no time zone, so its end cannot take one of its own",
+			"pass --time-zone for the start as well")
+	}
+	if event.AllDay && !cmd.Flags().Changed("end-time") {
+		return clockZone{}, clockZone{}, apierr.ErrUsageHint("--end-time-zone needs --end-time on an all-day event made timed",
+			"pass --end-time and --ends-on as the end reads in that zone")
+	}
+	loc, err := timezone.Load(f.endTimeZone)
+	if err != nil {
+		return clockZone{}, clockZone{}, errInvalidEndTimeZone(f.endTimeZone)
+	}
+	return start, clockZone{f.endTimeZone, loc}, nil
 }
 
 // storedZone loads a zone an event was saved in.

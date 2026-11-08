@@ -14,6 +14,9 @@ type smokeEvent struct {
 	RecordingID  int64  `json:"recording_id"`
 	Title        string `json:"title"`
 	StartsAt     string `json:"starts_at"`
+	EndsAt       string `json:"ends_at"`
+	StartsAtZone string `json:"starts_at_time_zone"`
+	EndsAtZone   string `json:"ends_at_time_zone"`
 	AllDay       bool   `json:"all_day"`
 	Notes        string `json:"description"`
 	Location     string `json:"location"`
@@ -451,10 +454,69 @@ func TestEventAllDay(t *testing.T) {
 	}
 }
 
+// A flight is entered as its ticket prints it, each end in the zone of its airport, and HEY
+// keeps both. Re-zoning the end on an edit keeps its moment. The start, 14:00Z, is on the 1st
+// in whatever zone the account reads the edit's [date] in.
+func TestEventEndTimeZone(t *testing.T) {
+	uid := uniqueID()
+	title := fmt.Sprintf("Flight to Singapore %s", uid)
+	const day = "2099-06-01"
+
+	stdout, stderr, code := hey(t, "event", "add", title,
+		"--starts-on", day, "--start-time", "10:00", "--time-zone", "America/New_York",
+		"--ends-on", "2099-06-02", "--end-time", "18:00", "--end-time-zone", "Asia/Singapore", "--json")
+	if code != 0 {
+		skipf(t, "event add with --end-time-zone failed (exit %d): %s", code, stderr)
+	}
+	var added Response
+	if err := json.Unmarshal([]byte(stdout), &added); err != nil {
+		t.Fatalf("failed to parse add response: %v", err)
+	}
+	event := dataAs[smokeEvent](t, added)
+	if event.ID == 0 {
+		t.Fatal("add response carries no event ID")
+	}
+	id := fmt.Sprint(event.ID)
+	t.Cleanup(func() { _, _, _ = hey(t, "event", "delete", id) })
+
+	if event.StartsAtZone != "America/New_York" || event.EndsAtZone != "Asia/Singapore" {
+		t.Errorf("zones = %q to %q, want America/New_York to Asia/Singapore", event.StartsAtZone, event.EndsAtZone)
+	}
+	// 10:00 in New York in June is 14:00Z; 18:00 in Singapore is 10:00Z.
+	assertSmokeInstant(t, "starts_at", event.StartsAt, "2099-06-01T14:00:00Z")
+	assertSmokeInstant(t, "ends_at", event.EndsAt, "2099-06-02T10:00:00Z")
+
+	stdout, stderr, code = hey(t, "event", "edit", id, day, "--end-time-zone", "Europe/London", "--json")
+	if code != 0 {
+		skipf(t, "event edit with --end-time-zone failed (exit %d): %s", code, stderr)
+	}
+	var edited Response
+	if err := json.Unmarshal([]byte(stdout), &edited); err != nil {
+		t.Fatalf("failed to parse edit response: %v", err)
+	}
+	updated := dataAs[smokeEvent](t, edited)
+	if updated.StartsAtZone != "America/New_York" || updated.EndsAtZone != "Europe/London" {
+		t.Errorf("zones after edit = %q to %q, want America/New_York to Europe/London", updated.StartsAtZone, updated.EndsAtZone)
+	}
+	assertSmokeInstant(t, "ends_at after edit", updated.EndsAt, "2099-06-02T10:00:00Z")
+}
+
+func assertSmokeInstant(t *testing.T, name, got, want string) {
+	t.Helper()
+	at, err := time.Parse(time.RFC3339, got)
+	wantAt, _ := time.Parse(time.RFC3339, want)
+	if err != nil || !at.Equal(wantAt) {
+		t.Errorf("%s = %q, want %s", name, got, want)
+	}
+}
+
 func TestEventCommandsValidateInput(t *testing.T) {
 	heyFail(t, "event", "add", "--json")
 	heyFail(t, "event", "edit", "--json")
 	heyFail(t, "event", "delete", "--json")
 	heyFail(t, "event", "edit", "not-an-id", "--json")
 	heyFail(t, "event", "delete", "not-an-id", "--json")
+	heyFail(t, "event", "add", "No end time", "--starts-on", "2099-06-01", "--start-time", "09:00",
+		"--end-time-zone", "Europe/London", "--json")
+	heyFail(t, "event", "add", "All day", "--starts-on", "2099-06-01", "--end-time-zone", "Europe/London", "--json")
 }

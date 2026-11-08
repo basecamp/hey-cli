@@ -124,6 +124,21 @@ func wantSchedule(t *testing.T, form url.Values, startsAt, startTime, endsAt, en
 	}
 }
 
+// wantZones checks the zone each end of an event write was sent in.
+func wantZones(t *testing.T, form url.Values, startZone, endZone string) {
+	t.Helper()
+	want := map[string]string{
+		"calendar_event[set_time_zone]":            "1",
+		"calendar_event[starts_at_time_zone_name]": startZone,
+		"calendar_event[ends_at_time_zone_name]":   endZone,
+	}
+	for field, value := range want {
+		if got := form.Get(field); got != value {
+			t.Errorf("%s = %q, want %q", field, got, value)
+		}
+	}
+}
+
 // The reported case: a laptop whose zone Go calls "Local" sent no zone, and HEY read 10:00
 // as UTC — 06:00 in New York. The time is read in the account's zone and the zone is named,
 // whatever this machine's is.
@@ -1106,21 +1121,6 @@ func TestEventsEditDerivesTheEndOfAnAllDayEventMadeTimed(t *testing.T) {
 	}
 }
 
-// wantZones checks the zone each end of an event write was sent in.
-func wantZones(t *testing.T, form url.Values, startZone, endZone string) {
-	t.Helper()
-	want := map[string]string{
-		"calendar_event[set_time_zone]":            "1",
-		"calendar_event[starts_at_time_zone_name]": startZone,
-		"calendar_event[ends_at_time_zone_name]":   endZone,
-	}
-	for field, value := range want {
-		if got := form.Get(field); got != value {
-			t.Errorf("%s = %q, want %q", field, got, value)
-		}
-	}
-}
-
 // A flight is entered as its ticket prints it: leaving New York at 22:05 on the 16th and
 // landing in Singapore at 06:00 on the 18th, each end in its own zone. One flying east to
 // west can land on an earlier date than it left, and only its instants are compared.
@@ -1182,7 +1182,7 @@ func TestEventsAddRefusesAnEndTimeZoneItCannotUse(t *testing.T) {
 		{"no end time", []string{"--start-time", "22:05", "--time-zone", "America/New_York", "--end-time-zone", "Asia/Singapore"}, "--end-time-zone needs --end-time"},
 		{"all day", []string{"--end-time-zone", "Asia/Singapore"}, "an all-day event has no end time"},
 		{"empty", []string{"--start-time", "10:00", "--end-time", "11:00", "--end-time-zone", ""}, "--end-time-zone needs a time zone"},
-		{"unknown", []string{"--start-time", "10:00", "--end-time", "11:00", "--end-time-zone", "Mars/Olympus"}, "invalid time-zone: Mars/Olympus"},
+		{"unknown", []string{"--start-time", "10:00", "--end-time", "11:00", "--end-time-zone", "Mars/Olympus"}, "invalid end-time-zone: Mars/Olympus"},
 		{"ends before it starts", []string{"--start-time", "09:00", "--time-zone", "America/Los_Angeles", "--ends-on", "2026-10-14", "--end-time", "11:00", "--end-time-zone", "America/New_York"},
 			"would end at 2026-10-14 11:00 America/New_York, before it starts at 2026-10-14 09:00 America/Los_Angeles"},
 	}
@@ -1245,5 +1245,27 @@ func TestEventsEditEndTimeZoneOnAZonelessEvent(t *testing.T) {
 	}
 	if got := form.Get("calendar_event[ends_at_time]"); got != "16:00:00" {
 		t.Errorf("ends_at_time = %q, want 16:00:00", got)
+	}
+}
+
+// --end-time-zone replaces the end's stored zone, so one this build cannot load stands in the
+// way of nothing: the end's moment is in ends_at. Without the flag it is still refused.
+func TestEventsEditEndTimeZoneReplacesAStoredEndZoneItCannotLoad(t *testing.T) {
+	event := strings.Replace(zonedEventJSON, `"ends_at_time_zone":"Europe/Zagreb"`, `"ends_at_time_zone":"Mars/Olympus_Mons"`, 1)
+	requests := runZoneEdit(t, zoneFixture{event: event}, "--end-time-zone", "Europe/London")
+	form := requests.written(t)
+	wantZones(t, form, "Europe/Zagreb", "Europe/London")
+	if got := form.Get("calendar_event[ends_at_time]"); got != "10:00:00" {
+		t.Errorf("ends_at_time = %q, want 10:00:00", got)
+	}
+
+	handler, requests := zoneServer(t, zoneFixture{event: event})
+	_, err := runJSONCommand(t, handler, "event", "edit", "4821", "2026-10-14", "--title", "Renamed")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || cliErr.Code != apierr.CodeUsage || !strings.Contains(cliErr.Message, "Mars/Olympus_Mons") {
+		t.Fatalf("error = %v, want a usage error naming the stored zone", err)
+	}
+	if got := requests.writes.Load(); got != 0 {
+		t.Errorf("writes = %d, want none", got)
 	}
 }
