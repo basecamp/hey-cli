@@ -151,7 +151,7 @@ func checkAccountFilter(api API, params map[string]any) error {
 	if value == strconv.FormatInt(accountID, 10) {
 		return nil
 	}
-	return fmt.Errorf("%s %s can't be read here: hey mcp is serving account %d only, and every read goes to that account. "+
+	return fmt.Errorf("%s %s can't be honored here: hey mcp is serving account %d only, and every request goes to that account. "+
 		"Leave %s out, or restart hey mcp with --account all to filter by account", accountFilterParam, value, accountID, accountFilterParam)
 }
 
