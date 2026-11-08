@@ -102,6 +102,8 @@ func newThreadsCommand() *topicCommand {
 			"creator as the entry's author (the external sender for inbound mail) and, when you sent " +
 			"from another address, include that address as sender. Entries also include To/CC/BCC recipients " +
 			"and, for inbound mail, received_via with the exact account delivery addresses HEY recorded. " +
+			"An entry whose message was read also carries its thread's topic_id and screened_in (false while " +
+			"the thread waits in the Screener, or after its sender was screened out), when HEY serves them. " +
 			"An entry's kind is message for mail; a note (comment) or share notice (access_notice) is " +
 			"internal to the thread and never emailed, and the text formats label it so.",
 		Annotations: map[string]string{
