@@ -12,7 +12,7 @@ import (
 
 func loadForTest(t *testing.T) *catalog.Catalog {
 	t.Helper()
-	cat, err := loadCatalog()
+	cat, err := loadCatalog(false)
 	if err != nil {
 		t.Fatalf("catalog must derive cleanly from the vendored model: %v", err)
 	}
