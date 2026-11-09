@@ -56,7 +56,9 @@ func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
 			var manager *auth.Manager
 			var mu sync.Mutex
 			var credentials []string
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var server *httptest.Server
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /auth-retry", func(w http.ResponseWriter, r *http.Request) {
 				credential := r.Header.Get("Authorization")
 				if credential == "" {
 					credential = r.Header.Get("Cookie")
@@ -74,6 +76,24 @@ func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
 					if err := manager.GetStore().Save(manager.CredentialKey(), tt.replacement); err != nil {
 						t.Errorf("replace credentials: %v", err)
 					}
+					// Unrelated root requests can hit the listener between the SDK's
+					// attempts. They must not count as authentication retries.
+					for range 2 {
+						request, err := http.NewRequestWithContext(r.Context(), http.MethodGet, server.URL+"/", nil)
+						if err != nil {
+							t.Errorf("root probe request: %v", err)
+							return
+						}
+						probe, err := server.Client().Do(request)
+						if err != nil {
+							t.Errorf("root probe: %v", err)
+							return
+						}
+						probe.Body.Close()
+						if probe.StatusCode != http.StatusNotFound {
+							t.Errorf("root probe status = %d, want 404", probe.StatusCode)
+						}
+					}
 					http.Error(w, "expired credential", http.StatusUnauthorized)
 				case 2:
 					if credential != tt.second {
@@ -85,7 +105,8 @@ func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
 					t.Errorf("unexpected SDK attempt %d with %q", attempt, credential)
 					http.Error(w, "too many attempts", http.StatusInternalServerError)
 				}
-			}))
+			})
+			server = httptest.NewServer(mux)
 			defer server.Close()
 
 			manager = auth.NewManager(server.URL, server.Client(), configDir)
