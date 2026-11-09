@@ -299,6 +299,7 @@ hey reply --bcc
 hey reply --cc
 hey reply --draft
 hey reply --dry-run
+hey reply --from
 hey reply --message
 hey reply --message-html
 hey reply --replace-recipients

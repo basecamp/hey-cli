@@ -313,13 +313,24 @@ A send HEY refuses is not reported as sent. When the account has reached its sen
 
 A new message from `hey compose` — sent or saved with `--draft` — ends with the sender's HEY name tag, appended the way HEY's own compose form does; HEY puts the tag into the form rather than onto the saved message, so the CLI carries it itself. `--no-name-tag` leaves it off. A reply does not carry one yet.
 
-Choose a new message's sender with `compose --from <email-or-sender-id>`. Discover
+Choose a message's sender with `compose --from <email-or-sender-id>` or
+`reply <topic-id> --from <email-or-sender-id>`. Discover
 addresses and IDs with `hey account senders`; `--account` filters the listing and
 limits sender selection. In All Accounts, an ambiguous address requires a sender
 ID or a specific account. Unknown and unavailable senders fail before reading
 stdin, opening the editor, or uploading attachments.
-The selected sender's active Name Tag is appended unless `--no-name-tag` is set.
-`--from` is currently only for new messages, not `compose --thread-id` replies.
+For new messages, the selected sender's active Name Tag is appended unless
+`--no-name-tag` is set.
+
+`reply --from` and `compose --thread-id <topic-id> --from` select a sender within
+the thread's existing account; they never move a reply to another linked account.
+An explicit `--account` must agree with the thread's account; a saved or environment
+account filter does not override it. An address shared by linked accounts is resolved within the thread's account; duplicates within that
+account require a sender ID. The override changes only the sender, preserving HEY's
+reply subject and recipients (and any explicit `reply --to/--cc/--bcc` overrides).
+Both reply paths support `--draft`; `reply 12345 --dry-run --from billing@example.org`
+prints the selected sender and final recipients without a body, uploads or writes.
+Without `--from`, HEY's reply sender selection and fallback remain unchanged.
 
 With `--from`, compose sends directly as the selected configured sender.
 `--draft` saves with that sender instead, ready for `draft show`, `draft edit`,

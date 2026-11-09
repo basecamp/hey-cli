@@ -54,18 +54,11 @@ func resolveSender(senders []generated.Sender, from string) (generated.Sender, e
 func selectedSender(ctx context.Context, from string, accountID int64) (*hey.Client, generated.Sender, error) {
 	if selected, scoped := sdk.AccountID(); scoped {
 		if accountID != 0 && selected != accountID {
-			return nil, generated.Sender{}, apierr.ErrUsage("the draft belongs to a different account than --account")
+			return nil, generated.Sender{}, apierr.ErrUsage("the message belongs to a different account than --account")
 		}
 		accountID = selected
 	}
-	identity, err := rootSDK.Identity().GetIdentity(ctx)
-	if err != nil {
-		return nil, generated.Sender{}, apierr.FromSDK(err)
-	}
-	if identity == nil {
-		return nil, generated.Sender{}, apierr.ErrAPI(0, "HEY returned no identity data")
-	}
-	sender, err := resolveSender(configuredSenders(identity, accountID), from)
+	sender, err := senderInAccount(ctx, from, accountID)
 	if err != nil {
 		return nil, generated.Sender{}, err
 	}
@@ -74,6 +67,19 @@ func selectedSender(ctx context.Context, from string, accountID int64) (*hey.Cli
 		return nil, generated.Sender{}, apierr.FromSDK(err)
 	}
 	return client, sender, nil
+}
+
+// senderInAccount resolves only within the resource's account, independent of the
+// startup account filter. Callers decide whether that filter constrains the resource.
+func senderInAccount(ctx context.Context, from string, accountID int64) (generated.Sender, error) {
+	identity, err := rootSDK.Identity().GetIdentity(ctx)
+	if err != nil {
+		return generated.Sender{}, apierr.FromSDK(err)
+	}
+	if identity == nil {
+		return generated.Sender{}, apierr.ErrAPI(0, "HEY returned no identity data")
+	}
+	return resolveSender(configuredSenders(identity, accountID), from)
 }
 
 type accountSenderItem struct {
@@ -88,7 +94,7 @@ func newAccountSendersCommand() *cobra.Command {
 		Use:         "senders",
 		Short:       "List configured sender addresses",
 		Args:        cobra.NoArgs,
-		Annotations: map[string]string{"agent_notes": "Lists sender IDs, account IDs, email addresses, and account-default flags. --account limits the list; use an email or sender ID with compose --from or draft edit --from. Does not change the default."},
+		Annotations: map[string]string{"agent_notes": "Lists sender IDs, account IDs, email addresses, and account-default flags. --account limits the list; use an email or sender ID with compose --from, reply --from or draft edit --from. Does not change the default."},
 		Example:     "  hey account senders\n  hey account senders --account 12345 --json",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireAuth(); err != nil {

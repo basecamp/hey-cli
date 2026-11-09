@@ -11,6 +11,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/mail"
 )
 
@@ -24,7 +25,8 @@ type replyRecipients = mail.ReplyRecipients
 // either: HEY never derives one,
 // so a reply sent without it saves drafts that read "No subject" in Drafts.
 // ActingSenderID is the identity the reply goes out as: the sender HEY resolved for
-// the thread, which on a shared or alternate address is not the account default; zero
+// the thread (or an explicit --from override), which on a shared or alternate address
+// is not the account default; zero
 // (the prefill named none, or was unreachable) leaves the SDK on the account default.
 type threadReplyTarget struct {
 	EntryID            int64
@@ -224,6 +226,26 @@ func keepReplyRecipients(addresses []string, excluded, seen map[string]bool) []s
 		kept = append(kept, address)
 	}
 	return kept
+}
+
+// selectReplySender changes only the reply's sender, leaving HEY's subject, recipients
+// and account-bound client intact. Resolve within the thread's account, not across all
+// linked accounts: an address can legitimately be configured in more than one.
+func selectReplySender(ctx context.Context, target *threadReplyTarget, from string) error {
+	// A saved or environment account filter chooses listings, not the account of
+	// a thread addressed by ID. Only an explicit --account may veto that account.
+	if cfg.SourceOf("account_id") == config.SourceFlag {
+		if selected, scoped := sdk.AccountID(); scoped && selected != target.AccountID {
+			return apierr.ErrUsage("the thread belongs to a different account than --account")
+		}
+	}
+	sender, err := senderInAccount(ctx, from, target.AccountID)
+	if err != nil {
+		return err
+	}
+	target.ActingSenderID = sender.Id
+	target.Sender = previewReplySender(sender)
+	return nil
 }
 
 func replySenderForPreview(ctx context.Context, target *threadReplyTarget) (mail.ReplySender, error) {

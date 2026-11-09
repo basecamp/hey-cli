@@ -17,6 +17,7 @@ import (
 
 type replyCommand struct {
 	cmd               *cobra.Command
+	from              string
 	message           string
 	messageHTML       string
 	attachments       []string
@@ -60,6 +61,11 @@ values add or move recipients on those lines; each value can also be comma-separ
 --replace-recipients uses only the explicitly supplied recipients instead. A dry run
 resolves and prints the complete envelope without requiring a message or sending one.
 
+--from selects a configured sender email or ID (see hey account senders) within the
+thread's account; an explicit --account must agree. It works with --draft and --dry-run too.
+Without --from, HEY chooses the reply sender as before. This does not change your
+default sender or the reply's recipients.
+
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
 or a top-level domain HEY does not know — is refused before anything is sent.
 
@@ -77,9 +83,11 @@ If HEY refuses the send — usually because the account has reached its sending 
 it keeps the message as a draft; the command then fails with not_delivered (exit 7),
 naming the draft, which hey draft send sends later.`,
 		Annotations: map[string]string{
-			"agent_notes": "Replies to the latest emailed message in a thread — never a note (kind \"comment\") or share notice (kind \"access_notice\"), which are internal to the thread and never emailed; a thread with no emailed message is refused as not_found. The reply is addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line, minus the acting user's own addresses. Repeatable --to/--cc/--bcc flags merge explicit recipients into that prefill; --replace-recipients uses only the explicit lists. --dry-run is read-only, needs no message, and returns the resolved sender, recipients, subject, account, thread and entry. A dry run does not read the original message body; run --dry-run --json first when changing the envelope. When HEY's reply prefill is unavailable a dry run will not guess the original lists and is refused as a usage error; pass --replace-recipients with explicit --to, --cc or --bcc addresses. A reply HEY cannot address is refused as a usage error unless an explicit --to, --cc or --bcc recipient makes it addressable. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text. Without -m or --message-html the message is read from stdin when stdin is not a terminal, and $EDITOR opens when it is. The message is Markdown; use --message-html to send raw HTML instead. --draft saves the reply as a draft, carries the resolved recipients, and answers the draft ID for hey draft show/edit/send/delete, with app_url, the draft's page in HEY. A send answers the reply's id and the topic_id of the thread it landed on — a new thread when HEY breaks the reply out of this one — as HEY's answer names them. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
+			"agent_notes": "--from selects a configured sender email or ID from account senders within the thread's account; an explicit --account must agree. Works with --draft and --dry-run; without --from, HEY chooses the sender as before. Does not change the default sender or reply recipients. Replies to the latest emailed message in a thread — never a note (kind \"comment\") or share notice (kind \"access_notice\"), which are internal to the thread and never emailed; a thread with no emailed message is refused as not_found. The reply is addressed the way HEY addresses a reply: everyone that entry was addressed to, plus its sender on the To line, minus the acting user's own addresses. Repeatable --to/--cc/--bcc flags merge explicit recipients into that prefill; --replace-recipients uses only the explicit lists. --dry-run is read-only, needs no message, and returns the resolved sender, recipients, subject, account, thread and entry. A dry run does not read the original message body; run --dry-run --json first when changing the envelope. When HEY's reply prefill is unavailable a dry run will not guess the original lists and is refused as a usage error; pass --replace-recipients with explicit --to, --cc or --bcc addresses. A reply HEY cannot address is refused as a usage error unless an explicit --to, --cc or --bcc recipient makes it addressable. Accepts message via -m, stdin, or $EDITOR, plus repeatable --attach files; an attachment can be sent without body text. Without -m or --message-html the message is read from stdin when stdin is not a terminal, and $EDITOR opens when it is. The message is Markdown; use --message-html to send raw HTML instead. --draft saves the reply as a draft, carries the resolved recipients, and answers the draft ID for hey draft show/edit/send/delete, with app_url, the draft's page in HEY. A send answers the reply's id and the topic_id of the thread it landed on — a new thread when HEY breaks the reply out of this one — as HEY's answer names them. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
 		},
 		Example: `  hey reply 12345 -m "Friday works for me — I'll send an agenda."
+  hey reply 12345 --from billing@example.org -m "The revised invoice is ready for review."
+  hey reply 12345 --from billing@example.org --dry-run --json
   hey reply 12345 --to support@example.com -m "The replacement is on the way."
   hey reply 12345 --to support@example.com --replace-recipients --dry-run --json
   hey reply 12345 -m "Attached is the report." --attach ./report.pdf
@@ -89,6 +97,7 @@ naming the draft, which hey draft send sends later.`,
 		Args: recipientsChecked(usageExactOneArg()),
 	}
 
+	replyCommand.cmd.Flags().StringVar(&replyCommand.from, "from", "", "Configured sender email or ID within the thread's account (see hey account senders)")
 	replyCommand.cmd.Flags().StringVarP(&replyCommand.message, "message", "m", "", "Reply message as Markdown (or opens $EDITOR)")
 	replyCommand.cmd.Flags().StringVar(&replyCommand.messageHTML, "message-html", "", "Reply message as raw HTML instead of Markdown")
 	replyCommand.cmd.Flags().StringArrayVar(&replyCommand.attachments, "attach", nil, "File to attach (repeatable)")
@@ -105,6 +114,9 @@ naming the draft, which hey draft send sends later.`,
 }
 
 func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
+	if cmd.Flags().Changed("from") && strings.TrimSpace(c.from) == "" {
+		return apierr.ErrUsage("--from requires a sender email or ID")
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}
@@ -132,6 +144,11 @@ func (c *replyCommand) run(cmd *cobra.Command, args []string) error {
 	target, err := resolve(ctx, threadID)
 	if err != nil {
 		return err
+	}
+	if cmd.Flags().Changed("from") {
+		if err = selectReplySender(ctx, target, c.from); err != nil {
+			return err
+		}
 	}
 	if target.Subject == "" {
 		return apierr.ErrUsage("could not determine the reply subject")

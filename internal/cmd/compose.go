@@ -45,6 +45,11 @@ func newComposeCommand() *composeCommand {
 share notice posted after it is internal and never emailed, and a thread holding nothing
 else is refused.
 
+--from selects a configured sender email or ID (see hey account senders), including
+with --thread-id and --draft. For a reply, the sender must belong to the thread's
+account and an explicit --account must agree. Without --from, HEY chooses the sender as before.
+This does not change your default sender.
+
 A --to, --cc or --bcc address HEY would drop without saying so — one with no domain,
 or a top-level domain HEY does not know — is refused before anything is sent.
 
@@ -64,12 +69,13 @@ it keeps the message as a draft; the command then fails with not_delivered (exit
 naming the draft, which hey draft send sends later.`,
 		Args: recipientsChecked(nil),
 		Annotations: map[string]string{
-			"agent_notes": "--from selects a configured sender email or ID from account senders; --account must agree. --from is only for new messages. --from does not save a default sender. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not; --thread-id answers the thread's latest emailed message, never a note (kind \"comment\") or share notice (kind \"access_notice\"), and a thread with no emailed message is refused as not_found. Repeatable --attach files are uploaded before sending and can be sent without body text. With neither -m nor --message-html the body is read from stdin when stdin is not a terminal, and $EDITOR opens when it is (unless --attach files stand in for a body). The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete, with app_url, the draft's page in HEY. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out. A send answers the new message's id and the topic_id of its thread (for hey thread read), with subject and delayed (true while Undo Send holds it back) — only the fields HEY's answer carries, never guessed. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
+			"agent_notes": "--from selects a configured sender email or ID from account senders; an explicit --account must agree. With --thread-id, the sender must belong to the thread's account. --from does not save a default sender. Starts a new thread with --to (optionally --cc/--bcc), which requires --subject, or replies to an existing one with --thread-id, which does not; --thread-id answers the thread's latest emailed message, never a note (kind \"comment\") or share notice (kind \"access_notice\"), and a thread with no emailed message is refused as not_found. Repeatable --attach files are uploaded before sending and can be sent without body text. With neither -m nor --message-html the body is read from stdin when stdin is not a terminal, and $EDITOR opens when it is (unless --attach files stand in for a body). The body is Markdown; use --message-html to send raw HTML instead. --draft saves instead of sending — recipients become optional — and answers the draft ID for hey draft show/edit/send/delete, with app_url, the draft's page in HEY. A new message ends with the sender's HEY name tag, as one composed in HEY does; --no-name-tag leaves it out. A send answers the new message's id and the topic_id of its thread (for hey thread read), with subject and delayed (true while Undo Send holds it back) — only the fields HEY's answer carries, never guessed. While delayed is true, HEY leaves the message out of its thread, so hey thread read shows the thread without it (a thread it started reads as not found) until Undo Send releases it. A send HEY refuses — usually the account's sending limit — is kept as a draft and fails with not_delivered (exit 7), naming the draft in meta.draft_id; send it later with hey draft send <draft_id>, not by sending again, which only makes another draft.",
 		},
 		Example: `  hey compose --to alice@example.com --subject "Lunch plans" -m "Are you free Friday?"
   hey compose --to alice@example.com --cc bob@example.com --bcc carol@example.org --subject "Kitchen remodel timeline" -m "Cabinets land the week of the 14th."
   hey compose --to alice@example.com --subject "Q3 revenue report" -m "The numbers are attached." --attach ./report.pdf
   hey compose --thread-id 12345 -m "Confirmed — see you then." --attach ./diagram.png
+  hey compose --thread-id 12345 --from billing@example.org -m "The revised invoice is ready for review."
   hey compose --to alice@example.com --subject "Sprint recap" -m "We **shipped** the pagination fix."
   hey compose --to alice@example.com --subject "Newsletter draft" --message-html "<h1>March</h1><p>What we shipped.</p>"
   echo "Notes from the offsite" | hey compose --to bob@example.com --subject "Offsite recap"
@@ -94,8 +100,8 @@ naming the draft, which hey draft send sends later.`,
 }
 
 func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
-	if cmd.Flags().Changed("from") && (strings.TrimSpace(c.from) == "" || c.threadID != "") {
-		return apierr.ErrUsage("--from requires a sender email or ID and is only supported for new messages")
+	if cmd.Flags().Changed("from") && strings.TrimSpace(c.from) == "" {
+		return apierr.ErrUsage("--from requires a sender email or ID")
 	}
 	if err := requireAuth(); err != nil {
 		return err
@@ -110,7 +116,27 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 	summary := sentWithAttachmentsSummary("Message sent", len(c.attachments))
 	var senderClient *hey.Client
 	var sender generated.Sender
-	if cmd.Flags().Changed("from") {
+	var target *threadReplyTarget
+	var topicID int64
+	if c.threadID != "" {
+		var err error
+		topicID, err = strconv.ParseInt(c.threadID, 10, 64)
+		if err != nil {
+			return apierr.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
+		}
+		target, err = resolveThreadReply(ctx, topicID)
+		if err != nil {
+			return err
+		}
+		if cmd.Flags().Changed("from") {
+			if err = selectReplySender(ctx, target, c.from); err != nil {
+				return err
+			}
+		}
+		if !replyHasRecipients(target.Addressed) {
+			return apierr.ErrUsage("could not determine thread recipients; use hey reply with --to, --cc or --bcc")
+		}
+	} else if cmd.Flags().Changed("from") {
 		var err error
 		senderClient, sender, err = selectedSender(ctx, c.from, 0)
 		if err != nil {
@@ -143,18 +169,7 @@ func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
 		message = htmlutil.FromMarkdown(markdownMessage)
 	}
 
-	if c.threadID != "" {
-		topicID, parseErr := strconv.ParseInt(c.threadID, 10, 64)
-		if parseErr != nil {
-			return apierr.ErrUsage(fmt.Sprintf("invalid thread ID: %s", c.threadID))
-		}
-		target, resolveErr := resolveThreadReply(ctx, topicID)
-		if resolveErr != nil {
-			return resolveErr
-		}
-		if !replyHasRecipients(target.Addressed) {
-			return apierr.ErrUsage("could not determine thread recipients; use hey reply with --to, --cc or --bcc")
-		}
+	if target != nil {
 		replySDK := target.client
 		messageWithAttachments, attachErr := attachFilesWithClient(ctx, replySDK, message, c.attachments)
 		if attachErr != nil {

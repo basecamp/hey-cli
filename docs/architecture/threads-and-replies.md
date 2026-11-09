@@ -67,6 +67,16 @@ because both were mis-stated here before:
   `mail.ReplyPrefillFromServer` rather than reimplementing HEY's exclusion rules in
   each caller.
 
+  CLI `reply --from` and `compose --thread-id --from` apply an explicit sender after
+  resolving that same target. `selectReplySender` in `internal/cmd/thread_reply.go`
+  reuses the configured sender lookup, scoped to the thread's account, and changes
+  only `ActingSenderID` and the preview's sender. It preserves the account-bound
+  client, subject and recipients. An explicit `--account` must agree; saved and
+  environment account filters do not veto the thread's account. Selection
+  happens before reading stdin, opening an editor or uploading attachments, and
+  is shared by sends, drafts and reply dry runs. Omitting `--from` leaves HEY's
+  selection and the existing fallback untouched.
+
   The entry a reply — or a forward — answers is not the thread's last entry but HEY's
   `Topic#last_replyable_entry`: `mail.ReplyTarget` in `internal/mail/reply_target.go`,
   which every reply and forward path asks. On HEY for Domains a thread also holds notes
