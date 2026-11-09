@@ -152,6 +152,30 @@ func TestReadOnlyDescriptionsNameNoWriteAction(t *testing.T) {
 	}
 }
 
+// Every domain that writes in full mode and still serves a read gets a
+// read-only blurb: its own was written for the full surface and can describe
+// a write in prose (bundling, designations) that the action-name check above
+// can't see.
+func TestReadOnlyBlurbsCoverEveryWritingDomain(t *testing.T) {
+	full, err := loadCatalog(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range full.Domains {
+		var reads, writes bool
+		for _, op := range d.Operations {
+			if op.ReadOnly {
+				reads = true
+			} else {
+				writes = true
+			}
+		}
+		if _, ok := readOnlyBlurbs[d.Key]; reads && writes && !ok {
+			t.Errorf("domain %s writes and serves reads read-only, but has no read-only blurb", d.Key)
+		}
+	}
+}
+
 func TestServerNarrowsDomains(t *testing.T) {
 	_, session := connect(t, &fakeAPI{}, Config{Domains: []string{"boxes"}})
 

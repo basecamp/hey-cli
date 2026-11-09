@@ -21,7 +21,7 @@ var DomainSpecs = []catalog.DomainSpec{
 		Key:  "boxes",
 		Tags: []string{"Boxes"},
 		Blurb: "HEY mail boxes: the Imbox, The Feed, the Paper Trail, Reply Later, Set Aside and Bubble Up, box groups and designations, and incremental posting changes. " +
-			"HEY sizes each page: The Feed sends 2 threads, then 6, 9 and 12, and the other boxes 30, then 10, so a short page isn't the end of a box; one with next_page has more.",
+			boxPaging,
 	},
 	{
 		Key:   "search",
@@ -55,13 +55,20 @@ var DomainSpecs = []catalog.DomainSpec{
 	},
 }
 
-// readOnlyBlurbs replace the blurbs of domains whose own name writes, for a
-// read-only server: the gateway drops every write action, and a blurb naming
-// one (create_message, toggling a calendar, contact writes) would point the
-// model at an action this server doesn't list. A domain left out keeps its
-// blurb, which names no write; todos, all writes, isn't served read-only.
+// boxPaging says how HEY sizes a box's pages, in either mode.
+const boxPaging = "HEY sizes each page: The Feed sends 2 threads, then 6, 9 and 12, and the other boxes 30, then 10, so a short page isn't the end of a box; one with next_page has more."
+
+// readOnlyBlurbs replace, for a read-only server, the blurb of every domain
+// that has a write action and still serves a read: the gateway drops every
+// write, and a blurb describing one (create_message, designations, bundling,
+// toggling a calendar) would point the model at an action this server doesn't
+// list. TestReadOnlyBlurbsCoverEveryWritingDomain holds that every such domain
+// is here; search writes nothing, and todos, all writes, isn't served
+// read-only.
 var readOnlyBlurbs = map[string]string{
+	"boxes":    "HEY mail boxes: the Imbox, The Feed, the Paper Trail, Reply Later, Set Aside and Bubble Up, box groups, and incremental posting changes. " + boxPaging,
 	"threads":  "HEY email threads: topics and their entries, full message content, and drafts. These actions only read: nothing here sends, saves or changes mail.",
+	"contacts": "HEY contacts and The Screener: contact records and notes, the contacts mail can be addressed to, and the senders waiting in The Screener. These actions only read: nothing here screens, bundles or changes a contact.",
 	"calendar": "HEY Calendars: list calendars and read their recordings (to-dos and events).",
 	"identity": "Your HEY identity: accounts, senders, and preferences.",
 }
