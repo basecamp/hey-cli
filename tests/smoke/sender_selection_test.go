@@ -42,8 +42,9 @@ type senderSent struct {
 	TopicID int64 `json:"topic_id"`
 }
 
-// TestSenderSelection requires an explicitly chosen non-default sender so it never
-// accidentally exercises a developer's external SMTP/Gmail integration. See README.md.
+// TestSenderSelection requires an explicitly chosen non-default sender; it does not
+// detect external SMTP/Gmail/Outlook routes. Configure local SMTP senders as README.md
+// describes before running it.
 func TestSenderSelection(t *testing.T) {
 	from := os.Getenv("HEY_SMOKE_FROM")
 	if from == "" {
@@ -180,6 +181,35 @@ func TestSenderSelection(t *testing.T) {
 		}
 	}
 
+	t.Run("saved-default-account", func(t *testing.T) {
+		accounts := dataAs[[]struct {
+			ID     string `json:"id"`
+			Active bool   `json:"active"`
+		}](t, heyJSON(t, "account", "list"))
+		previous := "all"
+		for _, row := range accounts {
+			if row.Active {
+				previous = row.ID
+			}
+		}
+		heyOK(t, "account", "use", strconv.FormatInt(other.AccountID, 10))
+		t.Cleanup(func() { heyOK(t, "account", "use", previous) })
+		preview := dataAs[senderPreview](t, heyJSON(t, "reply", topic, "--from", from, "--dry-run"))
+		if preview.AccountID != selected.AccountID || preview.From.ID != selected.ID {
+			t.Fatalf("saved account overrode reply preview: %+v", preview)
+		}
+		for _, command := range [][]string{{"reply", topic}, {"compose", "--thread-id", topic}} {
+			want := dataAs[senderPreview](t, heyJSON(t, "reply", topic, "--dry-run"))
+			body := "Please keep the Friday cabinet delivery. " + uniqueID()
+			args := append(append([]string{}, command...), "--from", from, "-m", body)
+			sent := dataAs[senderSent](t, heyJSON(t, args...))
+			if sent.ID <= 0 || sent.TopicID <= 0 {
+				t.Fatalf("send did not identify message and thread: %+v", sent)
+			}
+			outcomes = append(outcomes, outcome{name: command[0] + "/saved-default-account", email: from, body: body, sent: sent, want: want})
+		}
+	})
+
 	// Omitting --from must retain HEY's default selection on both reply paths.
 	for _, command := range [][]string{{"reply", topic}, {"compose", "--thread-id", topic}, {"compose", "--account", account, "--subject", subject, "--to", "alice@example.com"}} {
 		current := dataAs[senderPreview](t, heyJSON(t, "reply", topic, "--dry-run"))
@@ -211,8 +241,8 @@ func TestSenderSelection(t *testing.T) {
 		}
 	})
 
-	if len(outcomes) != 16 {
-		t.Errorf("created %d of 16 expected sender scenarios", len(outcomes))
+	if len(outcomes) != 18 {
+		t.Errorf("created %d of 18 expected sender scenarios", len(outcomes))
 	}
 	// Verify after queuing all sends, so their Undo Send windows elapse together.
 	for _, result := range outcomes {

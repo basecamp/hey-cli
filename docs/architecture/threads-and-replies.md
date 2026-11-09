@@ -71,7 +71,8 @@ because both were mis-stated here before:
   resolving that same target. `selectReplySender` in `internal/cmd/thread_reply.go`
   reuses the configured sender lookup, scoped to the thread's account, and changes
   only `ActingSenderID` and the preview's sender. It preserves the account-bound
-  client, subject and recipients. An explicit `--account` must agree. Selection
+  client, subject and recipients. An explicit `--account` must agree; saved and
+  environment account filters do not veto the thread's account. Selection
   happens before reading stdin, opening an editor or uploading attachments, and
   is shared by sends, drafts and reply dry runs. Omitting `--from` leaves HEY's
   selection and the existing fallback untouched.

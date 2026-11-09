@@ -11,6 +11,7 @@ import (
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/mail"
 )
 
@@ -231,7 +232,14 @@ func keepReplyRecipients(addresses []string, excluded, seen map[string]bool) []s
 // and account-bound client intact. Resolve within the thread's account, not across all
 // linked accounts: an address can legitimately be configured in more than one.
 func selectReplySender(ctx context.Context, target *threadReplyTarget, from string) error {
-	_, sender, err := selectedSender(ctx, from, target.AccountID)
+	// A saved or environment account filter chooses listings, not the account of
+	// a thread addressed by ID. Only an explicit --account may veto that account.
+	if cfg.SourceOf("account_id") == config.SourceFlag {
+		if selected, scoped := sdk.AccountID(); scoped && selected != target.AccountID {
+			return apierr.ErrUsage("the thread belongs to a different account than --account")
+		}
+	}
+	sender, err := senderInAccount(ctx, from, target.AccountID)
 	if err != nil {
 		return err
 	}

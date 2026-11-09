@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -264,6 +265,69 @@ func TestReplyFromWithAccountSelection(t *testing.T) {
 					t.Fatalf("sender resolved outside thread account: %v", writes[0])
 				}
 			})
+		}
+	}
+}
+
+func TestReplyFromUsesThreadAccountInsteadOfSavedDefault(t *testing.T) {
+	for _, command := range [][]string{{"reply", "7"}, {"compose", "--thread-id", "7"}} {
+		for _, mode := range []string{"send", "draft", "preview"} {
+			if command[0] == "compose" && mode == "preview" {
+				continue
+			}
+			for _, account := range []string{"", "9", "all", "8"} {
+				t.Run(command[0]+"/"+mode+"/account="+account, func(t *testing.T) {
+					var writes []draftWrite
+					server := httptest.NewServer(replyFromServer(t, replySenderIdentity, replySenderPrefill, &writes))
+					t.Cleanup(server.Close)
+					dir := t.TempDir()
+					if err := os.MkdirAll(filepath.Join(dir, "hey-cli"), 0700); err != nil {
+						t.Fatal(err)
+					}
+					data, err := json.Marshal(map[string]any{"account_defaults": map[string]string{server.URL: "8"}})
+					if err != nil {
+						t.Fatal(err)
+					}
+					if err = os.WriteFile(filepath.Join(dir, "hey-cli", "config.json"), data, 0600); err != nil {
+						t.Fatal(err)
+					}
+					args := append(append([]string{}, command...), "--from", "billing@example.org")
+					if account != "" {
+						args = append(args, "--account", account)
+					}
+					if mode == "preview" {
+						args = append(args, "--dry-run")
+					} else {
+						args = append(args, "-m", "Friday works.")
+						if mode == "draft" {
+							args = append(args, "--draft")
+						}
+					}
+					out, err := runAccountsCLIWithConfig(t, server, dir, args...)
+					if account == "8" {
+						if err == nil || !strings.Contains(err.Error(), "different account") || len(writes) != 0 {
+							t.Fatalf("explicit mismatch: err=%v writes=%v", err, writes)
+						}
+						return
+					}
+					if err != nil {
+						t.Fatalf("saved default vetoed thread sender: %v", err)
+					}
+					if mode == "preview" {
+						var response struct {
+							Data replyPreview `json:"data"`
+						}
+						if err := json.Unmarshal([]byte(out), &response); err != nil {
+							t.Fatal(err)
+						}
+						if len(writes) != 0 || response.Data.AccountID != 9 || response.Data.From.ID != 88 {
+							t.Fatalf("wrong preview: %s writes=%v", out, writes)
+						}
+					} else if len(writes) != 1 || writes[0].Body["acting_sender_id"] != float64(88) {
+						t.Fatalf("sender resolved outside thread account: %v", writes)
+					}
+				})
+			}
 		}
 	}
 }

@@ -58,14 +58,7 @@ func selectedSender(ctx context.Context, from string, accountID int64) (*hey.Cli
 		}
 		accountID = selected
 	}
-	identity, err := rootSDK.Identity().GetIdentity(ctx)
-	if err != nil {
-		return nil, generated.Sender{}, apierr.FromSDK(err)
-	}
-	if identity == nil {
-		return nil, generated.Sender{}, apierr.ErrAPI(0, "HEY returned no identity data")
-	}
-	sender, err := resolveSender(configuredSenders(identity, accountID), from)
+	sender, err := senderInAccount(ctx, from, accountID)
 	if err != nil {
 		return nil, generated.Sender{}, err
 	}
@@ -74,6 +67,19 @@ func selectedSender(ctx context.Context, from string, accountID int64) (*hey.Cli
 		return nil, generated.Sender{}, apierr.FromSDK(err)
 	}
 	return client, sender, nil
+}
+
+// senderInAccount resolves only within the resource's account, independent of the
+// startup account filter. Callers decide whether that filter constrains the resource.
+func senderInAccount(ctx context.Context, from string, accountID int64) (generated.Sender, error) {
+	identity, err := rootSDK.Identity().GetIdentity(ctx)
+	if err != nil {
+		return generated.Sender{}, apierr.FromSDK(err)
+	}
+	if identity == nil {
+		return generated.Sender{}, apierr.ErrAPI(0, "HEY returned no identity data")
+	}
+	return resolveSender(configuredSenders(identity, accountID), from)
 }
 
 type accountSenderItem struct {

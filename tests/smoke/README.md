@@ -31,7 +31,7 @@ default sender.
 For example, start a temporary local capture:
 
 ```bash
-docker run --rm --name hey-sender-mailpit \
+docker run -d --rm --name hey-sender-mailpit \
   -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit
 ```
 

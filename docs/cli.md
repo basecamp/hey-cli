@@ -324,8 +324,8 @@ For new messages, the selected sender's active Name Tag is appended unless
 
 `reply --from` and `compose --thread-id <topic-id> --from` select a sender within
 the thread's existing account; they never move a reply to another linked account.
-An explicit `--account` must agree with the thread's account. An address shared by
-linked accounts is resolved within the thread's account; duplicates within that
+An explicit `--account` must agree with the thread's account; a saved or environment
+account filter does not override it. An address shared by linked accounts is resolved within the thread's account; duplicates within that
 account require a sender ID. The override changes only the sender, preserving HEY's
 reply subject and recipients (and any explicit `reply --to/--cc/--bcc` overrides).
 Both reply paths support `--draft`; `reply 12345 --dry-run --from billing@example.org`
