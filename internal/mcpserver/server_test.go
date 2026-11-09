@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"log/slog"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -118,6 +119,60 @@ func TestServerReadOnlyDropsWriteActions(t *testing.T) {
 	})
 	if !isError {
 		t.Fatalf("write action succeeded on read-only server: %s", text)
+	}
+}
+
+// A read-only server's tool descriptions name no write action: the gateway
+// drops every one, so a blurb naming create_message would point the model
+// at an action it can't call (readOnlyBlurbs).
+func TestReadOnlyDescriptionsNameNoWriteAction(t *testing.T) {
+	full, err := loadCatalog(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var writes []string
+	for _, d := range full.Domains {
+		for _, op := range d.Operations {
+			if !op.ReadOnly {
+				writes = append(writes, op.Action)
+			}
+		}
+	}
+	if len(writes) == 0 {
+		t.Fatal("the catalog has no write actions to look for")
+	}
+
+	_, session := connect(t, &fakeAPI{}, Config{ReadOnly: true})
+	for name, tool := range mcptest.ListTools(t, session) {
+		for _, write := range writes {
+			if regexp.MustCompile(`\b` + write + `\b`).MatchString(tool.Description) {
+				t.Errorf("%s's read-only description names %s", name, write)
+			}
+		}
+	}
+}
+
+// Every domain that writes in full mode and still serves a read gets a
+// read-only blurb: its own was written for the full surface and can describe
+// a write in prose (bundling, designations) that the action-name check above
+// can't see.
+func TestReadOnlyBlurbsCoverEveryWritingDomain(t *testing.T) {
+	full, err := loadCatalog(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range full.Domains {
+		var reads, writes bool
+		for _, op := range d.Operations {
+			if op.ReadOnly {
+				reads = true
+			} else {
+				writes = true
+			}
+		}
+		if _, ok := readOnlyBlurbs[d.Key]; reads && writes && !ok {
+			t.Errorf("domain %s writes and serves reads read-only, but has no read-only blurb", d.Key)
+		}
 	}
 }
 

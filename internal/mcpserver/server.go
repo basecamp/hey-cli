@@ -46,7 +46,7 @@ func New(api API, cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("mcpserver: API client is required")
 	}
 
-	cat, err := loadCatalog()
+	cat, err := loadCatalog(cfg.ReadOnly)
 	if err != nil {
 		return nil, fmt.Errorf("derive catalog: %w", err)
 	}

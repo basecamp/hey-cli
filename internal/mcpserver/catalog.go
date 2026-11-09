@@ -23,15 +23,16 @@ import (
 //go:embed model/behavior-model.json model/openapi.json
 var modelFS embed.FS
 
-// loadCatalog derives hey's catalog from the embedded model snapshot.
-func loadCatalog() (*catalog.Catalog, error) {
+// loadCatalog derives hey's catalog from the embedded model snapshot, with
+// the blurbs a read-only server serves when readOnly (domainSpecs).
+func loadCatalog(readOnly bool) (*catalog.Catalog, error) {
 	model, err := fs.Sub(modelFS, "model")
 	if err != nil {
 		return nil, fmt.Errorf("embedded model: %w", err)
 	}
 	return catalog.Load(catalog.Spec{
 		ToolPrefix: "hey_",
-		Domains:    DomainSpecs,
+		Domains:    domainSpecs(readOnly),
 		Model:      model,
 	})
 }
