@@ -54,7 +54,7 @@ func resolveSender(senders []generated.Sender, from string) (generated.Sender, e
 func selectedSender(ctx context.Context, from string, accountID int64) (*hey.Client, generated.Sender, error) {
 	if selected, scoped := sdk.AccountID(); scoped {
 		if accountID != 0 && selected != accountID {
-			return nil, generated.Sender{}, apierr.ErrUsage("the draft belongs to a different account than --account")
+			return nil, generated.Sender{}, apierr.ErrUsage("the message belongs to a different account than --account")
 		}
 		accountID = selected
 	}
@@ -88,7 +88,7 @@ func newAccountSendersCommand() *cobra.Command {
 		Use:         "senders",
 		Short:       "List configured sender addresses",
 		Args:        cobra.NoArgs,
-		Annotations: map[string]string{"agent_notes": "Lists sender IDs, account IDs, email addresses, and account-default flags. --account limits the list; use an email or sender ID with compose --from or draft edit --from. Does not change the default."},
+		Annotations: map[string]string{"agent_notes": "Lists sender IDs, account IDs, email addresses, and account-default flags. --account limits the list; use an email or sender ID with compose --from, reply --from or draft edit --from. Does not change the default."},
 		Example:     "  hey account senders\n  hey account senders --account 12345 --json",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := requireAuth(); err != nil {
