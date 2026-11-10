@@ -115,11 +115,11 @@ func logoutMCP(cmd *cobra.Command) error {
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 	defer cancel()
-	revokeErr := mcpAuthMgr.Revoke(ctx)
-	if revokeErr != nil {
+	revokeErr, err := mcpAuthMgr.LogoutRevoking(ctx)
+	if warnRevocationFailed(revokeErr) {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: couldn't revoke hey mcp's sign-in at HEY (%v); remove HEY MCP (local) in HEY's Connected Apps\n", revokeErr)
 	}
-	if err := mcpAuthMgr.Logout(); err != nil {
+	if err != nil {
 		return apierr.ErrAuth(fmt.Sprintf("could not clear hey mcp's credentials: %v", err))
 	}
 	return writeMutationLine(cmd, "hey mcp signed out.", "hey mcp signed out",
