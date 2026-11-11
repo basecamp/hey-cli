@@ -46,6 +46,8 @@ EXIT CODES
   7  An API, server, or local operational failure occurred, or HEY kept a
      message as a draft instead of sending it (not_delivered).
   8  The request matched more than one resource.
+  9  Pending: the HEY app took the request and waits in its window for you to
+     confirm it (hey local send). Nothing has happened yet.
 
 JSON failures also carry a machine-readable error code and an actionable hint when one is available.`,
 		},
@@ -59,6 +61,7 @@ CONNECTION & AUTHENTICATION
   HEY_MCP_CLIENT_ID  Override the HEY MCP (local) client id hey auth login --mcp signs in as.
   HEY_BASE_URL       Override the HEY server URL.
   HEY_ACCOUNT_ID     Select a linked mail account ID or all.
+  HEY_LOCAL_SOCKET   The HEY app's socket for hey local, in place of $XDG_RUNTIME_DIR/hey/agent.sock.
   HEY_NO_KEYRING     Store credentials in the config directory instead of a keyring.
 
 INTERACTION & DIAGNOSTICS

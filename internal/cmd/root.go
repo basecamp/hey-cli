@@ -239,6 +239,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newHeyCommand().cmd)
 	root.AddCommand(newSkillCommand().cmd)
 	root.AddCommand(newMCPCommand().cmd)
+	root.AddCommand(newLocalCommand().cmd)
 	root.AddCommand(newHelpTopicCommands()...)
 	root.AddCommand(newCommandsCommand())
 	root.AddCommand(newShellCompletionCommand())
@@ -262,6 +263,8 @@ func commandSkipsCredentialMigration(cmd *cobra.Command) bool {
 	switch parts[1] {
 	case "skill":
 		return true
+	case "local":
+		return true // hey local talks to the app on this computer and holds no credential
 	case "setup":
 		return len(parts) > 2 // the wizard itself persists onboarded; subcommands touch only agent files
 	default:
@@ -275,7 +278,7 @@ func commandUsesAccountScope(cmd *cobra.Command) bool {
 		return true
 	}
 	switch parts[1] {
-	case "account", "auth", "commands", "config", "doctor", "login", "logout", "setup", "shell-completion", "skill", "upgrade", "version":
+	case "account", "auth", "commands", "config", "doctor", "local", "login", "logout", "setup", "shell-completion", "skill", "upgrade", "version":
 		return false
 	case "mcp":
 		// hey mcp scopes its own clients, on its own credential (mcp.go): the shared
@@ -290,6 +293,10 @@ func Execute() {
 	root := newRootCmd()
 
 	err := root.Execute()
+	if errors.Is(err, output.ErrPending) {
+		// The command already wrote its answer: pending is not a failure to report.
+		os.Exit(output.ExitPending)
+	}
 	if err != nil {
 		err = normalizeCobraError(err)
 		if writer == nil {

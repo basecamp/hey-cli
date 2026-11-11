@@ -281,6 +281,17 @@ hey label view
 hey label view --all
 hey label view --limit
 hey label view --page
+hey local
+hey local --socket
+hey local call
+hey local call --arg
+hey local imbox
+hey local screener
+hey local screener approve
+hey local screener deny
+hey local screener list
+hey local send
+hey local tools
 hey login
 hey login --cookie
 hey login --mcp

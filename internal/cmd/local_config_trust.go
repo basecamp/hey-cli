@@ -60,6 +60,9 @@ func commandIgnoresLocalConfig(cmd *cobra.Command) bool {
 	switch parts[1] {
 	case "skill":
 		return true
+	case "local":
+		// hey local talks to the app on this computer, never to a server or an account.
+		return true
 	case "setup":
 		// The wizard itself uses the effective server; its subcommands
 		// (agents, claude, codex, omarchy) touch only local files and must

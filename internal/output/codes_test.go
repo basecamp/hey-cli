@@ -88,6 +88,9 @@ func TestExitCodeForEveryCodeAnErrorCanCarry(t *testing.T) {
 		// standard library or a dependency still has to exit with something.
 		{errors.New("a plain error nobody wrapped"), ExitUsage},
 		{fmt.Errorf("wrapped: %w", apierr.ErrNotFound("topic", "3011")), ExitNotFound},
+		// A send waiting in HEY's window is neither done nor failed, and exits as neither.
+		{ErrPending, ExitPending},
+		{fmt.Errorf("sent to the app: %w", ErrPending), ExitPending},
 	}
 
 	for _, tt := range tests {

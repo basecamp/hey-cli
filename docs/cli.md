@@ -362,6 +362,15 @@ Snippets are named reusable email content, separate from clips saved out of rece
 
 Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. Moving to any of them but Imbox marks the threads seen, and a thread that cannot be replied to is silently not moved to Reply Later. Reply Later is a box rather than a separate flag: moving a Reply Later thread to Imbox removes Reply Later, preserves its seen state, and leaves a seen thread in Previously Seen. It does not return the thread to the box it occupied before Reply Later. A bundle row is refused rather than moved: it stands in for one sender's whole stream in the box they are delivered to, so moving it leaves nothing there for their next email to join and it arrives unbundled instead. Group or ungroup a sender with `hey contact bundle` and `hey contact unbundle`, and read a bundle with `hey bundle view`. Bubble Up has its own commands: `hey bubble up` raises a thread right away with `--now`, on a date with `--on` (HEY resurfaces it at 08:00 UTC that day, or 18:00 UTC when the date is today in UTC), or at 08:00 UTC tomorrow, the next Saturday, or next Monday with `--tomorrow`, `--weekend`, and `--next-week`; `hey bubble pop` cancels one, moving the thread to the Imbox and marking it seen rather than returning it to its original box. `hey bubble list` shows both buckets — the threads back in the Imbox after bubbling up and the ones still scheduled, each with when it resurfaces. Trashing a shared thread removes your access instead of deleting it for everyone. Ignoring marks a thread seen and leaves it in its box; while it is ignored `hey unseen` has no effect, and `hey stop-ignoring` resumes notifications but leaves it seen.
 
+## The HEY app on your computer
+
+`hey local` asks the HEY desktop app on this computer to act for you, through the door it
+opens while "Let agents use HEY" is on in its Settings: `hey local imbox`,
+`hey local screener list|approve|deny`, `hey local send`, and `hey local call` for any
+command `hey local tools` lists. It reaches the app alone, never HEY's servers, and needs
+no sign-in. A send waits in the HEY window for you to press Send and exits 9, pending.
+The effects, the socket and the exit codes are in [agents.md](agents.md#the-hey-app-on-your-computer-hey-local).
+
 ## Watching for changes
 
 ```bash

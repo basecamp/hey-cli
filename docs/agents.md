@@ -2,8 +2,9 @@
 
 hey-cli is built to be driven by an agent as readily as by a person: every command that returns
 data answers `--json`, the exit codes are stable (`hey help exit-codes`), and `hey commands --json`
-describes the whole surface. This page covers the two integrations that ship with it: an
-agent skill for Claude Code and Codex, and an MCP server.
+describes the whole surface. This page covers the integrations that ship with it: an
+agent skill for Claude Code and Codex, an MCP server, and `hey local`, which asks the HEY
+app on your computer to act for you.
 
 ## Agent skill and Claude Code plugin
 
@@ -156,3 +157,53 @@ Earlier releases delivered mail when a call omitted `entry.status`; these action
 save drafts only. `describe` for the draft actions serves the draft-only schema, and the
 `hey_threads` tool description says the same. A person can still send any draft from HEY
 or with `hey draft send <draft_id>`.
+
+## The HEY app on your computer: `hey local`
+
+`hey local` talks to the HEY desktop app running on your computer rather than to HEY's
+servers. The app runs its own commands over the mail it holds, as you would in its window,
+so `hey local` needs no sign-in of its own and nothing it reads is marked seen.
+
+The app lets agents in only while "Let agents use HEY" is on in its Settings (General). It
+is off by default. While it is on, the app listens on a Unix socket at
+`$XDG_RUNTIME_DIR/hey/agent.sock`, owner-only, and turns away a connection from any other
+user account. With the setting off or the app closed there is no socket, and `hey local`
+fails with exit 6 and says to turn it on. `--socket <path>` or `HEY_LOCAL_SOCKET` points it
+at another socket; with neither, and no absolute `XDG_RUNTIME_DIR`, it asks for one rather
+than guess.
+
+```bash
+hey local tools                        # what the app offers now, and what each does
+hey local imbox                        # the Imbox, marking nothing seen
+hey local screener list                # who waits in The Screener, and who was decided
+hey local screener deny 42             # screen sender 42 out; undo with approve
+hey local send 1731280000123           # ask to send a saved draft: you confirm it in HEY
+hey local call screener.decide --arg sender=42 --arg decision=in
+```
+
+Each command the app offers names its effect, and the effect decides what happens:
+
+| Effect | What happens | Commands |
+|--------|--------------|----------|
+| `read` | Runs, and changes nothing | `imbox.list`, `screener.list` |
+| `reversible` | Runs at once, and can be undone | `screener.decide` |
+| `reaches_people` | Waits in the HEY window until you press Send there | `message.send` |
+
+Nothing that can't be undone, like emptying Trash or Spam, is offered at all. A send never
+goes from `hey local`: the app shows you the sending address, recipients, subject, body
+and files exactly as they would go, and sends only when you press Send in its window.
+`hey local send` then exits 9 and says "Waiting in HEY": neither done (0) nor failed. Its
+JSON envelope carries `meta.status: "pending"`, the confirmation's id and what you were
+shown. No command or flag here can confirm it.
+
+`hey local call <command>` runs any command `hey local tools` lists. Arguments come as a
+JSON object, as `--arg name=value` pairs, or both, the pairs over the object; a value is
+read as JSON where it is JSON, so `sender=42` is a number and `decision=out` a word.
+A command the app refuses fails with its reason in the message, and in the JSON error's
+`meta.refusal`, which lists the ids it would take where an id was wrong.
+
+The wire is plain MCP: JSON-RPC 2.0, one message per line, `initialize`, then `tools/list`
+and `tools/call`. The app's door is built for Linux first. A Mac has no socket yet: there,
+HEY's sign-in sits behind a Keychain prompt, which a socket any program can reach would let
+it skip, so the Mac app will first ask you to approve each agent and check the signature
+of the program calling.
