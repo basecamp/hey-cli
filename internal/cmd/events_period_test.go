@@ -367,27 +367,17 @@ func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
 	}
 }
 
-// inLocalZone pins the process's local zone so the suite reads the same wherever it runs.
-func inLocalZone(t *testing.T, offsetHours int) {
-	t.Helper()
-	local := time.Local
-	time.Local = time.FixedZone(fmt.Sprintf("UTC%+d", offsetHours), offsetHours*60*60)
-	t.Cleanup(func() { time.Local = local })
-}
-
-// The listing reads in the order HEY draws the span: each day's all-day band first, then
-// the timed events by clock. HEY's JSON is always UTC, so east of Greenwich a 23:30Z event
-// belongs to the next local day — stamped-midnight instants alone would draw it above that
-// day's all-day band, and a small --limit could keep the wrong visual row.
+// The command puts the all-day band above timed events on the reader's day. Build
+// the timed fixture in the host's zone; fixed-zone day crossings are covered below.
 func TestEventsDaySortsTheAllDayBandFirst(t *testing.T) {
-	inLocalZone(t, 2)
+	start := time.Date(2026, 9, 2, 1, 30, 0, 0, time.Local)
 	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"kind":"day","starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T23:59:59Z","recordings":{`+
+		_, _ = fmt.Fprintf(w, `{"kind":"day","starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T23:59:59Z","recordings":{`+
 			`"Calendar::Event":[`+
-			`{"id":77,"title":"Late night sync","starts_at":"2026-09-01T23:30:00Z","ends_at":"2026-09-02T00:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}},`+
+			`{"id":77,"title":"Late night sync","starts_at":%q,"ends_at":%q,"type":"Calendar::Event","calendar":{"id":9,"name":"Work"}},`+
 			`{"id":88,"title":"Company holiday","all_day":true,"starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T00:00:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}}`+
-			`]}}`)
+			`]}}`, start.UTC().Format(time.RFC3339), start.Add(time.Hour).UTC().Format(time.RFC3339))
 	}), "event", "day", "2026-09-02")
 	if err != nil {
 		t.Fatalf("execute event day: %v", err)
@@ -402,15 +392,59 @@ func TestEventsDaySortsTheAllDayBandFirst(t *testing.T) {
 	}
 }
 
-// A styled boundary reads on the reader's clock — HEY's JSON is always UTC — while an
-// all-day date is the day it names and does not shift.
-func TestEventBoundaryDrawsTheReadersClock(t *testing.T) {
-	inLocalZone(t, 2)
-	if got := eventBoundary(time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC), false); got != "2026-09-02T16:00" {
-		t.Errorf("timed boundary = %q, want the reader's 16:00", got)
+// HEY serves UTC instants, but each local day's all-day band comes before its
+// timed events. A UTC date comparison or an instant-only sort breaks this order.
+func TestSortEventsByStartUsesTheReadersDay(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		offsetHours int
+		timedStart  time.Time
+	}{
+		{"east crosses into tomorrow", 2, time.Date(2026, 9, 1, 23, 30, 0, 0, time.UTC)},
+		{"west crosses into yesterday", -5, time.Date(2026, 9, 3, 0, 30, 0, 0, time.UTC)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			location := time.FixedZone(tt.name, tt.offsetHours*60*60)
+			day := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
+			events := []generated.Recording{
+				{Title: "Late night sync", StartsAt: tt.timedStart},
+				{Title: "Next day off", AllDay: true, StartsAt: day.AddDate(0, 0, 1)},
+				{Title: "Company holiday", AllDay: true, StartsAt: day},
+				{Title: "Previous day off", AllDay: true, StartsAt: day.AddDate(0, 0, -1)},
+			}
+			sortEventsByStart(events, location)
+			want := []string{"Previous day off", "Company holiday", "Late night sync", "Next day off"}
+			for i, title := range want {
+				if events[i].Title != title {
+					t.Errorf("event %d = %q, want %q", i, events[i].Title, title)
+				}
+			}
+		})
 	}
-	if got := eventBoundary(time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC), true); got != "2026-09-02" {
-		t.Errorf("all-day boundary = %q, want the unshifted day", got)
+}
+
+// A styled boundary reads on the reader's clock, crossing dates when necessary,
+// while an all-day date is the UTC day HEY names and does not shift.
+func TestEventBoundaryDrawsTheReadersClock(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		offsetHours int
+		at          time.Time
+		allDay      bool
+		want        string
+	}{
+		{"east clock", 2, time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC), false, "2026-09-02T16:00"},
+		{"east next day", 2, time.Date(2026, 9, 2, 23, 30, 0, 0, time.UTC), false, "2026-09-03T01:30"},
+		{"west previous day", -5, time.Date(2026, 9, 2, 0, 30, 0, 0, time.UTC), false, "2026-09-01T19:30"},
+		{"east all day", 2, time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC), true, "2026-09-02"},
+		{"west all day", -5, time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC), true, "2026-09-02"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			location := time.FixedZone(tt.name, tt.offsetHours*60*60)
+			if got := eventBoundary(tt.at, tt.allDay, location); got != tt.want {
+				t.Errorf("boundary = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
