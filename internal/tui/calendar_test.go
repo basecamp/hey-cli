@@ -5,6 +5,8 @@ import (
 	"image/color"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -478,7 +480,8 @@ func TestCalendarViewFetchesAroundTheCurrentDay(t *testing.T) {
 	}
 }
 
-// The week reads the week the day falls in — one request, not seven days' worth.
+// The week reads the week the day falls in and the one UTC day west of UTC reaches into —
+// two requests, not seven days' worth.
 func TestCalendarViewReadsTheWeekForTheWeekSpan(t *testing.T) {
 	var mu sync.Mutex
 	var paths []string
@@ -495,14 +498,20 @@ func TestCalendarViewReadsTheWeekForTheWeekSpan(t *testing.T) {
 	vc.sdk = hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
 	v := newCalendarView(vc)
 	v.Resize(80, 30)
-	v.now = func() time.Time { return time.Date(2025, 3, 9, 12, 0, 0, 0, time.UTC) }
+	zone, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skipf("time zone database unavailable: %v", err)
+	}
+	v.now = func() time.Time { return time.Date(2025, 3, 9, 12, 0, 0, 0, zone) }
 	v.viewMode = viewWeek
 
 	v.requestRecordings()()
 	mu.Lock()
 	defer mu.Unlock()
-	if len(paths) != 1 || paths[0] != "/calendar/weeks/2025-03-09.json" {
-		t.Errorf("paths = %v, want one read of the week", paths)
+	sort.Strings(paths)
+	want := []string{"/calendar/days/2025-03-10.json", "/calendar/weeks/2025-03-09.json"}
+	if !slices.Equal(paths, want) {
+		t.Errorf("paths = %v, want %v", paths, want)
 	}
 }
 

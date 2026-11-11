@@ -15,13 +15,37 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
+func emptyDayJSON(date string) string {
+	return `{"kind":"day","starts_at":"` + date + `T00:00:00Z","ends_at":"` + date + `T23:59:59Z","recordings":{}}`
+}
+
+func withLocalDays(days map[string]string, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/identity.json" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"id":1,"name":"Jason Fried","time_zone":"UTC"}`)
+			return
+		}
+		if r.Method == http.MethodGet {
+			date := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/calendar/days/"), ".json")
+			if body, ok := days[date]; ok {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, body)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // A repeating event is one row on a calendar, so `hey event list` answers it on the day the
 // series began. A day is HEY's own expansion: the occurrence falls on the day asked for,
 // carrying that day's times, and everything that is not an event stays out of the answer.
 // HEY serves the occurrence virtual — no id of its own, the series in parent_id — and the
 // row resolves that to the series id, which is what edit and delete take.
 func TestEventsDayExpandsRecurringEvents(t *testing.T) {
-	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	neighbours := map[string]string{"2026-09-01": emptyDayJSON("2026-09-01"), "2026-09-03": emptyDayJSON("2026-09-03")}
+	response, err := runJSONCommand(t, withLocalDays(neighbours, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/calendar/days/2026-09-02.json" {
 			t.Errorf("request = %s %s, want the day read", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -35,7 +59,7 @@ func TestEventsDayExpandsRecurringEvents(t *testing.T) {
 			`],`+
 			`"Calendar::Habit":[{"id":11,"title":"Morning strength training"}],`+
 			`"Calendar::Todo":[{"id":3,"title":"Send notes"}]}}`)
-	}), "event", "day", "2026-09-02")
+	})), "event", "day", "2026-09-02")
 	if err != nil {
 		t.Fatalf("execute event day: %v", err)
 	}
@@ -69,7 +93,7 @@ func TestEventsPeriodShowsTheEventsCountdown(t *testing.T) {
 		{"week", "/calendar/weeks/2026-09-28.json"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := withLocalDays(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet || r.URL.Path != tt.path {
 					t.Errorf("request = %s %s, want %s", r.Method, r.URL.Path, tt.path)
 					http.NotFound(w, r)
@@ -81,7 +105,7 @@ func TestEventsPeriodShowsTheEventsCountdown(t *testing.T) {
 					`{"id":301,"title":"Calendar countdown check-in","starts_at":"2026-09-28T19:00:00Z","ends_at":"2026-09-28T19:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Personal"}},`+
 					`{"id":302,"title":"Project planning","starts_at":"2026-09-28T21:00:00Z","ends_at":"2026-09-28T21:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Personal"}}],`+
 					`"Calendar::Countdown":[{"id":303,"parent_id":301,"label":"2 days before","starts_at":"2026-09-26T00:00:00Z","ends_at":"2026-09-28T00:00:00Z","type":"Calendar::Countdown"}]}}`)
-			})
+			}))
 
 			response, err := runJSONCommand(t, handler, "event", tt.name, "2026-09-28")
 			if err != nil {
@@ -268,7 +292,8 @@ func TestEventsDayKeepsARealizedOccurrenceID(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	response, err := runJSONCommand(t, handler, "event", "day", "2026-09-15")
+	neighbours := map[string]string{"2026-09-14": emptyDayJSON("2026-09-14"), "2026-09-16": emptyDayJSON("2026-09-16")}
+	response, err := runJSONCommand(t, withLocalDays(neighbours, handler), "event", "day", "2026-09-15")
 	if err != nil {
 		t.Fatalf("execute event day: %v", err)
 	}
@@ -314,7 +339,7 @@ func TestEventsPeriodStyledPublishesOccurrenceIdentifiers(t *testing.T) {
 		{name: "week", period: "week", path: "/calendar/weeks/2026-09-15.json"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			styled, err := runStyledCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			styled, err := runStyledCommand(t, withLocalDays(nil, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method != http.MethodGet || r.URL.Path != tt.path {
 					t.Errorf("request = %s %s, want %s", r.Method, r.URL.Path, tt.path)
 					http.NotFound(w, r)
@@ -324,7 +349,7 @@ func TestEventsPeriodStyledPublishesOccurrenceIdentifiers(t *testing.T) {
 				_, _ = io.WriteString(w, `{"kind":"`+tt.period+`","recordings":{"Calendar::Event":[`+
 					`{"parent_id":204,"occurrence_id":"204_2026-09-15","title":"Standup","starts_at":"2026-09-15T09:15:00Z","ends_at":"2026-09-15T09:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}},`+
 					`{"id":9001,"parent_id":4821,"occurrence_id":"4821_2026-09-13","title":"Design review","starts_at":"2026-09-15T13:30:00Z","ends_at":"2026-09-15T14:30:00Z","type":"Calendar::Event","calendar":{"id":9,"name":"Work"}}]}}`)
-			}), "event", tt.name, "2026-09-15")
+			})), "event", tt.name, "2026-09-15")
 			if err != nil {
 				t.Fatalf("execute event %s: %v", tt.name, err)
 			}
@@ -338,7 +363,8 @@ func TestEventsPeriodStyledPublishesOccurrenceIdentifiers(t *testing.T) {
 }
 
 func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
-	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	neighbours := map[string]string{"2026-08-30": emptyDayJSON("2026-08-30"), "2026-09-07": emptyDayJSON("2026-09-07")}
+	response, err := runJSONCommand(t, withLocalDays(neighbours, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/calendar/weeks/2026-09-02.json" {
 			t.Errorf("request = %s %s, want the week read", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -350,7 +376,7 @@ func TestEventsWeekReadsTheWeekPeriod(t *testing.T) {
 			`{"title":"Standup","starts_at":"2026-09-04T09:15:00Z","ends_at":"2026-09-04T09:30:00Z","type":"Calendar::Event","recurring":true,"parent_id":204,"occurrence_id":"204_2026-09-04","calendar":{"id":9,"name":"Work"}},`+
 			`{"title":"Standup","starts_at":"2026-09-02T09:15:00Z","ends_at":"2026-09-02T09:30:00Z","type":"Calendar::Event","recurring":true,"parent_id":204,"occurrence_id":"204_2026-09-02","calendar":{"id":9,"name":"Work"}}`+
 			`]}}`)
-	}), "event", "week", "2026-09-02")
+	})), "event", "week", "2026-09-02")
 	if err != nil {
 		t.Fatalf("execute event week: %v", err)
 	}
@@ -406,10 +432,10 @@ func TestEventsDaySortsTheAllDayBandFirst(t *testing.T) {
 // all-day date is the day it names and does not shift.
 func TestEventBoundaryDrawsTheReadersClock(t *testing.T) {
 	inLocalZone(t, 2)
-	if got := eventBoundary(time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC), false); got != "2026-09-02T16:00" {
+	if got := eventBoundary(time.Date(2026, 9, 2, 14, 0, 0, 0, time.UTC), false, time.Local); got != "2026-09-02T16:00" {
 		t.Errorf("timed boundary = %q, want the reader's 16:00", got)
 	}
-	if got := eventBoundary(time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC), true); got != "2026-09-02" {
+	if got := eventBoundary(time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC), true, time.Local); got != "2026-09-02" {
 		t.Errorf("all-day boundary = %q, want the unshifted day", got)
 	}
 }
