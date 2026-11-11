@@ -22,14 +22,14 @@ func TestAuthStatus(t *testing.T) {
 func TestAuthToken(t *testing.T) {
 	stdout, _, code := hey(t, "auth", "token")
 	if code != 0 || strings.TrimSpace(stdout) == "" || strings.Contains(stdout, sessionCookie) {
-		t.Fatal("auth token did not return an OAuth bearer token")
+		t.Fatalf("auth token did not return an OAuth bearer token (exit %d; empty=%v; cookie=%v)", code, strings.TrimSpace(stdout) == "", strings.Contains(stdout, sessionCookie))
 	}
 }
 
 func TestAuthTokenStored(t *testing.T) {
 	stdout, _, code := hey(t, "auth", "token", "--stored")
 	if code != 0 || strings.TrimSpace(stdout) == "" || strings.Contains(stdout, sessionCookie) {
-		t.Fatal("auth token --stored did not return an OAuth bearer token")
+		t.Fatalf("auth token --stored did not return an OAuth bearer token (exit %d; empty=%v; cookie=%v)", code, strings.TrimSpace(stdout) == "", strings.Contains(stdout, sessionCookie))
 	}
 }
 

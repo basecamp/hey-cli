@@ -431,7 +431,7 @@ func requireAuth() error {
 			return nil
 		}
 	}
-	if creds, err := authMgr.GetStore().Load(authMgr.CredentialKey()); err == nil && creds.AccessToken == "" && creds.SessionCookie != "" {
+	if creds, err := authMgr.GetStore().Load(authMgr.CredentialKey()); err == nil && creds.AccessToken == "" && creds.RefreshToken == "" && creds.SessionCookie != "" {
 		return apierr.ErrAuth("browser session cookie authentication is no longer supported; sign in again with hey auth login")
 	}
 	notLoggedIn := apierr.ErrAuth("Not logged in")
