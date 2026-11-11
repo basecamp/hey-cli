@@ -493,7 +493,7 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		// Asking again inside the rate limit cannot get through. A token that has
 		// not actually expired is still good, so carry on with it: the SDK's own
 		// retry after a 401 costs one request at most.
-		if creds.ExpiresAt > time.Now().Unix() {
+		if creds.AccessToken != "" && creds.ExpiresAt > time.Now().Unix() {
 			return nil
 		}
 		return errRefreshHeld(until)
