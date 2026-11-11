@@ -26,7 +26,7 @@ func newAuthCommand() *authCommand {
 		Short: "Sign in, sign out, and check login status",
 		Long:  "Sign in to HEY, sign out, or check your login status.",
 		Annotations: map[string]string{
-			"agent_notes": "Data commands reuse stored credentials and refresh expiring OAuth tokens themselves, so run the data command without an auth preflight. Use hey auth status --json only when an explicit check is needed. Never run hey auth login unattended: the browser flow waits for a person, and --token or --cookie is for a human handing over a credential, not something an agent runs on its own. A data command that exits 3 with code auth has no usable credentials; report it rather than signing in.",
+			"agent_notes": "Data commands reuse stored credentials and refresh expiring OAuth tokens themselves, so run the data command without an auth preflight. Use hey auth status --json only when an explicit check is needed. Never run hey auth login unattended: the browser flow waits for a person, and --token is for a human handing over a credential, not something an agent runs on its own. A data command that exits 3 with code auth has no usable credentials; report it rather than signing in.",
 		},
 	}
 
@@ -50,7 +50,6 @@ func newAuthLoginCommand() *cobra.Command {
 func buildLoginCommand(path string) *cobra.Command {
 	var (
 		token     string
-		cookie    string
 		noBrowser bool
 		mcp       bool
 	)
@@ -61,7 +60,7 @@ func buildLoginCommand(path string) *cobra.Command {
 		Long: `Authenticate with the HEY server.
 
 Opens a browser for OAuth authentication against HEY's own OAuth server, using PKCE.
-Use --token or --cookie for non-interactive login.
+Use --token for non-interactive login.
 
 --mcp signs in hey mcp instead, as its own app ("HEY MCP (local)" in HEY's Connected
 Apps), asking to read, write and send but nothing more. Its credential is kept apart
@@ -71,14 +70,13 @@ saves drafts but can't send them.`,
 		Example: strings.Join([]string{
 			"  " + path,
 			"  " + path + " --token YOUR_BEARER_TOKEN",
-			"  " + path + " --cookie SESSION_COOKIE_VALUE",
 			"  " + path + " --no-browser",
 			"  " + path + " --mcp",
 		}, "\n"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if mcp {
-				if token != "" || cookie != "" || cmd.Flags().Changed("token") || cmd.Flags().Changed("cookie") {
-					return apierr.ErrUsage("--mcp signs in through HEY; it takes no --token or --cookie")
+				if token != "" || cmd.Flags().Changed("token") {
+					return apierr.ErrUsage("--mcp signs in through HEY; it takes no --token")
 				}
 				return loginMCP(cmd, noBrowser)
 			}
@@ -90,15 +88,6 @@ saves drafts but can't send them.`,
 				// Replaced credentials orphan whatever the old ones cached.
 				clearHTTPCache(cmd.ErrOrStderr())
 				return writeMutation(cmd, "Logged in with token", map[string]string{"method": "token"})
-			}
-
-			if cookie != "" {
-				if err := authMgr.LoginWithCookie(cookie); err != nil {
-					return apierr.ErrAuth(fmt.Sprintf("could not save cookie: %v", err))
-				}
-				// Replaced credentials orphan whatever the old ones cached.
-				clearHTTPCache(cmd.ErrOrStderr())
-				return writeMutation(cmd, "Logged in with session cookie", map[string]string{"method": "cookie"})
 			}
 
 			ctx, cancel := context.WithTimeout(cmd.Context(), 6*time.Minute)
@@ -126,7 +115,6 @@ saves drafts but can't send them.`,
 	}
 
 	cmd.Flags().StringVar(&token, "token", "", "Pre-generated Bearer token")
-	cmd.Flags().StringVar(&cookie, "cookie", "", "Session cookie value from browser (__Host-session_token, or session_token)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser, print URL instead")
 	cmd.Flags().BoolVar(&mcp, "mcp", false, "Sign in hey mcp with its own credential (read, write and send)")
 
@@ -219,7 +207,13 @@ func newAuthStatusCommand() *cobra.Command {
 			if err != nil && !errors.Is(err, auth.ErrCredentialsNotFound) {
 				return auth.CredentialStorageError("could not read authentication status", err)
 			}
-			if errors.Is(err, auth.ErrCredentialsNotFound) || (creds.AccessToken == "" && creds.SessionCookie == "") {
+			if err == nil && creds.AccessToken == "" && creds.SessionCookie != "" {
+				status["sign_in_required"] = "Browser session cookie authentication is no longer supported. Run: hey auth login"
+				if writer.IsStyled() {
+					fmt.Fprintln(cmd.OutOrStdout(), status["sign_in_required"])
+				}
+			}
+			if errors.Is(err, auth.ErrCredentialsNotFound) || creds.AccessToken == "" {
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
@@ -270,11 +264,6 @@ func newAuthStatusCommand() *cobra.Command {
 				token := creds.AccessToken
 				if len(token) > 12 {
 					fmt.Fprintf(w, "Token:     %s...%s\n", token[:8], token[len(token)-4:])
-				} else if creds.SessionCookie != "" {
-					cookie := creds.SessionCookie
-					if len(cookie) > 12 {
-						fmt.Fprintf(w, "Cookie:    %s...%s\n", cookie[:8], cookie[len(cookie)-4:])
-					}
 				}
 				if installID != "" {
 					fmt.Fprintf(w, "Install:   %s\n", installID)
@@ -332,8 +321,7 @@ func newAuthTokenCommand() *cobra.Command {
 		Short: "Print access token to stdout",
 		Long: `Print the stored bearer token to stdout, for use as "Authorization: Bearer <token>".
 
-A login made with --cookie stores a browser session cookie instead. HEY sends that as a
-Cookie header, so it is not a bearer token and this command refuses to print it.`,
+Obsolete browser session cookie credentials require signing in again with hey auth login.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !stored {
 				if envToken := os.Getenv("HEY_TOKEN"); envToken != "" {
@@ -342,11 +330,13 @@ Cookie header, so it is not a bearer token and this command refuses to print it.
 				}
 			}
 
-			if err := refuseSessionCookieAsToken(); err != nil {
-				return err
+			var token string
+			var err error
+			if stored {
+				token, err = authMgr.StoredAccessToken(cmd.Context())
+			} else {
+				token, err = authMgr.AccessToken(cmd.Context())
 			}
-
-			token, err := authMgr.AccessToken(cmd.Context())
 			if err != nil {
 				return authFailure("could not get token", err)
 			}
@@ -374,20 +364,4 @@ func authFailure(context string, err error) error {
 	prefixed := *classified
 	prefixed.Message = fmt.Sprintf("%s: %s", context, classified.Message)
 	return &prefixed
-}
-
-// refuseSessionCookieAsToken stops `hey auth token` from printing a session cookie.
-// AccessToken falls back to one, and a cookie sent as a bearer token 401s with
-// nothing to explain it — besides leaving the cookie in the caller's shell history.
-func refuseSessionCookieAsToken() error {
-	creds, err := authMgr.GetStore().Load(authMgr.CredentialKey())
-	if err == nil && creds.AccessToken == "" && creds.SessionCookie != "" {
-		return &apierr.Error{
-			Code:       apierr.CodeAuth,
-			Message:    "the stored credential is a browser session cookie, not a bearer token",
-			Hint:       "Run: hey auth login   (HEY sends a session cookie as a Cookie header, so it cannot be used as Bearer)",
-			HTTPStatus: 401,
-		}
-	}
-	return nil
 }

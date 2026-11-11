@@ -37,13 +37,6 @@ func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
 			first:       "Bearer old-static",
 			second:      "Bearer new-static",
 		},
-		{
-			name:        "cookie",
-			initial:     &auth.Credentials{SessionCookie: "old-cookie", OAuthType: "cookie"},
-			replacement: &auth.Credentials{SessionCookie: "new-cookie", OAuthType: "cookie"},
-			first:       "__Host-session_token=old-cookie; session_token=old-cookie",
-			second:      "__Host-session_token=new-cookie; session_token=new-cookie",
-		},
 	}
 
 	for _, tt := range tests {
@@ -60,8 +53,8 @@ func TestSDK401RetryAdoptsCredentialsAnotherProcessStored(t *testing.T) {
 			mux := http.NewServeMux()
 			mux.HandleFunc("GET /auth-retry", func(w http.ResponseWriter, r *http.Request) {
 				credential := r.Header.Get("Authorization")
-				if credential == "" {
-					credential = r.Header.Get("Cookie")
+				if r.Header.Get("Cookie") != "" {
+					t.Error("SDK sent a Cookie header")
 				}
 				mu.Lock()
 				credentials = append(credentials, credential)
@@ -152,7 +145,7 @@ func TestLoginReplacingCredentialsClearsTheHTTPCache(t *testing.T) {
 	configHome := t.TempDir()
 	responses, etags := seedHTTPCache(t, configHome)
 
-	if _, _, err := runAuthCommand(t, configHome, "https://app.hey.com", "", true, "auth", "login", "--cookie", "replacement-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, "https://app.hey.com", "", true, "auth", "login", "--token", "replacement-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 
@@ -168,7 +161,7 @@ func TestLogoutClearsTheHTTPCache(t *testing.T) {
 	configHome := t.TempDir()
 	responses, etags := seedHTTPCache(t, configHome)
 
-	if _, _, err := runAuthCommand(t, configHome, "https://app.hey.com", "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, "https://app.hey.com", "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 	if _, logout, err := runAuthCommand(t, configHome, "https://app.hey.com", "", true, "auth", "logout"); err != nil || logout.Summary != "Logged out" {

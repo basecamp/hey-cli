@@ -35,10 +35,10 @@ All API interactions go through the HEY SDK (`hey-sdk/go`), with typed service m
 
 ### Authentication
 
-`internal/auth/` manages four methods: browser OAuth with PKCE (`hey auth login`, the
-primary one), a stored bearer token (`--token`), a browser session cookie (`--cookie`), and
-the `HEY_TOKEN` environment variable. The Manager refreshes tokens with a 5-minute buffer,
-and the SDK reaches it through the bridge in `internal/cmd/sdk.go`.
+`internal/auth/` manages three methods: browser OAuth with PKCE (`hey auth login`, the
+primary one), a stored bearer token (`--token`), and the `HEY_TOKEN` environment variable.
+The Manager refreshes tokens with a 5-minute buffer, and the SDK reaches it through the
+bridge in `internal/cmd/sdk.go`.
 
 Every data-access command calls `requireAuth()` before it makes an API call. Logged out,
 it exits 3 with `Run: hey auth login`, or offers to sign in at an interactive terminal with
@@ -240,7 +240,7 @@ The dev server must be running at `http://app.hey.localhost:3003` (override with
 
 **How they work:**
 
-1. `TestMain` in `helpers_test.go` orchestrates setup: finds the binary, checks server reachability, launches headless Chrome via chromedp to log in and extract the `session_token` cookie, then authenticates the CLI with `hey auth login --cookie`.
+1. `TestMain` in `helpers_test.go` orchestrates setup: finds the binary, checks server reachability, launches headless Chrome via chromedp to sign in, then completes the CLI’s actual `hey auth login --no-browser` OAuth/PKCE consent and callback flow. Browser sessions stay in browser helpers; the CLI receives only OAuth tokens.
 2. All CLI invocations run in an isolated environment: temp `XDG_CONFIG_HOME`, `HEY_NO_KEYRING=1`, `HEY_BASE_URL` pointing to the dev server.
 3. Helper functions (`hey()`, `heyOK()`, `heyJSON()`, `heyFail()`) run the binary and parse output. `dataAs[T]()` generically unmarshals response data.
 4. Tests that depend on write operations (compose, todo add, journal write, reply, timetrack start) skip gracefully when the server returns errors, since the SDK's parameter format may not match the server's expectations. Set `HEY_SMOKE_STRICT=1` to turn every such skip into a failure — that is the release gate, where a skipped check is not a passed one.

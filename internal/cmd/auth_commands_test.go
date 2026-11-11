@@ -50,22 +50,22 @@ func runAuthCommand(t *testing.T, configHome, baseURL, envToken string, jsonOutp
 	return stdout.String(), response, err
 }
 
-func TestAuthCookieLoginStatusAndLogout(t *testing.T) {
+func TestAuthTokenLoginStatusAndLogout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
 	defer server.Close()
 	configHome := t.TempDir()
 
-	_, login, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie")
+	_, login, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token")
 	if err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
-	if login.Summary != "Logged in with session cookie" {
+	if login.Summary != "Logged in with token" {
 		t.Errorf("login summary = %q", login.Summary)
 	}
 	method, ok := login.Data.(map[string]any)
-	if !ok || method["method"] != "cookie" {
+	if !ok || method["method"] != "token" {
 		t.Errorf("login data = %#v", login.Data)
 	}
 
@@ -77,7 +77,7 @@ func TestAuthCookieLoginStatusAndLogout(t *testing.T) {
 	if !ok {
 		t.Fatalf("status data = %T", status.Data)
 	}
-	if statusData["authenticated"] != true || statusData["auth_type"] != "cookie" || statusData["storage"] != "file" {
+	if statusData["authenticated"] != true || statusData["auth_type"] != "token" || statusData["storage"] != "file" {
 		t.Errorf("status data = %#v", statusData)
 	}
 
@@ -121,29 +121,47 @@ func TestAuthTokenLoginAndStoredTokenOutput(t *testing.T) {
 	}
 }
 
-// A session cookie is sent as a Cookie header, so printing it as a bearer token gave
-// the caller something that 401s with nothing to explain it -- and put the cookie in
-// their shell history.
-func TestAuthTokenRefusesToPrintASessionCookie(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
-	}))
-	defer server.Close()
-	configHome := t.TempDir()
+func TestObsoleteCookieRequiresSignIn(t *testing.T) {
+	for _, args := range [][]string{{"auth", "token"}, {"auth", "token", "--stored"}, {"box", "list"}, {"auth", "refresh"}} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			const origin = "https://mail.example.test"
+			home := t.TempDir()
+			t.Setenv("HEY_NO_KEYRING", "1")
+			store := auth.NewStore(filepath.Join(home, "hey-cli"))
+			if err := store.Save(origin, &auth.Credentials{SessionCookie: "obsolete-cookie", OAuthType: "cookie"}); err != nil {
+				t.Fatal(err)
+			}
+			stdout, _, err := runAuthCommand(t, home, origin, "", false, args...)
+			var authErr *apierr.Error
+			if !errors.As(err, &authErr) || authErr.Code != apierr.CodeAuth || !strings.Contains(err.Error(), "hey auth login") {
+				t.Fatalf("error = %v, want sign-in guidance", err)
+			}
+			if strings.Contains(stdout, "obsolete-cookie") {
+				t.Error("obsolete secret printed")
+			}
+			_, status, err := runAuthCommand(t, home, origin, "", true, "auth", "status")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if data, _ := status.Data.(map[string]any); data["authenticated"] != false || data["sign_in_required"] == nil {
+				t.Errorf("status = %#v", status.Data)
+			}
+			if _, _, err := runAuthCommand(t, home, origin, "", true, "logout"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Load(origin); !errors.Is(err, auth.ErrCredentialsNotFound) {
+				t.Fatal("logout retained obsolete secret")
+			}
+		})
+	}
+}
 
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
-		t.Fatalf("auth login: %v", err)
-	}
-
-	stdout, _, err := runAuthCommand(t, configHome, server.URL, "", false, "auth", "token")
-	if err == nil {
-		t.Fatal("auth token printed a session cookie")
-	}
-	if !strings.Contains(err.Error(), "session cookie") {
-		t.Errorf("error = %v", err)
-	}
-	if strings.Contains(stdout, "session-cookie") {
-		t.Errorf("stdout = %q, the cookie must not be printed", stdout)
+func TestCookieLoginFlagRemoved(t *testing.T) {
+	for _, path := range [][]string{{"auth", "login"}, {"login"}} {
+		_, _, err := runAuthCommand(t, t.TempDir(), "http://example.test", "", false, append(path, "--cookie", "obsolete-cookie")...)
+		if err == nil || !strings.Contains(err.Error(), "unknown flag: --cookie") {
+			t.Fatalf("%v: %v", path, err)
+		}
 	}
 }
 
@@ -392,11 +410,11 @@ func TestLoginLogoutShortcutsMirrorAuthCommands(t *testing.T) {
 	defer server.Close()
 	configHome := t.TempDir()
 
-	_, login, err := runAuthCommand(t, configHome, server.URL, "", true, "login", "--cookie", "session-cookie")
+	_, login, err := runAuthCommand(t, configHome, server.URL, "", true, "login", "--token", "session-token")
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
-	if login.Summary != "Logged in with session cookie" {
+	if login.Summary != "Logged in with token" {
 		t.Errorf("login summary = %q", login.Summary)
 	}
 
@@ -438,7 +456,7 @@ func TestAuthStatusReportsInstallID(t *testing.T) {
 	defer server.Close()
 	configHome := t.TempDir()
 
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 

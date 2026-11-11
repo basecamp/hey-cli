@@ -121,7 +121,7 @@ func TestSetupSkipAgentsLeavesAgentIntegrationsUnchanged(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 
@@ -146,7 +146,7 @@ func TestSetupSilentSuccessShowsSpinnerAndCompletion(t *testing.T) {
 	stubInteractive(t, true)
 	server := identityServer(t)
 	configHome := t.TempDir()
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 	origColor := colorDisabled
@@ -287,7 +287,7 @@ func TestSetupJSONSignedInReportsIdentityAndPersistsOnboarded(t *testing.T) {
 	server := identityServer(t)
 	configHome := t.TempDir()
 
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 
@@ -342,7 +342,7 @@ func TestSetupJSONRunsAgentStepNonInteractively(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 
@@ -680,7 +680,7 @@ func TestSetupStyledInteractiveInstallsDetectedAgentsWithoutPrompt(t *testing.T)
 	if err := os.MkdirAll(filepath.Join(configHome, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 
@@ -716,7 +716,7 @@ func TestSetupRepeatKeepsDetectedConnectedAgentsVisible(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(configHome, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 	origColor := colorDisabled
@@ -745,7 +745,7 @@ func TestSetupRepeatMigratesManagedLegacyCodexSkill(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 	if _, _, err := runAuthCommand(t, home, server.URL, "", true, "setup"); err != nil {
@@ -792,7 +792,7 @@ func TestSetupJSONStaleCredentialsReportIncomplete(t *testing.T) {
 	}))
 	defer server.Close()
 	configHome := t.TempDir()
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "stale-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "stale-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 
@@ -831,7 +831,7 @@ func TestSetupWizardPreservesUnmanagedLegacyCodexSkill(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(codexSkill, "SKILL.md"), []byte(custom), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 

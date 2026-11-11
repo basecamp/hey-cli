@@ -45,16 +45,15 @@ hey auth login
 
 # Or use a pre-generated token
 hey auth login --token TOKEN
-
-# Or use a browser session cookie (__Host-session_token, or session_token)
-hey auth login --cookie COOKIE
 ```
 
-Tokens refresh automatically on expiry. Credentials are stored in the system keyring (with file fallback at `~/.config/hey-cli/credentials.json`).
+Browser session cookies are no longer supported. Existing cookie-only logins must sign in again with `hey auth login`.
+
+OAuth tokens refresh automatically on expiry. Credentials are stored in the system keyring (with file fallback at `~/.config/hey-cli/credentials.json`).
 
 ```bash
 hey auth status   # check auth status
-hey auth token    # print the bearer token for scripting (refuses a --cookie login)
+hey auth token    # print the bearer token for scripting
 hey auth refresh  # force token refresh
 hey auth logout   # clear credentials
 ```

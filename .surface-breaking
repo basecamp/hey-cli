@@ -4,3 +4,6 @@
 # command or flag that the previous release had. List the dropped line here in
 # the same PR (e.g. `hey todo --legacy-flag`) to acknowledge the break; prune
 # entries after the release that ships them.
+
+hey auth login --cookie
+hey login --cookie

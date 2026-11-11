@@ -2,9 +2,38 @@
 
 Run `HEY_SMOKE_STRICT=1 make test-smoke` from the repository root against dev
 Haystack. The suite builds `bin/hey`, signs in with headless Chrome, and uses
-isolated CLI configuration and credentials. Strict mode turns skips into failures.
+isolated CLI configuration and credentials. Chrome approves the URL from
+`hey auth login --no-browser`, exercising the real OAuth/PKCE callback and token
+exchange. The dev server must have the built-in HEY CLI OAuth client registered
+with loopback redirects enabled; the suite does not register or bypass it.
+Browser cookies stay in browser helpers and are never used to authenticate the CLI.
+OAuth progress, codes and tokens are kept out of setup logs. Strict mode turns
+skips into failures.
 The default server is `http://app.hey.localhost:3003`; see the root `AGENTS.md` for
 login and environment overrides.
+
+## Cookie-removal verification
+
+The opt-in `verification` build tag adds a local HTTPS regression check. Supply a
+**disposable** pending clearance and its contact in `HEY_VERIFY_CLEARANCE_ID` and
+`HEY_VERIFY_CONTACT_ID`. The contact's name must be `Morgan Shaw`.
+Create these only in the development database and remove them afterward.
+
+With Haystack exposed at `https://app.hey.localhost:<port>` and its certificate
+trusted by both the CLI and the isolated test browser:
+
+```bash
+make build
+(cd tests/smoke && HEY_SMOKE_STRICT=1 go test -tags verification -v -count=1 -run '^TestCookieRemovalLive')
+```
+
+Set `HEY_SMOKE_BASE_URL` to that HTTPS origin. The check first proves a cookie-only
+write without fetch metadata is refused, then approves, denies and approves the
+fixture through the OAuth-authenticated CLI, reading each result independently in
+the browser. The fixture is left approved for explicit cleanup. It also establishes
+a real `hey watch` subscription. This proves WebSocket sign-in, not end-to-end
+mail-change delivery or TUI rendering; reconnect/header rotation is checked in
+`internal/cable`.
 
 ## Sender selection
 
