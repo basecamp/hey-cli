@@ -161,7 +161,7 @@ func (c *eventsPeriodCommand) run(cmd *cobra.Command, args []string) error {
 	if period != nil {
 		events = filterRecordingsByType(&period.Recordings, recordingTypeEvent)
 	}
-	sortEventsByStart(events)
+	sortEventsByStart(events, time.Local)
 	rows := occurrenceEventRows(events)
 	if period != nil {
 		attachEventCountdowns(rows, filterRecordingsByType(&period.Recordings, recordingTypeCountdown))
@@ -287,9 +287,9 @@ func attachEventCountdowns(rows []eventRow, countdowns []generated.Recording) {
 // grouped by type with no promise about order, and instants alone would not do — an
 // all-day event is stamped midnight UTC, so a timed event late the same local evening
 // can be the earlier instant even though the app draws it below the band.
-func sortEventsByStart(events []generated.Recording) {
+func sortEventsByStart(events []generated.Recording, location *time.Location) {
 	sort.SliceStable(events, func(i, j int) bool {
-		if di, dj := eventDay(events[i]), eventDay(events[j]); di != dj {
+		if di, dj := eventDay(events[i], location), eventDay(events[j], location); di != dj {
 			return di < dj
 		}
 		if events[i].AllDay != events[j].AllDay {
@@ -305,11 +305,11 @@ func sortEventsByStart(events []generated.Recording) {
 // eventDay names the day a row sits on, the day HEY draws it: the stamped date for an
 // all-day event, the reader's own day for a timed one. HEY's JSON is always UTC, so a
 // 23:30Z event belongs to the next day east of Greenwich.
-func eventDay(event generated.Recording) string {
+func eventDay(event generated.Recording, location *time.Location) string {
 	if event.AllDay {
 		return event.StartsAt.UTC().Format(dateLayout)
 	}
-	return event.StartsAt.Local().Format(dateLayout)
+	return event.StartsAt.In(location).Format(dateLayout)
 }
 
 // writeEventRows renders one listing of events: the table when styled, the JSON envelope
@@ -360,8 +360,8 @@ func writeEventRows(cmd *cobra.Command, events []eventRow, described, notice str
 				row = append(row, seriesID, event.OccurrenceId, recordingID)
 			}
 			row = append(row, event.Title,
-				eventBoundary(event.StartsAt, event.AllDay),
-				eventBoundary(event.EndsAt, event.AllDay),
+				eventBoundary(event.StartsAt, event.AllDay, time.Local),
+				eventBoundary(event.EndsAt, event.AllDay, time.Local),
 				event.Calendar.Name)
 			if showsCountdown {
 				label := ""

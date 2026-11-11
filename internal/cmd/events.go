@@ -123,11 +123,11 @@ func (c *eventsListCommand) run(cmd *cobra.Command, args []string) error {
 // as an event that starts at midnight. HEY's JSON is always UTC, so a timed boundary
 // converts to the reader's clock the way HEY's own views draw it, while an all-day date is
 // the day it names and does not shift.
-func eventBoundary(at time.Time, allDay bool) string {
+func eventBoundary(at time.Time, allDay bool, location *time.Location) string {
 	if allDay {
 		return formatDate(at)
 	}
-	return formatTimestamp(at.Local())
+	return formatTimestamp(at.In(location))
 }
 
 // add

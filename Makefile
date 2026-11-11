@@ -119,8 +119,10 @@ test-sync-skills:
 # Run smoke tests against a live HEY server.
 # Requires: a running server (default http://app.hey.localhost:3003) and Chrome.
 # Override defaults: make test-smoke HEY_SMOKE_BASE_URL=... HEY_SMOKE_EMAIL=... HEY_SMOKE_PASSWORD=...
+# The complete SMTP/browser suite can exceed five minutes on a dev server.
+# This is the whole-suite deadline; no assertions or strict-mode failures are skipped.
 test-smoke: build
-	cd tests/smoke && go test -v -count=1 -timeout 5m ./...
+	cd tests/smoke && go test -v -count=1 -timeout 10m ./...
 
 # Format Go source
 fmt:
