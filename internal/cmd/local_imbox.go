@@ -27,7 +27,7 @@ type localThread struct {
 
 type localImbox struct {
 	Threads []localThread `json:"threads"`
-	HasMore bool          `json:"has_more"`
+	HasMore *bool         `json:"has_more"`
 }
 
 func newLocalImboxCommand() *localImboxCommand {
@@ -56,13 +56,22 @@ func (c *localImboxCommand) run(cmd *cobra.Command, _ []string) error {
 		if imbox.Threads == nil {
 			return errors.New("it lists no threads")
 		}
+		// Missing, has_more would read as a complete Imbox, and an id as thread 0.
+		if imbox.HasMore == nil {
+			return errors.New("it does not say whether the Imbox holds more")
+		}
+		for _, thread := range imbox.Threads {
+			if thread.ID <= 0 {
+				return errors.New("it lists a thread without an ID")
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 	notice := ""
-	if imbox.HasMore {
+	if *imbox.HasMore {
 		notice = "The Imbox holds more threads than the app has loaded."
 	}
 
@@ -97,6 +106,6 @@ func (c *localImboxCommand) run(cmd *cobra.Command, _ []string) error {
 	return writeOK(imbox.Threads,
 		output.WithSummary(fmt.Sprintf("%d %s in the Imbox", len(imbox.Threads), threadNoun(len(imbox.Threads)))),
 		output.WithNotice(notice),
-		output.WithMeta("has_more", imbox.HasMore),
+		output.WithMeta("has_more", *imbox.HasMore),
 	)
 }

@@ -22,7 +22,7 @@ type localSender struct {
 
 type localScreener struct {
 	Waiting      []localSender `json:"waiting"`
-	WaitingCount int           `json:"waiting_count"`
+	WaitingCount *int          `json:"waiting_count"`
 	Decided      []localSender `json:"decided"`
 }
 
@@ -51,6 +51,20 @@ func (c *localScreenerListCommand) run(cmd *cobra.Command, _ []string) error {
 		if screener.Waiting == nil || screener.Decided == nil {
 			return errors.New("it lists neither who waits nor who was decided")
 		}
+		// Missing, these would read as nobody waiting, sender 0 or a sender screened out.
+		if screener.WaitingCount == nil {
+			return errors.New("it does not count who waits")
+		}
+		for _, sender := range append(append([]localSender{}, screener.Waiting...), screener.Decided...) {
+			if sender.ID <= 0 {
+				return errors.New("it lists a sender without an ID")
+			}
+		}
+		for _, sender := range screener.Decided {
+			if sender.ScreenedIn == nil {
+				return fmt.Errorf("it does not say whether sender %d was screened in or out", sender.ID)
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -58,7 +72,8 @@ func (c *localScreenerListCommand) run(cmd *cobra.Command, _ []string) error {
 	}
 
 	notice := ""
-	if unlisted := screener.WaitingCount - len(screener.Waiting); unlisted > 0 {
+	waitingCount := *screener.WaitingCount
+	if unlisted := waitingCount - len(screener.Waiting); unlisted > 0 {
 		notice = fmt.Sprintf("%d more %s waiting than the app lists.", unlisted, senderNoun(unlisted))
 	}
 
@@ -74,7 +89,7 @@ func (c *localScreenerListCommand) run(cmd *cobra.Command, _ []string) error {
 		return writeOK(append(append([]localSender{}, screener.Waiting...), screener.Decided...))
 	default:
 		return writeOK(screener,
-			output.WithSummary(fmt.Sprintf("%d %s waiting", screener.WaitingCount, senderNoun(screener.WaitingCount))),
+			output.WithSummary(fmt.Sprintf("%d %s waiting", waitingCount, senderNoun(waitingCount))),
 			output.WithNotice(notice),
 			output.WithBreadcrumbs(
 				output.Breadcrumb{Action: "approve", Command: "hey local screener approve <sender>", Description: "Screen a sender in"},
@@ -100,7 +115,7 @@ func (c *localScreenerListCommand) writeStyled(cmd *cobra.Command, screener loca
 	}
 	for _, sender := range screener.Decided {
 		status := "screened out"
-		if sender.ScreenedIn != nil && *sender.ScreenedIn {
+		if *sender.ScreenedIn {
 			status = "screened in"
 		}
 		table.addRow([]string{fmt.Sprintf("%d", sender.ID), truncate(sender.Name, 24), truncate(sender.Address, 32), status})

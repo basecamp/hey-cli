@@ -670,3 +670,47 @@ func TestLocalADecisionAnsweredOtherwiseDoesNotBlameTheCLIsVersion(t *testing.T)
 		t.Errorf("hint = %q", hint)
 	}
 }
+
+// A field whose zero value would say something (complete, screened out, sender 0) is the
+// app's to give: missing, the listing is unreadable, never read as that value.
+func TestLocalListingsRefuseAnswersMissingWhatTheirZeroWouldClaim(t *testing.T) {
+	waiting := map[string]any{"id": 51, "name": "Priya Natarajan", "address": "priya@example.com"}
+	decided := map[string]any{"id": 52, "name": "Glenn Hoffman", "address": "glenn@example.org", "screened_in": false}
+	thread := map[string]any{"id": 301, "topic": 801, "subject": "Stint plan", "sender": "Marcus Ortiz", "sender_id": 41}
+	without := func(row map[string]any, key string) map[string]any {
+		copied := map[string]any{}
+		for k, v := range row {
+			if k != key {
+				copied[k] = v
+			}
+		}
+		return copied
+	}
+	cases := []struct {
+		name, tool string
+		answer     map[string]any
+		args       []string
+	}{
+		{"no has_more", "imbox.list", map[string]any{"threads": []any{}}, []string{"imbox"}},
+		{"has_more null", "imbox.list", map[string]any{"threads": []any{}, "has_more": nil}, []string{"imbox"}},
+		{"thread without id", "imbox.list", map[string]any{"threads": []any{without(thread, "id")}, "has_more": false}, []string{"imbox", "--ids-only"}},
+		{"no waiting_count", "screener.list", map[string]any{"waiting": []any{waiting}, "decided": []any{decided}}, []string{"screener", "list"}},
+		{"waiting sender null", "screener.list", map[string]any{"waiting": []any{nil}, "waiting_count": 1, "decided": []any{}}, []string{"screener", "list", "--ids-only"}},
+		{"decided without id", "screener.list", map[string]any{"waiting": []any{}, "waiting_count": 0, "decided": []any{without(decided, "id")}}, []string{"screener", "list", "--ids-only"}},
+		{"decided without screened_in", "screener.list", map[string]any{"waiting": []any{}, "waiting_count": 0, "decided": []any{without(decided, "screened_in")}}, []string{"screener", "list", "--styled"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			door := localapptest.Start(t)
+			door.Answer(tc.tool, tc.answer)
+
+			stdout, _, err := runLocal(t, door.Path, tc.args...)
+			if output.ExitCodeFor(err) != output.ExitAPI {
+				t.Errorf("exit = %d (%v), stdout = %q", output.ExitCodeFor(err), err, stdout)
+			}
+			if strings.Contains(stdout, "screened out") || strings.Contains(stdout, "Nothing in the Imbox") || strings.TrimSpace(stdout) == "0" {
+				t.Errorf("stdout = %q", stdout)
+			}
+		})
+	}
+}
