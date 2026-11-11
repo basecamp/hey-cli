@@ -1,8 +1,11 @@
-{ go_1_27 }:
+{ fetchurl, go_1_27 }:
 
-# The Go toolchain shared by the package build and the dev shell.
-#
-# Both consumers use this one derivation so the package and `nix develop`
-# cannot drift. Keep flake.lock new enough that go_1_27 satisfies go.mod;
-# the nix-build CI job covers every go.mod change and every release tag.
-go_1_27
+# Both the package and dev shell use the patched compiler. The locked nixpkgs
+# still supplies 1.27.3, so override its source until it includes this security fix.
+go_1_27.overrideAttrs (finalAttrs: _: {
+  version = "1.27.4";
+  src = fetchurl {
+    url = "https://go.dev/dl/go${finalAttrs.version}.src.tar.gz";
+    hash = "sha256-c8+4VxrsDAEXdofbhxY9Rqog6XeWcncokaoXZU2aYJk=";
+  };
+})

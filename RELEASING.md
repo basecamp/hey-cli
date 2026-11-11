@@ -190,9 +190,10 @@ make update-nix-hash
 The PR-time `nix-build` job fails on every dependency bump by design — dependabot
 does not update `vendorHash` — and prints the correct hash with that command.
 
-`nix/go.nix` selects the Go toolchain from the locked nixpkgs snapshot for both
-the package and development shell. When `go.mod` moves beyond that snapshot,
-run `nix flake update nixpkgs` and commit `flake.lock` with the toolchain bump.
+`nix/go.nix` selects the Go toolchain for both the package and development shell.
+It temporarily pins the patched Go source while the locked nixpkgs snapshot still
+supplies Go 1.27.3. Keep its version and source hash aligned with `go.mod` and
+`.mise.toml`; remove the override once a locked nixpkgs snapshot supplies the fix.
 
 ## CLI surface compatibility
 
