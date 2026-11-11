@@ -640,7 +640,7 @@ func TestLocalASendAnsweredOtherwisePointsAtTheApp(t *testing.T) {
 
 	_, _, err := runLocal(t, door.Path, "send", "1731280000123")
 	failure := apierr.AsError(err)
-	if output.ExitCodeFor(err) != output.ExitAPI || strings.Contains(failure.Hint, "upgrade") {
+	if output.ExitCodeFor(err) != output.ExitAPI || failure.Hint != "Check in the HEY app what it did" {
 		t.Errorf("exit = %d, hint = %q (%v)", output.ExitCodeFor(err), failure.Hint, err)
 	}
 	if !strings.Contains(failure.Message, "Sent to Ada") {
@@ -666,7 +666,7 @@ func TestLocalADecisionAnsweredOtherwiseDoesNotBlameTheCLIsVersion(t *testing.T)
 	door.Answer("screener.decide", map[string]any{"sender": 42, "screened": "out"})
 
 	_, _, err := runLocal(t, door.Path, "screener", "approve", "42")
-	if hint := apierr.AsError(err).Hint; strings.Contains(hint, "upgrade") {
+	if hint := apierr.AsError(err).Hint; hint != "Check in the HEY app what it did" {
 		t.Errorf("hint = %q", hint)
 	}
 }
