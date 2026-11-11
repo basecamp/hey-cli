@@ -248,7 +248,7 @@ func watchDialError(err error) error {
 
 	var disconnect *actioncable.DisconnectError
 	if errors.As(err, &disconnect) && disconnect.Reason == actioncable.ReasonUnauthorized {
-		return apierr.ErrAuth("HEY's cable server turned these credentials down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
+		return apierr.ErrAuth("HEY's cable server turned these credentials down — run `hey auth login` again")
 	}
 
 	return apierr.ErrNetwork(fmt.Errorf("could not connect to HEY's cable server: %w", err))
@@ -512,7 +512,7 @@ func (w *postingsWatch) closedError(ctx context.Context, ended error) error {
 	case authenticationFailed:
 		return classified
 	case errors.Is(ended, actioncable.ErrRejected):
-		return apierr.ErrAuth("HEY's cable server turned this subscription down — run `hey auth login` again, or log in with `hey auth login --cookie` if the server doesn't take access tokens on a websocket yet")
+		return apierr.ErrAuth("HEY's cable server turned this subscription down — run `hey auth login` again")
 	default:
 		return apierr.ErrNetwork(fmt.Errorf("HEY's cable server hung up for good — nothing is watching for changes any more: %w", ended))
 	}

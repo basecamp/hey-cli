@@ -918,7 +918,7 @@ func TestSetupWizardSkipsOmarchyOnRejectedCredentials(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	configHome := t.TempDir()
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "stale-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "stale-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 	origColor := colorDisabled
@@ -1195,19 +1195,16 @@ func TestEnsureOmarchyBarPluginAfterLogin(t *testing.T) {
 	}
 }
 
-func TestLoginTokenAndCookieNeverRunTheOmarchyHook(t *testing.T) {
+func TestLoginTokenNeverRunsTheOmarchyHook(t *testing.T) {
 	hookCalls := stubOmarchyAfterLogin(t)
 	server := quietServer(t)
 	configHome := t.TempDir()
 
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
-		t.Fatalf("cookie login: %v", err)
-	}
 	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "stored-token"); err != nil {
 		t.Fatalf("token login: %v", err)
 	}
 	if *hookCalls != 0 {
-		t.Errorf("hook ran %d times for token/cookie logins", *hookCalls)
+		t.Errorf("hook ran %d times for token logins", *hookCalls)
 	}
 }
 
@@ -1280,7 +1277,7 @@ func TestSetupWizardStep3InstallsThePlugin(t *testing.T) {
 	confirms := stubConfirmOmarchyPanel(t, true, nil)
 	server := identityServer(t)
 	configHome := t.TempDir()
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 	origColor := colorDisabled
@@ -1389,7 +1386,7 @@ func TestSetupWizardSkipOmarchyLeavesIntegrationUnchanged(t *testing.T) {
 	stubInteractive(t, true)
 	server := identityServer(t)
 	configHome := t.TempDir()
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 	ran := stubOmarchyRun(t, omarchyUnavailable)
@@ -1425,7 +1422,7 @@ func TestSetupWizardMachineRunSkipsOmarchyAndPointsAtSetup(t *testing.T) {
 	isolateAgents(t)
 	server := identityServer(t)
 	configHome := t.TempDir()
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 	ran := stubOmarchyRun(t, omarchyUnavailable)
@@ -1476,7 +1473,7 @@ func TestSetupWizardStep3CloneFailureIsIncomplete(t *testing.T) {
 	stubConfirmOmarchyPanel(t, true, nil)
 	server := identityServer(t)
 	configHome := t.TempDir()
-	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--cookie", "session-cookie"); err != nil {
+	if _, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--token", "session-token"); err != nil {
 		t.Fatalf("auth login: %v", err)
 	}
 	origColor := colorDisabled

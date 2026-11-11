@@ -140,7 +140,7 @@ file, one lock:
   assigned dynamically to whichever steps actually run); `hey setup omarchy` also runs in
   *force* mode. The automatic
   hooks never run for machine output, `HEY_NONINTERACTIVE`, a non-TTY, or
-  `--token`/`--cookie` logins: a script installs with `hey setup omarchy`, which works in
+  `--token` logins: a script installs with `hey setup omarchy`, which works in
   every output format and exits `setup_failed` on any incomplete outcome — an incomplete
   forced install is a failure, never a quiet skip.
 - **Ordering, per mode.** Ensure: state gates → shell probe → consent → intent write →

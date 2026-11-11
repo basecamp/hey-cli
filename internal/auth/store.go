@@ -61,6 +61,8 @@ type Credentials struct {
 	ExpiresAt     int64  `json:"expires_at"`
 	OAuthType     string `json:"oauth_type"`
 	TokenEndpoint string `json:"token_endpoint"`
+	// SessionCookie is inert legacy data, read only to explain why sign-in is required.
+	// New logins replace the record; it must never authenticate or become a bearer.
 	SessionCookie string `json:"session_cookie,omitempty"`
 	// InstallID is the install these tokens were issued to. HEY binds a refresh token's
 	// lineage to it and revokes the session when another install presents the token, so it

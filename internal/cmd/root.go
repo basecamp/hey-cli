@@ -431,6 +431,9 @@ func requireAuth() error {
 			return nil
 		}
 	}
+	if creds, err := authMgr.GetStore().Load(authMgr.CredentialKey()); err == nil && creds.AccessToken == "" && creds.SessionCookie != "" {
+		return apierr.ErrAuth("browser session cookie authentication is no longer supported; sign in again with hey auth login")
+	}
 	notLoggedIn := apierr.ErrAuth("Not logged in")
 	notLoggedIn.Hint = auth.NotLoggedInHint()
 	return notLoggedIn
@@ -444,7 +447,7 @@ func migrateOldCredentials(_ string) {
 		return
 	}
 
-	if old.AccessToken == "" && old.SessionCookie == "" {
+	if old.AccessToken == "" && old.RefreshToken == "" && old.SessionCookie == "" {
 		return
 	}
 
@@ -464,17 +467,29 @@ func migrateOldCredentials(_ string) {
 		return
 	}
 
+	// A browser cookie has no supported migration target. Remove obsolete secrets
+	// without creating a credential record that a later run might resurrect.
+	if old.AccessToken == "" && old.RefreshToken == "" {
+		if err := config.ScrubLegacyCredentials(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not remove obsolete cookie credentials from config.json: %v\n", err)
+		}
+		fmt.Fprintln(os.Stderr, "notice: browser session cookie authentication is no longer supported; run hey auth login")
+		return
+	}
+
 	if existing, err := store.Load(credKey); err == nil {
 		// A prior run already migrated. If its scrub failed, the legacy
 		// fields are still in config.json (we just loaded them above) —
 		// retry the scrub now, but only when the stored record is actually
 		// usable: an empty record must never destroy the one recoverable
 		// copy of the credentials.
-		if existing.AccessToken != "" || existing.SessionCookie != "" {
+		if existing.AccessToken != "" || existing.RefreshToken != "" {
 			if scrubErr := config.ScrubLegacyCredentials(); scrubErr != nil {
 				fmt.Fprintf(os.Stderr, "warning: could not remove migrated credentials from config.json: %v\n", scrubErr)
 			}
+			return
 		}
+	} else if !errors.Is(err, auth.ErrCredentialsNotFound) {
 		return
 	}
 
@@ -484,9 +499,6 @@ func migrateOldCredentials(_ string) {
 	}
 	if old.TokenExpiry > 0 {
 		creds.ExpiresAt = old.TokenExpiry
-	}
-	if old.SessionCookie != "" {
-		creds.SessionCookie = old.SessionCookie
 	}
 
 	if err := store.Save(credKey, creds); err != nil {

@@ -125,7 +125,16 @@ func cloneCredentials(creds *Credentials) *Credentials {
 // AccessToken returns a valid access token, refreshing if needed.
 // If HEY_TOKEN env var is set, the CLI's manager uses it directly.
 func (m *Manager) AccessToken(ctx context.Context) (string, error) {
-	if token := m.envToken(); token != "" {
+	return m.accessToken(ctx, true)
+}
+
+// StoredAccessToken returns only the stored bearer token, ignoring HEY_TOKEN.
+func (m *Manager) StoredAccessToken(ctx context.Context) (string, error) {
+	return m.accessToken(ctx, false)
+}
+
+func (m *Manager) accessToken(ctx context.Context, useEnv bool) (string, error) {
+	if token := m.envToken(); useEnv && token != "" {
 		return token, nil
 	}
 
@@ -135,6 +144,10 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	creds, err := m.loadCredentialsLocked()
 	if err != nil {
 		return "", credentialLoadError(err)
+	}
+
+	if creds.AccessToken == "" && creds.RefreshToken == "" {
+		return "", missingBearer(creds)
 	}
 
 	// Check if token is expired (with 5-minute buffer)
@@ -152,16 +165,11 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 		return creds.AccessToken, nil
 	}
 
-	// Fall back to session cookie for cookie-based auth.
-	if creds.SessionCookie != "" {
-		return creds.SessionCookie, nil
-	}
-
-	return "", errNoCredential("no access token or session cookie available", nil)
+	return "", missingBearer(creds)
 }
 
 // AuthenticateRequest sets the appropriate auth header on an HTTP request.
-// Uses Bearer token if available, otherwise falls back to session cookie.
+// Uses only bearer tokens; obsolete browser cookies are never sent.
 func (m *Manager) AuthenticateRequest(ctx context.Context, req *http.Request) error {
 	return m.authenticateRequest(ctx, req, false)
 }
@@ -217,12 +225,7 @@ func (m *Manager) authenticateRequest(ctx context.Context, req *http.Request, re
 		return nil
 	}
 
-	if creds.SessionCookie != "" {
-		req.Header.Set("Cookie", sessionCookieHeader(creds.SessionCookie))
-		return nil
-	}
-
-	return errNoCredential("no access token or session cookie available", nil)
+	return missingBearer(creds)
 }
 
 // AuthenticationStatus reports whether usable credentials exist. A missing
@@ -243,7 +246,7 @@ func (m *Manager) AuthenticationStatus() (bool, error) {
 	if err != nil {
 		return false, credentialLoadError(err)
 	}
-	return creds.AccessToken != "" || creds.SessionCookie != "", nil
+	return creds.AccessToken != "", nil
 }
 
 // IsAuthenticated reports whether usable credentials exist. Callers that need
@@ -376,15 +379,6 @@ func (m *Manager) LoginWithToken(token string) error {
 	return m.saveCredentials(creds)
 }
 
-// LoginWithCookie stores a session cookie.
-func (m *Manager) LoginWithCookie(cookie string) error {
-	creds := &Credentials{
-		SessionCookie: cookie,
-		OAuthType:     "cookie",
-	}
-	return m.saveCredentials(creds)
-}
-
 // OnCredentialCleared registers what to run when the manager clears a credential
 // on its own — today, when the server has refused the refresh token. Replacing a
 // credential with a signed-out record after deletion fails counts as clearing it.
@@ -477,20 +471,15 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		return pinErr
 	}
 	m.cachedCredentials = cloneCredentials(stored)
-	changed := stored.AccessToken != creds.AccessToken || stored.SessionCookie != creds.SessionCookie
-	if changed && (stored.AccessToken != "" || stored.SessionCookie != "") {
+	changed := stored.AccessToken != creds.AccessToken
+	if changed && stored.AccessToken != "" {
 		return nil
 	}
 	creds = cloneCredentials(stored)
-	if creds.AccessToken == "" && creds.RefreshToken == "" && creds.SessionCookie == "" {
-		return errNoCredential("stored credentials are signed out", nil)
+	if creds.AccessToken == "" && creds.RefreshToken == "" {
+		return missingBearer(creds)
 	}
 
-	// Cookie-based auth has nothing to refresh. The fresh read above still lets
-	// a 401 adopt a cookie another process stored before the SDK retries.
-	if creds.RefreshToken == "" && creds.SessionCookie != "" {
-		return nil
-	}
 	if creds.RefreshToken == "" {
 		return fmt.Errorf("no refresh token available")
 	}
@@ -850,11 +839,11 @@ func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL st
 	}
 }
 
-// sessionCookieHeader sends a browser session cookie under both of the names
-// HEY signs it with. Browsers signed in since HEY moved to __Host-session_token
-// hold that cookie; older ones hold session_token. The value's signature is
-// bound to its name, so HEY accepts it under one and ignores it under the other,
-// and stored cookies work whichever name they were copied from.
-func sessionCookieHeader(value string) string {
-	return "__Host-session_token=" + value + "; session_token=" + value
+// missingBearer recognizes old cookie-only records without treating their secrets
+// as tokens. Keeping the record readable also lets ordinary login/logout replace it.
+func missingBearer(creds *Credentials) error {
+	if creds.SessionCookie != "" {
+		return apierr.ErrAuth("browser session cookie authentication is no longer supported; sign in again with hey auth login")
+	}
+	return errNoCredential("no access token available", nil)
 }

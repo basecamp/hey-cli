@@ -112,6 +112,11 @@ func TestEveryDialCarriesCurrentCredentials(t *testing.T) {
 		t.Fatalf("dials = %d, want the client to have redialed at least once", len(headers))
 	}
 
+	for _, header := range headers {
+		if header.Get("Cookie") != "" {
+			t.Error("cable dial sent a Cookie header")
+		}
+	}
 	if got := headers[0].Get("Authorization"); got != "Bearer token-at-dial-time" {
 		t.Errorf("first dial Authorization = %q", got)
 	}
@@ -272,33 +277,42 @@ func TestDialHeaderRereadsStoredCredentials(t *testing.T) {
 
 	configDir := t.TempDir()
 	manager := auth.NewManager("https://app.hey.com", http.DefaultClient, configDir)
-	if err := manager.LoginWithCookie("cookie-at-first-dial"); err != nil {
-		t.Fatalf("store first cookie: %v", err)
+	if err := manager.LoginWithToken("token-at-first-dial"); err != nil {
+		t.Fatalf("store first token: %v", err)
 	}
 
 	first, err := authHeader(t.Context(), "https://app.hey.com", manager)
 	if err != nil {
 		t.Fatalf("first dial header: %v", err)
 	}
-	if got := first.Get("Cookie"); got != "__Host-session_token=cookie-at-first-dial; session_token=cookie-at-first-dial" {
-		t.Errorf("first dial Cookie = %q", got)
+	if got := first.Get("Authorization"); got != "Bearer token-at-first-dial" {
+		t.Errorf("first dial Authorization = %q", got)
 	}
 
 	replacement := auth.NewManager("https://app.hey.com", http.DefaultClient, configDir)
-	if err := replacement.LoginWithCookie("cookie-at-redial"); err != nil {
-		t.Fatalf("replace stored cookie: %v", err)
+	if err := replacement.LoginWithToken("token-at-redial"); err != nil {
+		t.Fatalf("replace stored token: %v", err)
 	}
 
 	redial, err := authHeader(t.Context(), "https://app.hey.com", manager)
 	if err != nil {
 		t.Fatalf("redial header: %v", err)
 	}
-	if got := redial.Get("Cookie"); got != "__Host-session_token=cookie-at-redial; session_token=cookie-at-redial" {
-		t.Errorf("redial Cookie = %q, want the replacement from storage", got)
+	if got := redial.Get("Authorization"); got != "Bearer token-at-redial" {
+		t.Errorf("redial Authorization = %q, want the replacement from storage", got)
 	}
 
+	if first.Get("Cookie") != "" || redial.Get("Cookie") != "" {
+		t.Error("dial sent a Cookie header")
+	}
+	if err := replacement.GetStore().Save(replacement.CredentialKey(), &auth.Credentials{SessionCookie: "obsolete-cookie", OAuthType: "cookie"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authHeader(t.Context(), "https://app.hey.com", manager); err == nil || !strings.Contains(err.Error(), "cookie authentication is no longer supported") {
+		t.Fatalf("dial adopted an obsolete cookie: %v", err)
+	}
 	if err := replacement.Logout(); err != nil {
-		t.Fatalf("delete stored cookie: %v", err)
+		t.Fatalf("delete obsolete credential: %v", err)
 	}
 	if _, err := authHeader(t.Context(), "https://app.hey.com", manager); err == nil || !strings.Contains(err.Error(), "not authenticated") {
 		t.Errorf("dial after deletion error = %v, want not authenticated", err)

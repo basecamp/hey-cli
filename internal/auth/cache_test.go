@@ -337,13 +337,6 @@ func TestRefreshRereadsStoredAuthentication(t *testing.T) {
 			wantHeader:  "Authorization",
 			wantValue:   "Bearer replacement-token",
 		},
-		{
-			name:        "cookie",
-			old:         &Credentials{SessionCookie: "old-cookie", OAuthType: "cookie"},
-			replacement: &Credentials{SessionCookie: "replacement-cookie", OAuthType: "cookie"},
-			wantHeader:  "Cookie",
-			wantValue:   "__Host-session_token=replacement-cookie; session_token=replacement-cookie",
-		},
 	}
 
 	for _, tt := range tests {

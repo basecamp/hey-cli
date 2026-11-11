@@ -11,7 +11,7 @@ package cmd
 //     off the bar: a plugin the user disabled stays disabled, whatever the
 //     marker says. Its only mutation is `omarchy plugin add`, on fresh consent
 //     or a pending retry, and it never runs for machine output, HEY_NONINTERACTIVE,
-//     a non-TTY, or a --token/--cookie login.
+//     a non-TTY, or a --token login.
 //   - Force mode (`hey setup omarchy`) records its intent before acting, so a
 //     crash leaves a pending install the next explicit setup finishes — never
 //     a quiet skip — and it never reports success unless the running shell

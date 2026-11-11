@@ -35,7 +35,7 @@ var (
 )
 
 // cliAuthStrategy bridges the CLI's auth.Manager to the SDK's AuthStrategy interface.
-// This preserves session cookie support (which the SDK's BearerAuth doesn't have).
+// It keeps proactive refresh, 401 renewal, and credential-store reloads in the Manager.
 type cliAuthStrategy struct {
 	mgr *auth.Manager
 }

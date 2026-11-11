@@ -1,6 +1,7 @@
 package smoke_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -100,8 +101,8 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	// Authenticate the CLI with the obtained session cookie.
-	if err := setupCLI(sessionCookie); err != nil {
+	// Authenticate the CLI through its real browser OAuth/PKCE flow.
+	if err := setupCLI("auth", "login"); err != nil {
 		fmt.Fprintf(os.Stderr, "CLI setup failed: %v\n", err)
 		os.Exit(1)
 	}
@@ -190,8 +191,8 @@ func dataAs[T any](t *testing.T, resp Response) T {
 }
 
 // cliEnv returns the environment variables used for all CLI invocations. The
-// caller's HEY_TOKEN is dropped: the suite authenticates with the cookie TestMain
-// stored, and an inherited token would silently stand in for it on every command.
+// caller's HEY_TOKEN is dropped: the suite authenticates with the OAuth grant TestMain
+// obtained, and an inherited token would silently stand in for it on every command.
 // The caller's HOME and OMARCHY_PATH are replaced too, so a suite run on a
 // developer's Omarchy desktop can never detect it — the sign-in hook and
 // `hey setup omarchy` would otherwise talk to the real shell.
@@ -276,12 +277,78 @@ func serverReachable(base string) bool {
 	return true
 }
 
-func setupCLI(cookie string) error {
-	cmd := exec.Command(binaryPath, "auth", "login", "--cookie", cookie)
+// setupCLI exercises the CLI's actual PKCE callback and token exchange. The browser
+// alone uses the account session; no browser cookie is handed to the CLI. Keep all
+// CLI progress private because it contains OAuth state and the authorization URL.
+func setupCLI(loginPath ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	args := append(append([]string{}, loginPath...), "--no-browser")
+	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	cmd.Env = cliEnv()
-	out, err := cmd.CombinedOutput()
+	cmd.Stdout = io.Discard
+	progress, err := cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("hey auth login --cookie failed: %v\noutput: %s", err, out)
+		return fmt.Errorf("open CLI OAuth progress pipe: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start CLI OAuth login: %w", err)
+	}
+	defer func() {
+		cancel()
+		if cmd.ProcessState == nil {
+			_ = cmd.Wait()
+		}
+	}()
+
+	authorization := make(chan string, 1)
+	go func() {
+		defer close(authorization)
+		scanner := bufio.NewScanner(progress)
+		found := false
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			u, err := url.Parse(line)
+			base, baseErr := url.Parse(baseURL)
+			if !found && err == nil && baseErr == nil && u.Scheme == base.Scheme && u.Host == base.Host && u.Path == "/oauth/authorizations/new" && u.Query().Get("code_challenge_method") == "S256" {
+				authorization <- line
+				found = true
+			}
+		}
+	}()
+
+	var authURL string
+	select {
+	case authURL = <-authorization:
+		if authURL == "" {
+			return fmt.Errorf("CLI did not offer a PKCE authorization URL; check the registered CLI OAuth app")
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("timed out waiting for CLI OAuth authorization")
+	}
+
+	browser, browserCancel, allocCancel := newBrowserContext()
+	defer allocCancel()
+	defer browserCancel()
+	browser, timeoutCancel := context.WithTimeout(browser, 45*time.Second)
+	defer timeoutCancel()
+	base, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("invalid smoke server base URL")
+	}
+	if err := chromedp.Run(browser,
+		network.SetCookie("session_token", sessionCookie).WithDomain(base.Hostname()).WithPath("/").WithHTTPOnly(true),
+		chromedp.Navigate(authURL),
+		chromedp.WaitVisible(`form[action="/oauth/authorizations"] input[type="submit"]`, chromedp.ByQuery),
+		// Submit the consent form directly: a coordinate click can miss while
+		// the page's styles settle, leaving the CLI waiting for its callback.
+		chromedp.Submit(`form[action="/oauth/authorizations"] input[type="submit"]`, chromedp.ByQuery),
+	); err != nil {
+		// Browser errors can contain the URL, including OAuth codes or state.
+		return fmt.Errorf("browser OAuth consent failed; check the registered CLI app and server")
+	}
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("CLI OAuth login did not complete successfully")
 	}
 	return nil
 }

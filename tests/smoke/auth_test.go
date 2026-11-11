@@ -2,6 +2,7 @@ package smoke_test
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -17,24 +18,19 @@ func TestAuthStatus(t *testing.T) {
 	}
 }
 
-// TestMain authenticates with a browser session cookie, and auth token refuses
-// to print a cookie as a bearer token: HEY sends it as a Cookie header, so
-// handing it out as "Authorization: Bearer" would 401 with nothing to explain
-// it. The refusal is the command's behavior under this suite's auth method.
+// Never include token command output in a failure: these are real dev OAuth tokens.
 func TestAuthToken(t *testing.T) {
-	_, stderr, code := hey(t, "auth", "token")
-	if code != 3 {
-		t.Fatalf("expected auth token to refuse the session cookie with exit 3, got exit %d: %s", code, stderr)
+	stdout, _, code := hey(t, "auth", "token")
+	if code != 0 || strings.TrimSpace(stdout) == "" || strings.Contains(stdout, sessionCookie) {
+		t.Fatal("auth token did not return an OAuth bearer token")
 	}
-	assertContains(t, stderr, "browser session cookie")
 }
 
 func TestAuthTokenStored(t *testing.T) {
-	_, stderr, code := hey(t, "auth", "token", "--stored")
-	if code != 3 {
-		t.Fatalf("expected auth token --stored to refuse the session cookie with exit 3, got exit %d: %s", code, stderr)
+	stdout, _, code := hey(t, "auth", "token", "--stored")
+	if code != 0 || strings.TrimSpace(stdout) == "" || strings.Contains(stdout, sessionCookie) {
+		t.Fatal("auth token --stored did not return an OAuth bearer token")
 	}
-	assertContains(t, stderr, "browser session cookie")
 }
 
 func TestAuthRefresh(t *testing.T) {
@@ -65,8 +61,10 @@ func TestAuthLogoutAndRelogin(t *testing.T) {
 		t.Errorf("expected 'hey box list' to fail when not authenticated")
 	}
 
-	// Re-login with cookie.
-	heyOK(t, "auth", "login", "--cookie", sessionCookie)
+	// Re-login through browser OAuth.
+	if err := setupCLI("auth", "login"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Verify we're logged back in.
 	resp2 := heyJSON(t, "auth", "status")
@@ -85,9 +83,11 @@ func TestLoginLogoutShortcuts(t *testing.T) {
 	}
 
 	// hey login == hey auth login.
-	heyOK(t, "login", "--cookie", sessionCookie)
+	if err := setupCLI("login"); err != nil {
+		t.Fatal(err)
+	}
 	status = heyJSON(t, "auth", "status")
 	if data := dataAs[map[string]any](t, status); data["authenticated"] != true {
-		t.Errorf("expected authenticated=true after hey login --cookie")
+		t.Errorf("expected authenticated=true after hey login")
 	}
 }

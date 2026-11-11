@@ -112,7 +112,7 @@ func TestAuthLoginMCPKeepsTheCLIsCredentialAndStatusShowsBoth(t *testing.T) {
 	}
 }
 
-func TestAuthLoginMCPTakesNoTokenOrCookie(t *testing.T) {
+func TestAuthLoginMCPTakesNoToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
 	}))
