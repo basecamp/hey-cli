@@ -179,9 +179,8 @@ func localRefusal(name string, result *localapp.Result) error {
 		refusal.Message += terminal.SanitizeLine(" (" + detail + ")")
 	}
 	arg, _ := reason["arg"].(string)
-	available, listsAvailable := reason["available"].([]any)
 	switch {
-	case arg != "" && listsAvailable && len(available) == 0:
+	case arg != "" && localOffersNothing(reason):
 		// Nothing would do, so nothing the caller sent was wrong: the app holds none now,
 		// or could not load what it would choose from.
 		refusal.Hint = "The app holds nothing this takes now: hey local tools lists what it offers"
@@ -198,6 +197,17 @@ func localRefusal(name string, result *localapp.Result) error {
 		refusal.Hint = "Sign in to HEY in the app"
 	}
 	return refusal
+}
+
+// localOffersNothing reports a refusal whose list of what the argument would take, its
+// ids or its cases, is there and empty.
+func localOffersNothing(reason map[string]any) bool {
+	for _, key := range []string{"available", "cases"} {
+		if values, ok := reason[key].([]any); ok && len(values) == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // localArgumentHint says what a refused argument would take: the ids the app offers it

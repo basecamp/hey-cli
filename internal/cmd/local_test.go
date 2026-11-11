@@ -413,8 +413,9 @@ func TestLocalAListTheAppCouldNotLoadIsAnAPIFailure(t *testing.T) {
 	door := localapptest.Start(t)
 	door.Refuse("imbox.list", map[string]any{"error": "unavailable"})
 	door.Refuse("screener.decide", map[string]any{"error": "unavailable", "arg": "sender", "of": "sender", "given": 42, "available": []int{}})
+	door.Refuse("screener.list", map[string]any{"error": "no_such_case", "arg": "box", "cases": []string{}})
 
-	for _, args := range [][]string{{"imbox"}, {"screener", "deny", "42"}} {
+	for _, args := range [][]string{{"imbox"}, {"screener", "deny", "42"}, {"screener", "list"}} {
 		_, _, err := runLocal(t, door.Path, append(args, "--json")...)
 		if output.ExitCodeFor(err) != output.ExitAPI {
 			t.Errorf("%v: exit = %d (%v)", args, output.ExitCodeFor(err), err)

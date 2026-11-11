@@ -230,7 +230,10 @@ func (c *Client) initialize(ctx context.Context) error {
 		return &ProtocolError{Reason: "initialize answered with no protocolVersion"}
 	}
 	c.Server = answer.ServerInfo
-	return c.notify("notifications/initialized")
+	if err := c.notify("notifications/initialized"); err != nil {
+		return c.exchangeError(ctx, "initialize", err)
+	}
+	return nil
 }
 
 func (c *Client) notify(method string) error {
