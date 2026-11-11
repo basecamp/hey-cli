@@ -70,7 +70,7 @@ func imboxDoor(t *testing.T) *localapptest.Door {
 func TestLocalToolsListsWhatTheAppOffersAndWhatEachDoes(t *testing.T) {
 	door := localapptest.Start(t)
 	door.Offer("imbox.list", "Lists the threads in the Imbox", "read")
-	door.Offer("screener.decide", "Screens a sender in or out", "reversible")
+	door.Offer("screener.decide", "Screens a sender in or out", "reversible", "sender", "decision")
 	door.Offer("message.send", "Sends a saved draft once you confirm it in HEY", "reaches_people")
 
 	stdout, _, err := runLocal(t, door.Path, "tools", "--json")
@@ -86,7 +86,7 @@ func TestLocalToolsListsWhatTheAppOffersAndWhatEachDoes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(styled, "message.send") || !strings.Contains(styled, "waits for you in HEY") {
+	if !strings.Contains(styled, "message.send") || !strings.Contains(styled, "waits for you in HEY") || !strings.Contains(styled, "decision, sender") {
 		t.Errorf("styled = %s", styled)
 	}
 }
@@ -310,13 +310,15 @@ func TestLocalWithNoSocketSaysToTurnTheDoorOn(t *testing.T) {
 }
 
 func TestLocalWithNoRuntimeFolderSaysWhereToLook(t *testing.T) {
-	t.Setenv("XDG_RUNTIME_DIR", "")
+	for _, runtime := range []string{"", "run/user/1000"} {
+		t.Setenv("XDG_RUNTIME_DIR", runtime)
 
-	_, _, err := runLocal(t, "", "imbox")
+		_, _, err := runLocal(t, "", "imbox")
 
-	failure := apierr.AsError(err)
-	if !strings.Contains(failure.Message, "XDG_RUNTIME_DIR") || !strings.Contains(failure.Hint, "--socket") {
-		t.Errorf("err = %q, hint = %q", failure.Message, failure.Hint)
+		failure := apierr.AsError(err)
+		if !strings.Contains(failure.Message, "XDG_RUNTIME_DIR is not set to an absolute path") || !strings.Contains(failure.Hint, "--socket") {
+			t.Errorf("XDG_RUNTIME_DIR=%q: err = %q, hint = %q", runtime, failure.Message, failure.Hint)
+		}
 	}
 }
 
@@ -531,7 +533,122 @@ func TestLocalSignedOutOfTheAppIsAnAuthFailureThatNamesTheApp(t *testing.T) {
 	if output.ExitCodeFor(err) != output.ExitAuth {
 		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
 	}
-	if hint := apierr.AsError(err).Hint; strings.Contains(hint, "hey auth login") {
+	if hint := apierr.AsError(err).Hint; hint != "Sign in to HEY in the app" {
 		t.Errorf("hint = %q: the app's sign-in is not the CLI's", hint)
+	}
+}
+
+// An undo reaches the app the decision did: a --socket given goes into it, quoted.
+func TestLocalAnUndoCarriesTheSocketItWasGiven(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("screener.decide", map[string]any{"sender": 42, "screened": "out"})
+
+	stdout, _, err := runLocal(t, filepath.Join(t.TempDir(), "elsewhere.sock"), "--socket", door.Path, "screener", "deny", "42", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := localEnvelope(t, stdout)
+	if want := "hey local --socket '" + door.Path + "' screener approve 42"; len(resp.Breadcrumbs) != 1 || resp.Breadcrumbs[0].Command != want {
+		t.Errorf("breadcrumbs = %+v, want %q", resp.Breadcrumbs, want)
+	}
+}
+
+func screenerListDoor(t *testing.T, waitingCount int) *localapptest.Door {
+	t.Helper()
+	door := localapptest.Start(t)
+	door.Answer("screener.list", map[string]any{
+		"waiting":       []map[string]any{{"id": 51, "name": "Priya Natarajan", "address": "priya@example.com"}},
+		"waiting_count": waitingCount,
+		"decided":       []map[string]any{{"id": 52, "name": "Glenn Hoffman", "address": "glenn@example.org", "screened_in": false}},
+	})
+	return door
+}
+
+func TestLocalScreenerListGivesIDsAndACountOfEveryoneItHolds(t *testing.T) {
+	door := screenerListDoor(t, 1)
+
+	ids, _, err := runLocal(t, door.Path, "screener", "list", "--ids-only")
+	if err != nil || ids != "51\n52\n" {
+		t.Errorf("--ids-only = %q (%v)", ids, err)
+	}
+	count, _, err := runLocal(t, door.Path, "screener", "list", "--count")
+	if err != nil || strings.TrimSpace(count) != "2" {
+		t.Errorf("--count = %q (%v)", count, err)
+	}
+}
+
+// waiting_count counts everyone waiting, which may be more than the app lists.
+func TestLocalScreenerListSaysWhenMoreWaitThanItLists(t *testing.T) {
+	door := screenerListDoor(t, 6)
+
+	styled, _, err := runLocal(t, door.Path, "screener", "list", "--styled")
+	if err != nil || !strings.Contains(styled, "5 more senders waiting than the app lists.") {
+		t.Errorf("styled = %q (%v)", styled, err)
+	}
+	_, stderr, err := runLocal(t, door.Path, "screener", "list", "--ids-only")
+	if err != nil || !strings.Contains(stderr, "5 more senders waiting") {
+		t.Errorf("--ids-only stderr = %q (%v)", stderr, err)
+	}
+
+	empty := localapptest.Start(t)
+	empty.Answer("screener.list", map[string]any{"waiting": []any{}, "waiting_count": 5, "decided": []any{}})
+	styled, _, _ = runLocal(t, empty.Path, "screener", "list", "--styled")
+	if strings.Contains(styled, "Nobody waits") || !strings.Contains(styled, "5 more senders waiting") {
+		t.Errorf("empty styled = %q", styled)
+	}
+}
+
+// The app may hold more of the Imbox than it has loaded, and a list that stops short says
+// so in every format, never only in the envelope.
+func TestLocalImboxSaysWhenTheAppHoldsMoreInEveryFormat(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("imbox.list", map[string]any{"threads": []any{}, "has_more": true})
+
+	styled, _, _ := runLocal(t, door.Path, "imbox", "--styled")
+	if strings.Contains(styled, "Nothing in the Imbox") || !strings.Contains(styled, "more threads than the app has loaded") {
+		t.Errorf("styled = %q", styled)
+	}
+	for _, format := range []string{"--ids-only", "--count", "--quiet"} {
+		_, stderr, err := runLocal(t, door.Path, "imbox", format)
+		if err != nil || !strings.Contains(stderr, "more threads than the app has loaded") {
+			t.Errorf("%s stderr = %q (%v)", format, stderr, err)
+		}
+	}
+}
+
+// A send the app took is pending; any other answer to it is not a send this knows.
+func TestLocalASendNotAnsweredPendingIsAnAPIFailure(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("message.send", map[string]any{})
+
+	stdout, _, err := runLocal(t, door.Path, "send", "1731280000123", "--json")
+	if output.ExitCodeFor(err) != output.ExitAPI {
+		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
+	}
+	if strings.Contains(stdout, "HEY ran") {
+		t.Errorf("stdout = %q", stdout)
+	}
+}
+
+func TestLocalCallRefusesAnArgumentGivenTwice(t *testing.T) {
+	door := localapptest.Start(t)
+
+	_, _, err := runLocal(t, door.Path, "call", "screener.decide", "--arg", "sender=42", "--arg", "sender=43")
+	if output.ExitCodeFor(err) != output.ExitUsage {
+		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
+	}
+	if calls := door.Calls(); len(calls) != 0 {
+		t.Errorf("calls = %s", calls)
+	}
+}
+
+// A decision the app says it took otherwise is the app's to explain, not an old hey.
+func TestLocalADecisionAnsweredOtherwiseDoesNotBlameTheCLIsVersion(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("screener.decide", map[string]any{"sender": 42, "screened": "out"})
+
+	_, _, err := runLocal(t, door.Path, "screener", "approve", "42")
+	if hint := apierr.AsError(err).Hint; strings.Contains(hint, "upgrade") {
+		t.Errorf("hint = %q", hint)
 	}
 }

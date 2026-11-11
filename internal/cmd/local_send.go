@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type localSendCommand struct {
@@ -47,9 +48,11 @@ func (c *localSendCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil || draft <= 0 {
 		return apierr.ErrUsage(fmt.Sprintf("invalid draft ID: %s", args[0]))
 	}
+	// A send the app took comes back pending, and callLocal has written it; anything else
+	// it answered is not a send this command knows, and never reads as one.
 	result, err := callLocal(cmd, "message.send", map[string]any{"draft": draft})
 	if err != nil {
 		return err
 	}
-	return writeLocalAnswer(cmd, "message.send", result)
+	return localUnreadable("message.send", fmt.Errorf("it is not pending: %s", terminal.SanitizeLine(string(result.Answer()))))
 }

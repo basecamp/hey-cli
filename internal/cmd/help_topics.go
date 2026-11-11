@@ -47,7 +47,8 @@ EXIT CODES
      message as a draft instead of sending it (not_delivered).
   8  The request matched more than one resource.
   9  Pending: the HEY app took the request and waits in its window for you to
-     confirm it (hey local send). Nothing has happened yet.
+     confirm it (hey local send, or hey local call of a send). Nothing has
+     happened yet.
 
 JSON failures also carry a machine-readable error code and an actionable hint when one is available.`,
 		},

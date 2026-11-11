@@ -2,7 +2,10 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -72,13 +75,13 @@ func (c *localToolsCommand) run(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"Command", "Effect", "Description"})
+		table.addRow([]string{"Command", "Effect", "Arguments", "Description"})
 		for _, tool := range tools {
 			effect := localEffects[tool.Effect]
 			if effect == "" {
 				effect = tool.Effect
 			}
-			table.addRow([]string{tool.Name, effect, truncate(tool.Description, 60)})
+			table.addRow([]string{tool.Name, effect, localArgumentNames(tool.InputSchema), truncate(tool.Description, 60)})
 		}
 		table.print()
 		return nil
@@ -87,6 +90,27 @@ func (c *localToolsCommand) run(cmd *cobra.Command, _ []string) error {
 		output.WithSummary(fmt.Sprintf("HEY offers %d %s", len(tools), localCommandNoun(len(tools)))),
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "call", Command: "hey local call <command> --arg name=value", Description: "Run one"}),
 	)
+}
+
+// localArgumentNames names the arguments a tool's schema declares, in order of name, for
+// a person to read; --json carries the whole schema.
+func localArgumentNames(schema any) string {
+	raw, ok := schema.(json.RawMessage)
+	if !ok {
+		return ""
+	}
+	var declared struct {
+		Properties map[string]any `json:"properties"`
+	}
+	if json.Unmarshal(raw, &declared) != nil {
+		return ""
+	}
+	names := make([]string, 0, len(declared.Properties))
+	for name := range declared.Properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 func localCommandNoun(count int) string {

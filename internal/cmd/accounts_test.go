@@ -29,6 +29,9 @@ func TestCommandAccountScopePolicy(t *testing.T) {
 		{args: []string{"auth", "status"}, want: false},
 		{args: []string{"config", "show"}, want: false},
 		{args: []string{"shell-completion", "install"}, want: false},
+		// hey local talks to the app on this computer, never to HEY's server.
+		{args: []string{"local", "tools"}, want: false},
+		{args: []string{"local", "screener", "deny"}, want: false},
 	} {
 		command, _, err := root.Find(test.args)
 		if err != nil {
@@ -398,4 +401,20 @@ func runAccountsCLIWithConfig(t *testing.T, server *httptest.Server, configDir s
 	root.SetArgs(append([]string{"--json", "--base-url", server.URL}, args...))
 	err := root.Execute()
 	return output.String(), err
+}
+
+func TestLocalSkipsWhatOnlyHEYsServerNeeds(t *testing.T) {
+	root := newRootCmd()
+	for _, args := range [][]string{{"local", "imbox"}, {"local", "send"}} {
+		command, _, err := root.Find(args)
+		if err != nil {
+			t.Fatalf("Find(%v): %v", args, err)
+		}
+		if !commandSkipsCredentialMigration(command) {
+			t.Errorf("%v migrates credentials it never reads", args)
+		}
+		if !commandIgnoresLocalConfig(command) {
+			t.Errorf("%v reads a repository's server and account config", args)
+		}
+	}
 }

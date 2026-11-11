@@ -12,11 +12,14 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+
+	"github.com/basecamp/hey-cli/internal/localapp"
 )
 
-// Door answers initialize, tools/list and tools/call. A test fills Tools and Results, and
-// may make a method answer with a JSON-RPC error (Errors) or with a line of its own
-// (Raw), to see what a client makes of an app that misbehaves.
+// Door answers initialize, tools/list and tools/call. A test offers tools (Offer) and
+// sets what a call answers (Answer, Refuse, AnswerRaw), and may make a method answer with
+// a JSON-RPC error (Fail), with a line of its own (Reply) or not at all (Hang), to see what
+// a client makes of an app that misbehaves.
 type Door struct {
 	Path string
 
@@ -25,6 +28,7 @@ type Door struct {
 	results  map[string]map[string]any
 	errors   map[string]RPCError
 	raw      map[string]string
+	hang     map[string]bool
 	requests []Request
 }
 
@@ -48,6 +52,7 @@ func Start(t testing.TB) *Door {
 		results: map[string]map[string]any{},
 		errors:  map[string]RPCError{},
 		raw:     map[string]string{},
+		hang:    map[string]bool{},
 	}
 	go door.serve(listener)
 	return door
@@ -78,16 +83,32 @@ func Listen(t testing.TB) (string, *net.UnixListener) {
 	return path, unix
 }
 
-// Offer lists a tool, with the effect the door names in its _meta.
-func (d *Door) Offer(name, description, effect string) {
+// Offer lists a tool, with the effect the door names in its _meta and the arguments its
+// schema declares, each required, as the door's are.
+func (d *Door) Offer(name, description, effect string, arguments ...string) {
+	properties := map[string]any{}
+	for _, argument := range arguments {
+		properties[argument] = map[string]any{"type": "string"}
+	}
+	if arguments == nil {
+		arguments = []string{}
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.tools = append(d.tools, map[string]any{
 		"name":        name,
 		"description": description,
-		"inputSchema": map[string]any{"type": "object", "additionalProperties": false},
+		"inputSchema": map[string]any{"type": "object", "properties": properties, "required": arguments, "additionalProperties": false},
 		"_meta":       map[string]any{"com.hey/effect": effect},
 	})
+}
+
+// AnswerRaw makes a tools/call of name answer with result, as written, for a result that
+// is not what Answer builds.
+func (d *Door) AnswerRaw(name string, result map[string]any) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.results[name] = result
 }
 
 // Answer makes a tools/call of name answer structured, done.
@@ -112,6 +133,13 @@ func (d *Door) Reply(method, line string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.raw[method] = line
+}
+
+// Hang makes method go unanswered, the connection left open.
+func (d *Door) Hang(method string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.hang[method] = true
 }
 
 // Requests is every message the door has read, notifications included, in order.
@@ -159,6 +187,7 @@ func (d *Door) serve(listener net.Listener) {
 func (d *Door) converse(conn net.Conn) {
 	defer conn.Close()
 	lines := bufio.NewScanner(conn)
+	lines.Buffer(make([]byte, 0, 64<<10), localapp.MaxLine)
 	for lines.Scan() {
 		var request struct {
 			ID     json.RawMessage `json:"id"`
@@ -173,9 +202,10 @@ func (d *Door) converse(conn net.Conn) {
 		d.requests = append(d.requests, Request{Method: request.Method, Params: request.Params})
 		raw, isRaw := d.raw[request.Method]
 		failure, fails := d.errors[request.Method]
+		hangs := d.hang[request.Method]
 		d.mu.Unlock()
 
-		if len(request.ID) == 0 {
+		if len(request.ID) == 0 || hangs {
 			continue
 		}
 		switch {

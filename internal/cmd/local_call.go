@@ -67,11 +67,16 @@ func localArguments(object []string, pairs []string) (map[string]any, error) {
 				`Pass an object, like '{"sender": 42}', or --arg sender=42`)
 		}
 	}
+	given := map[string]bool{}
 	for _, pair := range pairs {
 		name, value, ok := strings.Cut(pair, "=")
 		if !ok || name == "" {
 			return nil, apierr.ErrUsage(fmt.Sprintf("--arg %s is not name=value", pair))
 		}
+		if given[name] {
+			return nil, apierr.ErrUsage(fmt.Sprintf("--arg %s is given twice", name))
+		}
+		given[name] = true
 		arguments[name] = localArgumentValue(value)
 	}
 	return arguments, nil

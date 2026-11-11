@@ -68,6 +68,10 @@ func (c *localImboxCommand) run(cmd *cobra.Command, _ []string) error {
 
 	if writer.IsStyled() {
 		if len(imbox.Threads) == 0 {
+			if notice != "" {
+				fmt.Fprintln(cmd.OutOrStdout(), notice)
+				return nil
+			}
 			fmt.Fprintln(cmd.OutOrStdout(), "Nothing in the Imbox")
 			return nil
 		}
@@ -87,16 +91,12 @@ func (c *localImboxCommand) run(cmd *cobra.Command, _ []string) error {
 		}
 		return nil
 	}
+	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
+	}
 	return writeOK(imbox.Threads,
-		output.WithSummary(fmt.Sprintf("%d %s in the Imbox", len(imbox.Threads), localThreadNoun(len(imbox.Threads)))),
+		output.WithSummary(fmt.Sprintf("%d %s in the Imbox", len(imbox.Threads), threadNoun(len(imbox.Threads)))),
 		output.WithNotice(notice),
 		output.WithMeta("has_more", imbox.HasMore),
 	)
-}
-
-func localThreadNoun(count int) string {
-	if count == 1 {
-		return "thread"
-	}
-	return "threads"
 }

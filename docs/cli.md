@@ -366,8 +366,9 @@ Move destinations are Imbox, The Feed, Set Aside, Reply Later, or Paper Trail. M
 
 `hey local` asks the HEY desktop app on this computer to act for you, through the door it
 opens while "Let agents use HEY" is on in its Settings: `hey local imbox`,
-`hey local screener list|approve|deny`, `hey local send`, and `hey local call` for any
-command `hey local tools` lists. It reaches the app alone, never HEY's servers, and needs
+`hey local screener list`, `hey local screener approve`, `hey local screener deny`,
+`hey local send`, and `hey local call` for any command `hey local tools` lists. The app
+opens that door on Linux only, for now. It reaches the app alone, never HEY's servers, and needs
 no sign-in. A send waits in the HEY window for you to press Send and exits 9, pending.
 The effects, the socket and the exit codes are in [agents.md](agents.md#the-hey-app-on-your-computer-hey-local).
 

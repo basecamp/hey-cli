@@ -49,8 +49,11 @@ func decideLocally(cmd *cobra.Command, value, decision string) error {
 	}
 	// Said back by the app, so a decision it took any other way is never reported as this one.
 	decided, err := decodeLocalAnswerAs("screener.decide", result, func(decided localDecision) error {
+		if decided.Screened != "in" && decided.Screened != "out" {
+			return fmt.Errorf("it says sender %d was screened %q", decided.Sender, decided.Screened)
+		}
 		if decided.Sender != sender || decided.Screened != decision {
-			return fmt.Errorf("it answered sender %d screened %q, not %d screened %q", decided.Sender, decided.Screened, sender, decision)
+			return &localOtherwiseError{fmt.Sprintf("it says sender %d was screened %s, not %d screened %s", decided.Sender, decided.Screened, sender, decision)}
 		}
 		return nil
 	})
@@ -63,11 +66,20 @@ func decideLocally(cmd *cobra.Command, value, decision string) error {
 	if decided.Screened == "in" {
 		opposite, undo, verb = "deny", "Screen them out again", "screened in"
 	}
-	reverse := fmt.Sprintf("hey local screener %s %d", opposite, sender)
+	reverse := fmt.Sprintf("hey local %sscreener %s %d", localSocketArgument(), opposite, sender)
 	return writeMutationLine(cmd,
 		fmt.Sprintf("Sender %d %s. Undo with: %s", sender, verb, reverse),
 		fmt.Sprintf("Sender %d %s", sender, verb),
 		decided,
 		output.WithBreadcrumbs(output.Breadcrumb{Action: opposite, Command: reverse, Description: undo}),
 	)
+}
+
+// localSocketArgument is the --socket this run was given, as a command a person can paste,
+// so an undo reaches the same app. HEY_LOCAL_SOCKET stays in the shell that set it.
+func localSocketArgument() string {
+	if localSocketFlag == "" {
+		return ""
+	}
+	return "--socket " + shellQuoted(localSocketFlag) + " "
 }

@@ -75,7 +75,7 @@ func withLocalApp(cmd *cobra.Command, talk func(context.Context, *localapp.Clien
 	path, err := localapp.SocketPath(localSocketFlag)
 	if err != nil {
 		return apierr.ErrUsageHint(
-			"XDG_RUNTIME_DIR is not set, so there is no HEY socket to look for",
+			"XDG_RUNTIME_DIR is not set to an absolute path, so there is no HEY socket to look for",
 			"Run hey local from your desktop session, or pass --socket <path>",
 		)
 	}
@@ -313,6 +313,12 @@ func decodeLocalAnswer(name string, result *localapp.Result) (any, error) {
 	return answer, nil
 }
 
+// localOtherwiseError is what a complete func returns for an answer whose shape is right
+// but whose content says the app did something else.
+type localOtherwiseError struct{ said string }
+
+func (e *localOtherwiseError) Error() string { return e.said }
+
 // decodeLocalAnswerAs reads a command's answer into the shape the command's sugar knows,
 // and refuses one that is not that shape, or that complete says lacks what the command
 // must have, rather than show it as empty or as done.
@@ -326,9 +332,24 @@ func decodeLocalAnswerAs[T any](name string, result *localapp.Result, complete f
 		return answer, localUnreadable(name, err)
 	}
 	if err := complete(answer); err != nil {
+		var otherwise *localOtherwiseError
+		if errors.As(err, &otherwise) {
+			return answer, localAnsweredOtherwise(name, err)
+		}
 		return answer, localUnreadable(name, err)
 	}
 	return answer, nil
+}
+
+// localAnsweredOtherwise is an answer the app gave in the right shape that says it did
+// something other than what was asked.
+func localAnsweredOtherwise(name string, cause error) error {
+	return &apierr.Error{
+		Code:    apierr.CodeAPI,
+		Message: terminal.SanitizeLine(fmt.Sprintf("HEY's answer to %s is not what was asked: %v", name, cause)),
+		Hint:    "Check in the HEY app what it did",
+		Cause:   cause,
+	}
 }
 
 func localUnreadable(name string, cause error) error {

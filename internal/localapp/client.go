@@ -20,6 +20,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/basecamp/hey-cli/internal/version"
 )
 
 // ProtocolVersion is the MCP revision the client asks for. initialize, tools/list and
@@ -31,17 +33,16 @@ const ProtocolVersion = "2025-06-18"
 // reaches_people.
 const EffectMetaKey = "com.hey/effect"
 
-// maxLine bounds one message from the app. An Imbox listing is a few hundred kilobytes
+// MaxLine bounds one message from the app. An Imbox listing is a few hundred kilobytes
 // at most; a line past this is not an answer worth waiting for.
-const maxLine = 16 << 20
+const MaxLine = 16 << 20
 
 // Client is one connection to the app's door, initialized and ready for calls. It sends
 // one request at a time and reads its answer before the next.
 type Client struct {
-	conn    net.Conn
-	lines   *bufio.Scanner
-	lastID  int64
-	stopped func() bool
+	conn   net.Conn
+	lines  *bufio.Scanner
+	lastID int64
 
 	// Server is what the app said about itself in its initialize answer.
 	Server ServerInfo
@@ -87,8 +88,8 @@ type Pending struct {
 	Snapshot     json.RawMessage `json:"snapshot,omitempty"`
 }
 
-// Dial connects to the door at path and initializes the session. ctx bounds the dial and,
-// through its deadline, every exchange on the connection after it.
+// Dial connects to the door at path and initializes the session. ctx bounds the dial and
+// the initialize; each later call is bounded by its own.
 func Dial(ctx context.Context, path string) (*Client, error) {
 	// Asked first, since a path too long for a socket's address fails the dial with
 	// EINVAL whether or not there is anything there.
@@ -101,10 +102,13 @@ func Dial(ctx context.Context, path string) (*Client, error) {
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
 			return nil, &DoorClosedError{Path: path, Cause: err}
 		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, &TimeoutError{Method: "connect", Cause: ctxErr}
+		}
 		return nil, &ConnectError{Path: path, Cause: err}
 	}
 
-	client := newClient(ctx, conn)
+	client := newClient(conn)
 	if err := client.initialize(ctx); err != nil {
 		_ = client.Close()
 		return nil, err
@@ -128,6 +132,10 @@ func (c *Client) Tools(ctx context.Context) ([]Tool, error) {
 		if err := c.request(ctx, "tools/list", params, &page); err != nil {
 			return nil, err
 		}
+		// An empty list is the app with nobody signed in; no list at all is no answer.
+		if page.Tools == nil {
+			return nil, &ProtocolError{Method: "tools/list", Reason: "the result lists no tools"}
+		}
 		tools = append(tools, page.Tools...)
 		if page.NextCursor == "" {
 			return tools, nil
@@ -147,11 +155,15 @@ func (c *Client) Call(ctx context.Context, name string, arguments map[string]any
 	if err := c.request(ctx, "tools/call", map[string]any{"name": name, "arguments": arguments}, &result); err != nil {
 		return nil, err
 	}
+	// MCP's result always carries content. One that does not is no answer, unless it says
+	// it is pending, which is never read as anything less.
+	if _, pending := result.Pending(); result.Content == nil && !pending {
+		return nil, &ProtocolError{Method: "tools/call", Reason: "the result carries no content"}
+	}
 	return &result, nil
 }
 
 func (c *Client) Close() error {
-	c.stopped()
 	return c.conn.Close()
 }
 
@@ -201,23 +213,17 @@ func (r *Result) Pending() (*Pending, bool) {
 	return &Pending{Confirmation: fields["confirmation"], Snapshot: fields["snapshot"]}, true
 }
 
-func newClient(ctx context.Context, conn net.Conn) *Client {
-	if deadline, ok := ctx.Deadline(); ok {
-		_ = conn.SetDeadline(deadline)
-	}
+func newClient(conn net.Conn) *Client {
 	lines := bufio.NewScanner(conn)
-	lines.Buffer(make([]byte, 0, 64<<10), maxLine)
-	// A cancelled context ends whatever read or write is waiting, rather than leaving the
-	// caller on a connection the app holds open.
-	stopped := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
-	return &Client{conn: conn, lines: lines, stopped: stopped}
+	lines.Buffer(make([]byte, 0, 64<<10), MaxLine)
+	return &Client{conn: conn, lines: lines}
 }
 
 func (c *Client) initialize(ctx context.Context) error {
 	params := map[string]any{
 		"protocolVersion": ProtocolVersion,
 		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "hey-cli", "title": "hey local"},
+		"clientInfo":      map[string]any{"name": "hey-cli", "title": "hey local", "version": version.Version},
 	}
 	var answer struct {
 		ProtocolVersion string     `json:"protocolVersion"`
@@ -243,6 +249,7 @@ func (c *Client) notify(method string) error {
 // request sends one request and reads lines until its answer, answering what the app asks
 // of the client on the way (a ping) and passing over its notifications.
 func (c *Client) request(ctx context.Context, method string, params any, into any) error {
+	defer c.bound(ctx)()
 	c.lastID++
 	id := c.lastID
 	if err := c.send(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
@@ -283,6 +290,16 @@ func (c *Client) request(ctx context.Context, method string, params any, into an
 	}
 }
 
+// bound holds the connection to ctx for one exchange: its deadline, or none, and its
+// cancellation, which ends whatever read or write waits rather than leave the caller on a
+// connection the app holds open. The returned func lets go of ctx.
+func (c *Client) bound(ctx context.Context) func() {
+	deadline, _ := ctx.Deadline()
+	_ = c.conn.SetDeadline(deadline)
+	stop := context.AfterFunc(ctx, func() { _ = c.conn.SetDeadline(time.Unix(1, 0)) })
+	return func() { stop() }
+}
+
 type message struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -310,7 +327,7 @@ func (c *Client) receive(ctx context.Context, method string) (message, error) {
 			return message{}, &ProtocolError{Method: method, Reason: "the app closed the connection without answering", Closed: true}
 		}
 		if errors.Is(err, bufio.ErrTooLong) {
-			return message{}, &ProtocolError{Method: method, Reason: fmt.Sprintf("the answer is longer than %d bytes", maxLine)}
+			return message{}, &ProtocolError{Method: method, Reason: fmt.Sprintf("the answer is longer than %d bytes", MaxLine)}
 		}
 		return message{}, c.exchangeError(ctx, method, err)
 	}

@@ -42,10 +42,18 @@ func TestDialInitializesBeforeAnythingElse(t *testing.T) {
 	}
 	var initialize struct {
 		ProtocolVersion string `json:"protocolVersion"`
+		ClientInfo      struct {
+			Name    string `json:"name"`
+			Version string `json:"version"`
+		} `json:"clientInfo"`
 	}
 	_ = json.Unmarshal(door.Requests()[0].Params, &initialize)
 	if initialize.ProtocolVersion != localapp.ProtocolVersion {
 		t.Errorf("protocolVersion = %q", initialize.ProtocolVersion)
+	}
+	// MCP requires both of clientInfo's name and version.
+	if initialize.ClientInfo.Name != "hey-cli" || initialize.ClientInfo.Version == "" {
+		t.Errorf("clientInfo = %+v", initialize.ClientInfo)
 	}
 	if client.Server.Name != "hey" {
 		t.Errorf("server = %+v", client.Server)
@@ -307,5 +315,74 @@ func TestNoRuntimeFolderIsNoGuess(t *testing.T) {
 		if _, err := localapp.SocketPath(""); !errors.Is(err, localapp.ErrNoRuntimeDir) {
 			t.Errorf("XDG_RUNTIME_DIR=%q: err = %v", runtime, err)
 		}
+	}
+}
+
+func TestAResultWithNoListOrNoContentIsAProtocolError(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Reply("tools/list", `{"jsonrpc":"2.0","id":2,"result":{}}`)
+	if _, err := dial(t, door.Path).Tools(context.Background()); !errors.As(err, new(*localapp.ProtocolError)) {
+		t.Errorf("tools/list with no tools: err = %v (%T)", err, err)
+	}
+
+	door = localapptest.Start(t)
+	door.AnswerRaw("imbox.list", map[string]any{})
+	if _, err := dial(t, door.Path).Call(context.Background(), "imbox.list", nil); !errors.As(err, new(*localapp.ProtocolError)) {
+		t.Errorf("tools/call with no content: err = %v (%T)", err, err)
+	}
+}
+
+// A pending answer is never read as less, whatever else it lacks.
+func TestAPendingAnswerWithNoContentIsStillPending(t *testing.T) {
+	door := localapptest.Start(t)
+	door.AnswerRaw("message.send", map[string]any{"structuredContent": map[string]any{"status": "pending", "confirmation": 7}})
+
+	result, err := dial(t, door.Path).Call(context.Background(), "message.send", map[string]any{"draft": 99})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := result.Pending(); !ok {
+		t.Errorf("not pending: %+v", result)
+	}
+}
+
+// Each call is bounded by its own context, not by the one the dial was given, which here
+// has no deadline at all.
+func TestACallThatGoesUnansweredTimesOutOnItsOwnContext(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Hang("tools/call")
+	client, err := localapp.Dial(context.Background(), door.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	answered := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		_, err := client.Call(ctx, "imbox.list", nil)
+		answered <- err
+	}()
+
+	select {
+	case err := <-answered:
+		if !errors.As(err, new(*localapp.TimeoutError)) {
+			t.Fatalf("err = %v (%T)", err, err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the call outlived its own context")
+	}
+}
+
+func TestADialWhoseContextEndedIsATimeoutNotAConnectError(t *testing.T) {
+	door := localapptest.Start(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := localapp.Dial(ctx, door.Path)
+
+	if !errors.As(err, new(*localapp.TimeoutError)) {
+		t.Errorf("err = %v (%T)", err, err)
 	}
 }

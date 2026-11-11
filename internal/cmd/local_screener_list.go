@@ -57,31 +57,57 @@ func (c *localScreenerListCommand) run(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	notice := ""
+	if unlisted := screener.WaitingCount - len(screener.Waiting); unlisted > 0 {
+		notice = fmt.Sprintf("%d more %s waiting than the app lists.", unlisted, senderNoun(unlisted))
+	}
+
 	if writer.IsStyled() {
-		if len(screener.Waiting) == 0 && len(screener.Decided) == 0 {
-			fmt.Fprintln(cmd.OutOrStdout(), "Nobody waits in The Screener, and nobody was decided")
+		return c.writeStyled(cmd, screener, notice)
+	}
+	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
+	}
+	switch writer.EffectiveFormat() {
+	case output.FormatIDs, output.FormatCount:
+		// The one list a sender ID or a count reads: everyone the app holds, waiting first.
+		return writeOK(append(append([]localSender{}, screener.Waiting...), screener.Decided...))
+	default:
+		return writeOK(screener,
+			output.WithSummary(fmt.Sprintf("%d %s waiting", screener.WaitingCount, senderNoun(screener.WaitingCount))),
+			output.WithNotice(notice),
+			output.WithBreadcrumbs(
+				output.Breadcrumb{Action: "approve", Command: "hey local screener approve <sender>", Description: "Screen a sender in"},
+				output.Breadcrumb{Action: "deny", Command: "hey local screener deny <sender>", Description: "Screen a sender out"},
+			),
+		)
+	}
+}
+
+func (c *localScreenerListCommand) writeStyled(cmd *cobra.Command, screener localScreener, notice string) error {
+	if len(screener.Waiting) == 0 && len(screener.Decided) == 0 {
+		if notice != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), notice)
 			return nil
 		}
-		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"Sender", "Name", "Email", "Status"})
-		for _, sender := range screener.Waiting {
-			table.addRow([]string{fmt.Sprintf("%d", sender.ID), truncate(sender.Name, 24), truncate(sender.Address, 32), "waiting"})
-		}
-		for _, sender := range screener.Decided {
-			status := "screened out"
-			if sender.ScreenedIn != nil && *sender.ScreenedIn {
-				status = "screened in"
-			}
-			table.addRow([]string{fmt.Sprintf("%d", sender.ID), truncate(sender.Name, 24), truncate(sender.Address, 32), status})
-		}
-		table.print()
+		fmt.Fprintln(cmd.OutOrStdout(), "Nobody waits in The Screener, and nobody was decided")
 		return nil
 	}
-	return writeOK(screener,
-		output.WithSummary(fmt.Sprintf("%d %s waiting", screener.WaitingCount, senderNoun(screener.WaitingCount))),
-		output.WithBreadcrumbs(
-			output.Breadcrumb{Action: "approve", Command: "hey local screener approve <sender>", Description: "Screen a sender in"},
-			output.Breadcrumb{Action: "deny", Command: "hey local screener deny <sender>", Description: "Screen a sender out"},
-		),
-	)
+	table := newTable(cmd.OutOrStdout())
+	table.addRow([]string{"Sender", "Name", "Email", "Status"})
+	for _, sender := range screener.Waiting {
+		table.addRow([]string{fmt.Sprintf("%d", sender.ID), truncate(sender.Name, 24), truncate(sender.Address, 32), "waiting"})
+	}
+	for _, sender := range screener.Decided {
+		status := "screened out"
+		if sender.ScreenedIn != nil && *sender.ScreenedIn {
+			status = "screened in"
+		}
+		table.addRow([]string{fmt.Sprintf("%d", sender.ID), truncate(sender.Name, 24), truncate(sender.Address, 32), status})
+	}
+	table.print()
+	if notice != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", notice)
+	}
+	return nil
 }

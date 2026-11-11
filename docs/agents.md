@@ -192,7 +192,10 @@ Each command the app offers names its effect, and the effect decides what happen
 Nothing that can't be undone, like emptying Trash or Spam, is offered at all. A send never
 goes from `hey local`: the app shows you the sending address, recipients, subject, body
 and files exactly as they would go, and sends only when you press Send in its window.
-`hey local send` then exits 9 and says "Waiting in HEY": neither done (0) nor failed. Its
+`hey local send` then exits 9 and says "Waiting in HEY": neither done (0) nor failed.
+It takes the HEY app's own id for a draft already saved in the app, not the id `hey draft
+list` shows, and no command lists the app's drafts yet: a send refused for its draft names
+the ids the app would take, in `meta.refusal.available`. Its
 JSON envelope carries `meta.status: "pending"`, the confirmation's id and what you were
 shown. No command or flag here can confirm it.
 
