@@ -240,7 +240,9 @@ func TestTheAppsOwnMessagesBeforeAnAnswerArePassedOver(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		// Held open until the test ends, as the app holds it, so the client's
+		// notifications/initialized never meets a closed socket.
+		t.Cleanup(func() { _ = conn.Close() })
 		buffer := make([]byte, 4096)
 		_, _ = conn.Read(buffer) // initialize
 		_, _ = conn.Write([]byte(`{"jsonrpc":"2.0","method":"notifications/message","params":{"level":"info"}}` + "\n"))

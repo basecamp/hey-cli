@@ -385,7 +385,7 @@ func TestLocalARefusedArgumentIsAUsageErrorNamingWhatItTakes(t *testing.T) {
 		t.Run(why, func(t *testing.T) {
 			door := localapptest.Start(t)
 			door.Refuse("screener.decide", map[string]any{
-				"error": why, "arg": "sender", "of": "sender", "given": 99, "available": []int{51, 52},
+				"error": why, "arg": "sender", "of": "sender", "given": 99, "available": []int64{51, 1731280000123},
 			})
 
 			_, _, err := runLocal(t, door.Path, "screener", "deny", "99", "--json")
@@ -393,7 +393,7 @@ func TestLocalARefusedArgumentIsAUsageErrorNamingWhatItTakes(t *testing.T) {
 				t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
 			}
 			failure := apierr.AsError(err)
-			if !strings.Contains(failure.Message, why) || failure.Hint != "sender takes one of: 51, 52" {
+			if !strings.Contains(failure.Message, why) || failure.Hint != "sender takes one of: 51, 1731280000123" {
 				t.Errorf("message = %q, hint = %q", failure.Message, failure.Hint)
 			}
 			if strings.Contains(failure.Hint, "Let agents use HEY") {
@@ -407,14 +407,18 @@ func TestLocalARefusedArgumentIsAUsageErrorNamingWhatItTakes(t *testing.T) {
 	}
 }
 
-// A list the app could not load names no argument: nothing the caller sent was wrong.
+// A list the app could not load is nothing the caller sent wrong: a read's refusal names
+// no argument, and a decision's names one with nothing available.
 func TestLocalAListTheAppCouldNotLoadIsAnAPIFailure(t *testing.T) {
 	door := localapptest.Start(t)
 	door.Refuse("imbox.list", map[string]any{"error": "unavailable"})
+	door.Refuse("screener.decide", map[string]any{"error": "unavailable", "arg": "sender", "of": "sender", "given": 42, "available": []int{}})
 
-	_, _, err := runLocal(t, door.Path, "imbox", "--json")
-	if output.ExitCodeFor(err) != output.ExitAPI {
-		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
+	for _, args := range [][]string{{"imbox"}, {"screener", "deny", "42"}} {
+		_, _, err := runLocal(t, door.Path, append(args, "--json")...)
+		if output.ExitCodeFor(err) != output.ExitAPI {
+			t.Errorf("%v: exit = %d (%v)", args, output.ExitCodeFor(err), err)
+		}
 	}
 }
 
@@ -430,6 +434,9 @@ func TestLocalAPendingSendIsPendingInEveryFormat(t *testing.T) {
 		}
 		if format[0] == "--ids-only" && strings.TrimSpace(stdout) != "7" {
 			t.Errorf("--ids-only: stdout = %q", stdout)
+		}
+		if format[0] == "--markdown" && (!strings.Contains(stdout, "**confirmation:** 7") || strings.Contains(stdout, "[55]")) {
+			t.Errorf("--markdown: stdout = %q", stdout)
 		}
 		if (format[0] == "--ids-only" || format[0] == "--count") && !strings.Contains(stderr, "Waiting in HEY") {
 			t.Errorf("%v: stderr = %q", format, stderr)

@@ -162,8 +162,9 @@ func localFailure(err error) error {
 // app signed out of HEY is an auth one, though not the CLI's sign-in; anything else, a list
 // the app could not load included, is the app's to explain.
 func localRefusal(name string, result *localapp.Result) error {
+	// Numbers kept as written, so an id past a million is hinted as an id, not 1.7e+12.
 	var reason map[string]any
-	_ = json.Unmarshal(result.Answer(), &reason)
+	_ = decodeJSONExactly(string(result.Answer()), &reason)
 	why, _ := reason["error"].(string)
 	if why == "" {
 		why = result.Text()
@@ -178,7 +179,12 @@ func localRefusal(name string, result *localapp.Result) error {
 		refusal.Message += terminal.SanitizeLine(" (" + detail + ")")
 	}
 	arg, _ := reason["arg"].(string)
+	available, listsAvailable := reason["available"].([]any)
 	switch {
+	case arg != "" && listsAvailable && len(available) == 0:
+		// Nothing would do, so nothing the caller sent was wrong: the app holds none now,
+		// or could not load what it would choose from.
+		refusal.Hint = "The app holds nothing this takes now: hey local tools lists what it offers"
 	case arg != "":
 		refusal.Code = apierr.CodeUsage
 		refusal.Hint = terminal.SanitizeLine(localArgumentHint(arg, reason))
@@ -199,9 +205,6 @@ func localRefusal(name string, result *localapp.Result) error {
 func localArgumentHint(arg string, reason map[string]any) string {
 	for _, key := range []string{"available", "cases"} {
 		if values, ok := reason[key].([]any); ok {
-			if len(values) == 0 {
-				return fmt.Sprintf("%s takes nothing the app holds now", arg)
-			}
 			taken := make([]string, 0, len(values))
 			for _, value := range values {
 				taken = append(taken, fmt.Sprint(value))
@@ -256,12 +259,14 @@ func writeLocalPending(cmd *cobra.Command, pending *localapp.Pending) error {
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), summary)
 	default:
+		// Decoded to values, since --markdown prints a map's values as they are and would
+		// show raw JSON as bytes.
 		data := map[string]any{"status": "pending"}
-		if len(pending.Confirmation) > 0 {
-			data["confirmation"] = pending.Confirmation
-		}
-		if len(pending.Snapshot) > 0 {
-			data["snapshot"] = pending.Snapshot
+		for key, raw := range map[string]json.RawMessage{"confirmation": pending.Confirmation, "snapshot": pending.Snapshot} {
+			var value any
+			if decodeJSONExactly(string(raw), &value) == nil {
+				data[key] = value
+			}
 		}
 		if err := writeOK(data, output.WithSummary(summary), output.WithMeta("status", "pending")); err != nil {
 			// A filter that failed on the answer does not make the send any less pending.
