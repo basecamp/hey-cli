@@ -344,7 +344,8 @@ func (c *Client) exchangeError(ctx context.Context, method string, err error) er
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return &TimeoutError{Method: method, Cause: err}
 	}
-	if errors.Is(err, io.EOF) {
+	// On Linux a close with the request unread reaches the client as a reset, not an end.
+	if errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
 		return &ProtocolError{Method: method, Reason: "the app closed the connection without answering", Closed: true}
 	}
 	return &ConnectError{Path: c.conn.RemoteAddr().String(), Cause: err}
