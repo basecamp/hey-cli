@@ -204,6 +204,9 @@ JSON object, as `--arg name=value` pairs, or both, the pairs over the object; a 
 read as JSON where it is JSON, so `sender=42` is a number and `decision=out` a word.
 A command the app refuses fails with its reason in the message, and in the JSON error's
 `meta.refusal`, which lists the ids it would take where an id was wrong.
+A command cut off by signing out of the app or switching accounts while it ran also exits 7,
+with `session_ended` in `meta.refusal`: it may have been done, so check in HEY before running
+it again.
 
 The wire is plain MCP: JSON-RPC 2.0, one message per line, `initialize`, then `tools/list`
 and `tools/call`. The app's door is built for Linux first. A Mac has no socket yet: there,

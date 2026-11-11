@@ -538,6 +538,23 @@ func TestLocalSignedOutOfTheAppIsAnAuthFailureThatNamesTheApp(t *testing.T) {
 	}
 }
 
+// A call the app's sign-out or account switch cut off may still have been done: it never
+// reads as a refusal, and sends the person to HEY before anything is run again.
+func TestLocalACallCutOffBySessionEndSaysItMayHaveHappened(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Refuse("screener.decide", map[string]any{"error": "session_ended", "detail": "Signed out"})
+
+	for _, args := range [][]string{{"screener", "deny", "42"}, {"call", "screener.decide", `{"sender":42,"decision":"out"}`}} {
+		_, _, err := runLocal(t, door.Path, args...)
+		failure := apierr.AsError(err)
+		if output.ExitCodeFor(err) != output.ExitAPI || strings.Contains(failure.Message, "refused") ||
+			!strings.Contains(failure.Message, "may have been done") ||
+			failure.Hint != "Check in HEY whether it was done before running it again" {
+			t.Errorf("%v: exit = %d, message = %q, hint = %q", args, output.ExitCodeFor(err), failure.Message, failure.Hint)
+		}
+	}
+}
+
 // An undo reaches the app the decision did: a --socket given goes into it, quoted.
 func TestLocalAnUndoCarriesTheSocketItWasGiven(t *testing.T) {
 	door := localapptest.Start(t)

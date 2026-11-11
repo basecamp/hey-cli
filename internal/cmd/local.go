@@ -175,6 +175,12 @@ func localRefusal(name string, result *localapp.Result) error {
 		Message: terminal.SanitizeLine(fmt.Sprintf("HEY refused %s: %s", name, why)),
 		Meta:    map[string]any{"refusal": reason},
 	}
+	if why == "session_ended" {
+		// A sign-out or account switch cut the call off while it ran: unlike every refusal,
+		// what it asked may already be done, so it is never worded as refused.
+		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("HEY's session ended while it ran %s: it may have been done", name))
+		refusal.Hint = "Check in HEY whether it was done before running it again"
+	}
 	if detail, _ := reason["detail"].(string); detail != "" {
 		refusal.Message += terminal.SanitizeLine(" (" + detail + ")")
 	}
