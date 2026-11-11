@@ -162,7 +162,7 @@ func newAuthStatusCommand() *cobra.Command {
 		Use:   "status",
 		Short: "Show authentication status",
 		Annotations: map[string]string{
-			"agent_notes": "Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing, so authenticated true does not prove HEY still accepts them. JSON answers authenticated, base_url, mail_account, account_source and install_id; method env_var when HEY_TOKEN is set; otherwise storage (keyring or file), auth_type, and expires_at, expired and refresh_available for a token. An expired token with refresh_available is refreshed by the next data command. mcp reports hey mcp's own sign-in the same way, with its scope and can_send; HEY_TOKEN never stands in for it.",
+			"agent_notes": "Use it when the user asks for authentication status or when an explicit check helps diagnose a failed command, not as a preflight. It reports stored credentials without contacting HEY and changes nothing, so authenticated true does not prove HEY still accepts them. JSON answers authenticated, base_url, mail_account, account_source and install_id; method env_var when HEY_TOKEN is set; otherwise storage (keyring or file), auth_type, and expires_at, expired and refresh_available for a token. An expired or missing access token with refresh_available is renewed by the next data command. sign_in_required explains an obsolete cookie-only sign-in and how to replace it. mcp reports hey mcp's own sign-in the same way, with its scope and can_send; HEY_TOKEN never stands in for it.",
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mcpStatus := mcpCredentialStatus()
@@ -207,13 +207,13 @@ func newAuthStatusCommand() *cobra.Command {
 			if err != nil && !errors.Is(err, auth.ErrCredentialsNotFound) {
 				return auth.CredentialStorageError("could not read authentication status", err)
 			}
-			if err == nil && creds.AccessToken == "" && creds.SessionCookie != "" {
+			if err == nil && creds.AccessToken == "" && creds.RefreshToken == "" && creds.SessionCookie != "" {
 				status["sign_in_required"] = "Browser session cookie authentication is no longer supported. Run: hey auth login"
 				if writer.IsStyled() {
 					fmt.Fprintln(cmd.OutOrStdout(), status["sign_in_required"])
 				}
 			}
-			if errors.Is(err, auth.ErrCredentialsNotFound) || creds.AccessToken == "" {
+			if errors.Is(err, auth.ErrCredentialsNotFound) || (creds.AccessToken == "" && creds.RefreshToken == "") {
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)

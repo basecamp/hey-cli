@@ -150,8 +150,8 @@ func (m *Manager) accessToken(ctx context.Context, useEnv bool) (string, error) 
 		return "", missingBearer(creds)
 	}
 
-	// Check if token is expired (with 5-minute buffer)
-	if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
+	// Recover a missing access token, or refresh an expired one (with a 5-minute buffer).
+	if creds.AccessToken == "" || (creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300) {
 		if err = m.refreshLocked(ctx, creds); err != nil {
 			return "", err
 		}
@@ -210,9 +210,9 @@ func (m *Manager) authenticateRequest(ctx context.Context, req *http.Request, re
 		return credentialLoadError(err)
 	}
 
-	if creds.AccessToken != "" {
-		// Auto-refresh if needed
-		if creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300 {
+	if creds.AccessToken != "" || creds.RefreshToken != "" {
+		// Recover a missing access token as well as an expired one.
+		if creds.AccessToken == "" || (creds.ExpiresAt > 0 && time.Now().Unix() >= creds.ExpiresAt-300) {
 			if err = m.refreshLocked(ctx, creds); err != nil {
 				return err
 			}
@@ -246,7 +246,7 @@ func (m *Manager) AuthenticationStatus() (bool, error) {
 	if err != nil {
 		return false, credentialLoadError(err)
 	}
-	return creds.AccessToken != "", nil
+	return creds.AccessToken != "" || creds.RefreshToken != "", nil
 }
 
 // IsAuthenticated reports whether usable credentials exist. Callers that need

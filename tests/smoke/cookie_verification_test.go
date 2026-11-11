@@ -78,7 +78,7 @@ func TestCookieRemovalLiveWatch(t *testing.T) {
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = io.Discard
-	_ = cmd.Run() // A timeout after readiness is the expected end of this check.
+	runErr := cmd.Run() // A timeout after readiness is the expected end of this check.
 	for _, line := range strings.Split(stdout.String(), "\n") {
 		var event struct {
 			Change string `json:"change"`
@@ -87,5 +87,6 @@ func TestCookieRemovalLiveWatch(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("watch never established its subscription (context ended: %v)", ctx.Err())
+	// Report the process result without dumping server-supplied stderr.
+	t.Fatalf("watch never established its subscription (process: %v; context: %v)", runErr, ctx.Err())
 }

@@ -162,6 +162,6 @@ quick-reference/120	help:hey journal list	List journal entries
 quick-reference/121	help:hey journal read	Write content_markdown back with hey journal write only when content_markdown_lossless is true.
 quick-reference/122	help:hey journal write	Content that trims to nothing — whitespace-only, or an emptied $EDITOR buffer — removes the day's entry
 quick-reference/123	help:hey auth status	Show authentication status
-quick-reference/124	help:hey auth token	Obsolete browser session cookie credentials require signing in again with hey auth login.
+quick-reference/124	retired	Cookie login was removed; the old fact about printing its session cookie as a token no longer describes a supported sign-in.
 quick-reference/125	help:hey tui	Launch the interactive terminal UI
 quick-reference/125	help:hey tui	Ctrl+A switches linked mail accounts when there is more than one.

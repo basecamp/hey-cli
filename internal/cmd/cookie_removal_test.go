@@ -20,7 +20,7 @@ type authWireTransport func(*http.Request) (*http.Response, error)
 func (f authWireTransport) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
 
 func TestSDKCookieRemovalOnWire(t *testing.T) {
-	for _, mode := range []string{"cookie only", "bearer and obsolete cookie", "expired OAuth", "401 refresh", "401 replaced by cookie", "revoked OAuth"} {
+	for _, mode := range []string{"cookie only", "bearer and obsolete cookie", "expired OAuth", "401 refresh", "401 replaced by cookie", "revoked OAuth", "refresh only"} {
 		t.Run(mode, func(t *testing.T) {
 			t.Setenv("HEY_TOKEN", "")
 			t.Setenv("HEY_NO_KEYRING", "1")
@@ -31,12 +31,15 @@ func TestSDKCookieRemovalOnWire(t *testing.T) {
 				creds.AccessToken = ""
 				creds.OAuthType = "cookie"
 			}
-			if mode == "expired OAuth" || mode == "401 refresh" || mode == "revoked OAuth" {
+			if mode == "expired OAuth" || mode == "401 refresh" || mode == "revoked OAuth" || mode == "refresh only" {
 				creds.RefreshToken = "original-refresh"
 				creds.OAuthType = "oauth"
 			}
 			if mode == "expired OAuth" || mode == "revoked OAuth" {
 				creds.ExpiresAt = time.Now().Add(-time.Hour).Unix()
+			}
+			if mode == "refresh only" {
+				creds.AccessToken = ""
 			}
 
 			apiCalls, refreshCalls := 0, 0
@@ -58,7 +61,7 @@ func TestSDKCookieRemovalOnWire(t *testing.T) {
 				} else {
 					apiCalls++
 					want := "Bearer original-token"
-					if mode == "expired OAuth" || (mode == "401 refresh" && apiCalls == 2) {
+					if mode == "expired OAuth" || mode == "refresh only" || (mode == "401 refresh" && apiCalls == 2) {
 						want = "Bearer renewed-token"
 					}
 					if r.Header.Get("Authorization") != want {
@@ -78,6 +81,11 @@ func TestSDKCookieRemovalOnWire(t *testing.T) {
 			manager = auth.NewManager(origin, &http.Client{Transport: transport}, t.TempDir())
 			if err := manager.GetStore().Save(origin, creds); err != nil {
 				t.Fatal(err)
+			}
+			if mode == "refresh only" {
+				if authenticated, err := manager.AuthenticationStatus(); err != nil || !authenticated {
+					t.Fatal("refresh-only sign-in was not usable for data commands")
+				}
 			}
 			initSDK(manager, origin)
 			// Keep the production SDK config and auth bridge; substitute only the wire.
@@ -104,7 +112,7 @@ func TestSDKCookieRemovalOnWire(t *testing.T) {
 			switch mode {
 			case "cookie only":
 				wantAPI = 0
-			case "expired OAuth":
+			case "expired OAuth", "refresh only":
 				wantRefresh = 1
 			case "revoked OAuth":
 				wantAPI, wantRefresh = 0, 1
@@ -115,6 +123,24 @@ func TestSDKCookieRemovalOnWire(t *testing.T) {
 				t.Errorf("wire calls: API=%d refresh=%d; want API=%d refresh=%d", apiCalls, refreshCalls, wantAPI, wantRefresh)
 			}
 		})
+	}
+}
+
+func TestRefreshOnlyStatusRemainsUsable(t *testing.T) {
+	t.Setenv("HEY_NO_KEYRING", "1")
+	home := t.TempDir()
+	const origin = "https://mail.example.test"
+	store := auth.NewStore(filepath.Join(home, "hey-cli"))
+	if err := store.Save(origin, &auth.Credentials{RefreshToken: "valid-refresh", SessionCookie: "obsolete-cookie", OAuthType: "oauth"}); err != nil {
+		t.Fatal(err)
+	}
+	_, response, err := runAuthCommand(t, home, origin, "", true, "auth", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, _ := response.Data.(map[string]any)
+	if data["authenticated"] != true || data["refresh_available"] != true || data["sign_in_required"] != nil {
+		t.Fatal("refresh-only OAuth was incorrectly treated as an obsolete cookie sign-in")
 	}
 }
 
