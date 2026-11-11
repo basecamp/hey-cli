@@ -630,6 +630,24 @@ func TestLocalASendNotAnsweredPendingIsAnAPIFailure(t *testing.T) {
 	}
 }
 
+// A send answered otherwise may have done something in the app: the hint points there,
+// and a plain-text answer still reaches the person.
+func TestLocalASendAnsweredOtherwisePointsAtTheApp(t *testing.T) {
+	door := localapptest.Start(t)
+	door.AnswerRaw("message.send", map[string]any{
+		"content": []map[string]any{{"type": "text", "text": "Sent to Ada"}},
+	})
+
+	_, _, err := runLocal(t, door.Path, "send", "1731280000123")
+	failure := apierr.AsError(err)
+	if output.ExitCodeFor(err) != output.ExitAPI || strings.Contains(failure.Hint, "upgrade") {
+		t.Errorf("exit = %d, hint = %q (%v)", output.ExitCodeFor(err), failure.Hint, err)
+	}
+	if !strings.Contains(failure.Message, "Sent to Ada") {
+		t.Errorf("message = %q", failure.Message)
+	}
+}
+
 func TestLocalCallRefusesAnArgumentGivenTwice(t *testing.T) {
 	door := localapptest.Start(t)
 

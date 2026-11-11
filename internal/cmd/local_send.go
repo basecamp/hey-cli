@@ -49,10 +49,15 @@ func (c *localSendCommand) run(cmd *cobra.Command, args []string) error {
 		return apierr.ErrUsage(fmt.Sprintf("invalid draft ID: %s", args[0]))
 	}
 	// A send the app took comes back pending, and callLocal has written it; anything else
-	// it answered is not a send this command knows, and never reads as one.
+	// it answered is not a send this command knows, and never reads as one. It may still
+	// have done something in the app, so the person is sent there to look.
 	result, err := callLocal(cmd, "message.send", map[string]any{"draft": draft})
 	if err != nil {
 		return err
 	}
-	return localUnreadable("message.send", fmt.Errorf("it is not pending: %s", terminal.SanitizeLine(string(result.Answer()))))
+	answer := string(result.Answer())
+	if answer == "" {
+		answer = result.Text()
+	}
+	return localAnsweredOtherwise("message.send", fmt.Errorf("it is not pending: %s", terminal.SanitizeLine(answer)))
 }
