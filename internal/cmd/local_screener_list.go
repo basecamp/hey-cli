@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -46,7 +47,12 @@ func (c *localScreenerListCommand) run(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	screener, err := decodeLocalAnswerAs[localScreener]("screener.list", result)
+	screener, err := decodeLocalAnswerAs("screener.list", result, func(screener localScreener) error {
+		if screener.Waiting == nil || screener.Decided == nil {
+			return errors.New("it lists neither who waits nor who was decided")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}

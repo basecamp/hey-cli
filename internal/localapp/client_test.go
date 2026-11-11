@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,8 +32,9 @@ func TestDialInitializesBeforeAnythingElse(t *testing.T) {
 	if _, err := client.Tools(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	var methods []string
-	for _, request := range door.Requests() {
+	requests := door.Requests()
+	methods := make([]string, 0, len(requests))
+	for _, request := range requests {
 		methods = append(methods, request.Method)
 	}
 	if got := strings.Join(methods, " "); got != "initialize notifications/initialized tools/list" {
@@ -122,8 +121,24 @@ func TestASendWaitingInHEYIsPending(t *testing.T) {
 	if !ok {
 		t.Fatalf("not pending: %s", result.Answer())
 	}
-	if pending.Confirmation != 7 || !strings.Contains(string(pending.Snapshot), "marcus@example.com") {
+	if string(pending.Confirmation) != "7" || !strings.Contains(string(pending.Snapshot), "marcus@example.com") {
 		t.Errorf("pending = %+v", pending)
+	}
+}
+
+// Pending is the status alone: a confirmation in a shape this client does not expect
+// still waits for the person, and must not read as done.
+func TestAPendingAnswerOfAnotherShapeIsStillPending(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("message.send", map[string]any{"status": "pending", "confirmation": "c-7"})
+
+	result, err := dial(t, door.Path).Call(context.Background(), "message.send", map[string]any{"draft": 99})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, ok := result.Pending()
+	if !ok || string(pending.Confirmation) != `"c-7"` {
+		t.Errorf("pending = %+v, %v", pending, ok)
 	}
 }
 
@@ -155,20 +170,11 @@ func TestNoSocketIsADoorClosed(t *testing.T) {
 // A crashed app leaves its socket file behind with nothing listening on it, which is as
 // closed as no file at all.
 func TestASocketNothingAnswersOnIsADoorClosed(t *testing.T) {
-	folder, err := os.MkdirTemp("", "hl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(folder) })
-	path := filepath.Join(folder, "agent.sock")
-	listener, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	path, listener := localapptest.Listen(t)
+	listener.SetUnlinkOnClose(false)
 	_ = listener.Close()
 
-	_, err = localapp.Dial(context.Background(), path)
+	_, err := localapp.Dial(context.Background(), path)
 
 	var closed *localapp.DoorClosedError
 	if !errors.As(err, &closed) {
@@ -227,17 +233,7 @@ func TestAnInitializeWithNoVersionIsAProtocolError(t *testing.T) {
 // The app may ask the client something, or tell it something, before it answers; the
 // client answers a ping, passes over a notification and still reads its own answer.
 func TestTheAppsOwnMessagesBeforeAnAnswerArePassedOver(t *testing.T) {
-	folder, err := os.MkdirTemp("", "hl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(folder) })
-	path := filepath.Join(folder, "agent.sock")
-	listener, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
+	path, listener := localapptest.Listen(t)
 	answered := make(chan string, 1)
 	go func() {
 		conn, err := listener.Accept()
@@ -269,17 +265,7 @@ func TestTheAppsOwnMessagesBeforeAnAnswerArePassedOver(t *testing.T) {
 }
 
 func TestAnAppThatNeverAnswersTimesOut(t *testing.T) {
-	folder, err := os.MkdirTemp("", "hl")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(folder) })
-	path := filepath.Join(folder, "agent.sock")
-	listener, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = listener.Close() })
+	path, listener := localapptest.Listen(t)
 	go func() {
 		conn, err := listener.Accept()
 		if err == nil {
@@ -289,7 +275,7 @@ func TestAnAppThatNeverAnswersTimesOut(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	_, err = localapp.Dial(ctx, path)
+	_, err := localapp.Dial(ctx, path)
 
 	var timeout *localapp.TimeoutError
 	if !errors.As(err, &timeout) {

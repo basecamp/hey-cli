@@ -40,10 +40,12 @@ func (e *ServerError) Error() string {
 	return fmt.Sprintf("HEY refused %s: %s (%d)", e.Method, e.Message, e.Code)
 }
 
-// ProtocolError is an answer the client cannot read as MCP.
+// ProtocolError is an answer the client cannot read as MCP. Closed is a connection the
+// app closed before it answered, as it does a caller of another user account.
 type ProtocolError struct {
 	Method string
 	Reason string
+	Closed bool
 }
 
 func (e *ProtocolError) Error() string {

@@ -161,7 +161,7 @@ func TestLocalImboxListsWhatTheAppHolds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(styled, "Stint plan for Saturday") || !strings.Contains(styled, "Marcus Ortiz") {
+	if !strings.Contains(styled, "Stint plan for Saturday") || !strings.Contains(styled, "Marcus Ortiz") || !strings.Contains(styled, "301") || !strings.Contains(styled, "801") {
 		t.Errorf("styled = %s", styled)
 	}
 }
@@ -329,15 +329,26 @@ func TestLocalASocketFlagOutranksTheEnvironment(t *testing.T) {
 	}
 }
 
-func TestLocalAServerErrorIsAnAPIFailure(t *testing.T) {
+// The app answers a tool it has not got with -32602, which is the caller's mistake.
+func TestLocalAnUnknownToolIsAUsageErrorThatPointsAtTheList(t *testing.T) {
 	door := localapptest.Start(t)
 
 	_, _, err := runLocal(t, door.Path, "call", "drafts.empty", "--json")
-	if output.ExitCodeFor(err) != output.ExitAPI {
+	if output.ExitCodeFor(err) != output.ExitUsage {
 		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
 	}
-	if !strings.Contains(err.Error(), "drafts.empty") {
-		t.Errorf("err = %v", err)
+	if !strings.Contains(err.Error(), "drafts.empty") || !strings.Contains(apierr.AsError(err).Hint, "hey local tools") {
+		t.Errorf("err = %v, hint = %q", err, apierr.AsError(err).Hint)
+	}
+}
+
+func TestLocalAServerErrorIsAnAPIFailure(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Fail("tools/list", -32603, "internal error")
+
+	_, _, err := runLocal(t, door.Path, "tools", "--json")
+	if output.ExitCodeFor(err) != output.ExitAPI {
+		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
 	}
 }
 
@@ -366,23 +377,141 @@ func TestLocalAnImboxInAnotherShapeIsAnAPIFailure(t *testing.T) {
 	}
 }
 
-func TestLocalARefusalSaysWhyAndCarriesTheAppsReason(t *testing.T) {
-	door := localapptest.Start(t)
-	door.Refuse("screener.decide", map[string]any{
-		"error": "bad_request", "arg": "sender", "of": "sender", "given": 99, "available": []int{51, 52},
-	})
+// A sender the app does not hold is refused as the app's Arg.Ref refuses it: unavailable,
+// naming the argument and the ids it would take, or disabled where the sender is there but
+// the decision is off for them. Either is the caller's to fix.
+func TestLocalARefusedArgumentIsAUsageErrorNamingWhatItTakes(t *testing.T) {
+	for _, why := range []string{"unavailable", "disabled"} {
+		t.Run(why, func(t *testing.T) {
+			door := localapptest.Start(t)
+			door.Refuse("screener.decide", map[string]any{
+				"error": why, "arg": "sender", "of": "sender", "given": 99, "available": []int{51, 52},
+			})
 
-	_, _, err := runLocal(t, door.Path, "screener", "deny", "99", "--json")
+			_, _, err := runLocal(t, door.Path, "screener", "deny", "99", "--json")
+			if output.ExitCodeFor(err) != output.ExitUsage {
+				t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
+			}
+			failure := apierr.AsError(err)
+			if !strings.Contains(failure.Message, why) || failure.Hint != "sender takes one of: 51, 52" {
+				t.Errorf("message = %q, hint = %q", failure.Message, failure.Hint)
+			}
+			if strings.Contains(failure.Hint, "Let agents use HEY") {
+				t.Errorf("hint = %q: the door is open, it answered", failure.Hint)
+			}
+			refusal, _ := failure.Meta["refusal"].(map[string]any)
+			if refusal["arg"] != "sender" {
+				t.Errorf("meta = %+v", failure.Meta)
+			}
+		})
+	}
+}
+
+// A list the app could not load names no argument: nothing the caller sent was wrong.
+func TestLocalAListTheAppCouldNotLoadIsAnAPIFailure(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Refuse("imbox.list", map[string]any{"error": "unavailable"})
+
+	_, _, err := runLocal(t, door.Path, "imbox", "--json")
+	if output.ExitCodeFor(err) != output.ExitAPI {
+		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
+	}
+}
+
+// Pending reaches every format as pending: a format with no list to show writes what it
+// can and still exits 9.
+func TestLocalAPendingSendIsPendingInEveryFormat(t *testing.T) {
+	door := pendingDoor(t)
+
+	for _, format := range [][]string{{"--ids-only"}, {"--count"}, {"--quiet"}, {"--markdown"}, {"--jq", ".data.confirmation"}, {"--jq", ".nope | error"}} {
+		stdout, stderr, err := runLocal(t, door.Path, append([]string{"send", "1731280000123"}, format...)...)
+		if output.ExitCodeFor(err) != output.ExitPending {
+			t.Errorf("%v: exit = %d (%v)", format, output.ExitCodeFor(err), err)
+		}
+		if format[0] == "--ids-only" && strings.TrimSpace(stdout) != "7" {
+			t.Errorf("--ids-only: stdout = %q", stdout)
+		}
+		if (format[0] == "--ids-only" || format[0] == "--count") && !strings.Contains(stderr, "Waiting in HEY") {
+			t.Errorf("%v: stderr = %q", format, stderr)
+		}
+	}
+}
+
+// Whatever the command, an answer that waits for the person is not read on as done.
+func TestLocalSugarAnsweredPendingIsPendingNotDone(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("screener.decide", map[string]any{"status": "pending", "confirmation": 8})
+	door.Answer("imbox.list", map[string]any{"status": "pending", "confirmation": 9})
+
+	for _, args := range [][]string{{"screener", "approve", "42"}, {"imbox"}} {
+		stdout, _, err := runLocal(t, door.Path, append(args, "--styled")...)
+		if output.ExitCodeFor(err) != output.ExitPending {
+			t.Errorf("%v: exit = %d (%v)", args, output.ExitCodeFor(err), err)
+		}
+		if strings.Contains(stdout, "screened") || strings.Contains(stdout, "Nothing in the Imbox") {
+			t.Errorf("%v: stdout = %q", args, stdout)
+		}
+	}
+}
+
+// A decision the app says it took some other way is not reported as the one asked for.
+func TestLocalADecisionAnsweredOtherwiseIsAnAPIFailure(t *testing.T) {
+	for name, answer := range map[string]map[string]any{
+		"empty":          {},
+		"the other way":  {"sender": 42, "screened": "out"},
+		"another sender": {"sender": 43, "screened": "in"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			door := localapptest.Start(t)
+			door.Answer("screener.decide", answer)
+
+			stdout, _, err := runLocal(t, door.Path, "screener", "approve", "42", "--styled")
+			if output.ExitCodeFor(err) != output.ExitAPI {
+				t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
+			}
+			if strings.Contains(stdout, "screened") {
+				t.Errorf("stdout = %q", stdout)
+			}
+		})
+	}
+}
+
+func TestLocalAnArgumentWithTrailingJunkIsAWord(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("screener.decide", map[string]any{"sender": 42, "screened": "out"})
+
+	if _, _, err := runLocal(t, door.Path, "call", "screener.decide", "--arg", "sender=42}", "--json"); err != nil {
+		t.Fatal(err)
+	}
+	if calls := door.Calls(); string(calls[0]) != `{"arguments":{"sender":"42}"},"name":"screener.decide"}` {
+		t.Errorf("calls = %s", calls)
+	}
+
+	_, _, err := runLocal(t, door.Path, "call", "screener.decide", `{"sender":42}]`)
 	if output.ExitCodeFor(err) != output.ExitUsage {
 		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
 	}
-	failure := apierr.AsError(err)
-	if !strings.Contains(failure.Message, "bad_request") {
-		t.Errorf("message = %q", failure.Message)
+}
+
+// The app closes a connection from another user account without a word.
+func TestLocalAConnectionClosedUnansweredSaysWhoTheAppAnswers(t *testing.T) {
+	path, listener := localapptest.Listen(t)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			_ = conn.Close()
+		}
+	}()
+
+	_, _, err := runLocal(t, path, "imbox", "--json")
+	if output.ExitCodeFor(err) != output.ExitNetwork {
+		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
 	}
-	refusal, _ := failure.Meta["refusal"].(map[string]any)
-	if refusal["arg"] != "sender" {
-		t.Errorf("meta = %+v", failure.Meta)
+	if !strings.Contains(apierr.AsError(err).Hint, "user account") {
+		t.Errorf("hint = %q", apierr.AsError(err).Hint)
 	}
 }
 

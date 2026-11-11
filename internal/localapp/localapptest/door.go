@@ -4,6 +4,7 @@ package localapptest
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -38,10 +39,24 @@ type Request struct {
 	Params json.RawMessage
 }
 
-// Start opens a door in a folder of its own, closed when the test ends. The folder is
-// short-named under the system's temporary folder, since a Unix socket's path is capped
-// near a hundred bytes and a test's own temporary folder on macOS is longer.
+// Start opens a door, closed when the test ends.
 func Start(t testing.TB) *Door {
+	t.Helper()
+	path, listener := Listen(t)
+	door := &Door{
+		Path:    path,
+		results: map[string]map[string]any{},
+		errors:  map[string]RPCError{},
+		raw:     map[string]string{},
+	}
+	go door.serve(listener)
+	return door
+}
+
+// Listen opens a Unix socket for a test that answers by hand, closed when the test ends.
+// Its folder is short-named under the system's temporary folder, since a socket's path is
+// capped near a hundred bytes and a test's own temporary folder on macOS is longer.
+func Listen(t testing.TB) (string, *net.UnixListener) {
 	t.Helper()
 	folder, err := os.MkdirTemp("", "hl")
 	if err != nil {
@@ -49,19 +64,18 @@ func Start(t testing.TB) *Door {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(folder) })
 
-	door := &Door{
-		Path:    filepath.Join(folder, "agent.sock"),
-		results: map[string]map[string]any{},
-		errors:  map[string]RPCError{},
-		raw:     map[string]string{},
-	}
-	listener, err := net.Listen("unix", door.Path)
+	path := filepath.Join(folder, "agent.sock")
+	var config net.ListenConfig
+	listener, err := config.Listen(context.Background(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = listener.Close() })
-	go door.serve(listener)
-	return door
+	unix, ok := listener.(*net.UnixListener)
+	if !ok {
+		t.Fatalf("a unix listen gave a %T", listener)
+	}
+	return path, unix
 }
 
 // Offer lists a tool, with the effect the door names in its _meta.

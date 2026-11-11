@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -51,7 +52,12 @@ func (c *localImboxCommand) run(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	imbox, err := decodeLocalAnswerAs[localImbox]("imbox.list", result)
+	imbox, err := decodeLocalAnswerAs("imbox.list", result, func(imbox localImbox) error {
+		if imbox.Threads == nil {
+			return errors.New("it lists no threads")
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
@@ -66,13 +72,14 @@ func (c *localImboxCommand) run(cmd *cobra.Command, _ []string) error {
 			return nil
 		}
 		table := newTable(cmd.OutOrStdout())
-		table.addRow([]string{"Thread", "Sender", "Subject", ""})
+		// Both ids, as hey box view shows them: the row's is what --ids-only prints.
+		table.addRow([]string{"ID", "Thread", "Sender", "Subject", ""})
 		for _, thread := range imbox.Threads {
 			unseen := ""
 			if !thread.Seen {
 				unseen = "new"
 			}
-			table.addRow([]string{fmt.Sprintf("%d", thread.Topic), truncate(thread.Sender, 24), truncate(thread.Subject, 50), unseen})
+			table.addRow([]string{fmt.Sprintf("%d", thread.ID), fmt.Sprintf("%d", thread.Topic), truncate(thread.Sender, 24), truncate(thread.Subject, 50), unseen})
 		}
 		table.print()
 		if notice != "" {

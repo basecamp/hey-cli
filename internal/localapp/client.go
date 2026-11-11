@@ -83,7 +83,7 @@ type Content struct {
 // Pending is a call the app took but did not carry out: it waits in the app's window for
 // the person, who sees Snapshot and sends it or not.
 type Pending struct {
-	Confirmation int64           `json:"confirmation"`
+	Confirmation json.RawMessage `json:"confirmation,omitempty"`
 	Snapshot     json.RawMessage `json:"snapshot,omitempty"`
 }
 
@@ -183,20 +183,22 @@ func (r *Result) Answer() json.RawMessage {
 }
 
 // Pending reports a call the app answered "pending, waiting in HEY": a structured answer
-// whose status is pending. A refusal is never pending.
+// whose status is pending, however the rest of it reads, since reading a waiting send as
+// done is the one mistake this must not make. A refusal is never pending.
 func (r *Result) Pending() (*Pending, bool) {
 	answer := r.Answer()
 	if r.IsError || answer == nil {
 		return nil, false
 	}
-	var pending struct {
+	var status struct {
 		Status string `json:"status"`
-		Pending
 	}
-	if err := json.Unmarshal(answer, &pending); err != nil || pending.Status != "pending" {
+	if err := json.Unmarshal(answer, &status); err != nil || status.Status != "pending" {
 		return nil, false
 	}
-	return &pending.Pending, true
+	var fields map[string]json.RawMessage
+	_ = json.Unmarshal(answer, &fields)
+	return &Pending{Confirmation: fields["confirmation"], Snapshot: fields["snapshot"]}, true
 }
 
 func newClient(ctx context.Context, conn net.Conn) *Client {
@@ -302,7 +304,7 @@ func (c *Client) receive(ctx context.Context, method string) (message, error) {
 	if !c.lines.Scan() {
 		err := c.lines.Err()
 		if err == nil {
-			return message{}, &ProtocolError{Method: method, Reason: "the app closed the connection without answering"}
+			return message{}, &ProtocolError{Method: method, Reason: "the app closed the connection without answering", Closed: true}
 		}
 		if errors.Is(err, bufio.ErrTooLong) {
 			return message{}, &ProtocolError{Method: method, Reason: fmt.Sprintf("the answer is longer than %d bytes", maxLine)}
@@ -343,7 +345,7 @@ func (c *Client) exchangeError(ctx context.Context, method string, err error) er
 		return &TimeoutError{Method: method, Cause: err}
 	}
 	if errors.Is(err, io.EOF) {
-		return &ProtocolError{Method: method, Reason: "the app closed the connection without answering"}
+		return &ProtocolError{Method: method, Reason: "the app closed the connection without answering", Closed: true}
 	}
 	return &ConnectError{Path: c.conn.RemoteAddr().String(), Cause: err}
 }

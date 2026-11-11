@@ -90,8 +90,9 @@ func withLocalApp(cmd *cobra.Command, talk func(context.Context, *localapp.Clien
 	return localFailure(talk(ctx, client))
 }
 
-// callLocal runs one of the app's commands. A refusal is an error; an answer, done or
-// pending, is the result.
+// callLocal runs one of the app's commands and hands back what it did. A refusal is an
+// error. So is pending, once it is written: whatever the command, an answer that waits
+// for the person is never read on as done.
 func callLocal(cmd *cobra.Command, name string, arguments map[string]any) (*localapp.Result, error) {
 	var result *localapp.Result
 	err := withLocalApp(cmd, func(ctx context.Context, client *localapp.Client) error {
@@ -104,6 +105,9 @@ func callLocal(cmd *cobra.Command, name string, arguments map[string]any) (*loca
 	}
 	if result.IsError {
 		return nil, localRefusal(name, result)
+	}
+	if pending, ok := result.Pending(); ok {
+		return nil, writeLocalPending(cmd, pending)
 	}
 	return result, nil
 }
@@ -131,6 +135,21 @@ func localFailure(err error) error {
 		}
 	case errors.As(err, &connect), errors.As(err, &timeout):
 		return &apierr.Error{Code: apierr.CodeNetwork, Message: terminal.SanitizeLine(err.Error()), Cause: err}
+	case errors.As(err, &protocol) && protocol.Closed && protocol.Method == "initialize":
+		return &apierr.Error{
+			Code:    apierr.CodeNetwork,
+			Message: "HEY closed the connection without answering",
+			Hint:    "The HEY app answers only the user account it runs as",
+			Cause:   err,
+		}
+	case errors.As(err, &server) && server.Method == "tools/call" && server.Code == -32602:
+		// The app's answer to a tool it has not got, or arguments that are not an object.
+		return &apierr.Error{
+			Code:    apierr.CodeUsage,
+			Message: terminal.SanitizeLine(err.Error()),
+			Hint:    "Run: hey local tools, for what the app offers now and what each takes",
+			Cause:   err,
+		}
 	case errors.As(err, &server), errors.As(err, &protocol):
 		return &apierr.Error{Code: apierr.CodeAPI, Message: terminal.SanitizeLine(err.Error()), Cause: err}
 	default:
@@ -139,8 +158,9 @@ func localFailure(err error) error {
 }
 
 // localRefusal is a command the app refused, with its reason in the error's meta. A
-// request the app could not take is a usage error; the app signed out of HEY is an auth
-// one, though not the CLI's sign-in; anything else is the app's to explain.
+// refusal that names an argument is a usage error, with what the argument would take; the
+// app signed out of HEY is an auth one, though not the CLI's sign-in; anything else, a list
+// the app could not load included, is the app's to explain.
 func localRefusal(name string, result *localapp.Result) error {
 	var reason map[string]any
 	_ = json.Unmarshal(result.Answer(), &reason)
@@ -157,28 +177,44 @@ func localRefusal(name string, result *localapp.Result) error {
 	if detail, _ := reason["detail"].(string); detail != "" {
 		refusal.Message += terminal.SanitizeLine(" (" + detail + ")")
 	}
-	switch why {
-	case "bad_request", "no_such_case", "not_text":
+	arg, _ := reason["arg"].(string)
+	switch {
+	case arg != "":
+		refusal.Code = apierr.CodeUsage
+		refusal.Hint = terminal.SanitizeLine(localArgumentHint(arg, reason))
+	case why == "bad_request" || why == "not_text":
 		refusal.Code = apierr.CodeUsage
 		refusal.Hint = "Run: hey local tools, for what each command takes"
-	case "not_offered":
+	case why == "not_offered":
 		refusal.Hint = "Run: hey local tools, for what the app offers now"
-	case "signed_out":
+	case why == "signed_out":
 		refusal.Code = apierr.CodeAuth
 		refusal.Hint = "Sign in to HEY in the app"
-	case "disabled":
-		refusal.Hint = localDoorHint
 	}
 	return refusal
 }
 
-// writeLocalAnswer writes what a command answered: pretty JSON for a person, the envelope
-// for everyone else. A pending answer is written as pending.
-func writeLocalAnswer(cmd *cobra.Command, name string, result *localapp.Result) error {
-	if pending, ok := result.Pending(); ok {
-		return writeLocalPending(cmd, pending)
+// localArgumentHint says what a refused argument would take: the ids the app offers it
+// for now, or its cases.
+func localArgumentHint(arg string, reason map[string]any) string {
+	for _, key := range []string{"available", "cases"} {
+		if values, ok := reason[key].([]any); ok {
+			if len(values) == 0 {
+				return fmt.Sprintf("%s takes nothing the app holds now", arg)
+			}
+			taken := make([]string, 0, len(values))
+			for _, value := range values {
+				taken = append(taken, fmt.Sprint(value))
+			}
+			return fmt.Sprintf("%s takes one of: %s", arg, strings.Join(taken, ", "))
+		}
 	}
+	return "Run: hey local tools, for what each command takes"
+}
 
+// writeLocalAnswer writes what a command answered: pretty JSON for a person, the envelope
+// for everyone else.
+func writeLocalAnswer(cmd *cobra.Command, name string, result *localapp.Result) error {
 	answer, err := decodeLocalAnswer(name, result)
 	if err != nil {
 		return err
@@ -195,12 +231,15 @@ func writeLocalAnswer(cmd *cobra.Command, name string, result *localapp.Result) 
 }
 
 // writeLocalPending says a command waits in HEY's window, and returns ErrPending so the
-// run exits as neither done nor failed.
+// run exits as neither done nor failed, whatever the output format makes of the answer.
 func writeLocalPending(cmd *cobra.Command, pending *localapp.Pending) error {
+	const summary = "Waiting in HEY: nothing is sent until the person presses Send in the HEY window"
 	var snapshot localSendSnapshot
 	_ = json.Unmarshal(pending.Snapshot, &snapshot)
+	confirmation := localConfirmationID(pending.Confirmation)
 
-	if writer.IsStyled() {
+	switch writer.EffectiveFormat() {
+	case output.FormatStyled:
 		out := cmd.OutOrStdout()
 		fmt.Fprintln(out, "Waiting in HEY: press Send in the HEY window to send it. Nothing has been sent.")
 		if len(snapshot.To) > 0 {
@@ -209,20 +248,38 @@ func writeLocalPending(cmd *cobra.Command, pending *localapp.Pending) error {
 		if snapshot.Subject != "" {
 			fmt.Fprintln(out, "  Subject: "+terminal.SanitizeLine(snapshot.Subject))
 		}
-		return output.ErrPending
-	}
-
-	data := map[string]any{"status": "pending", "confirmation": pending.Confirmation}
-	if len(pending.Snapshot) > 0 {
-		data["snapshot"] = pending.Snapshot
-	}
-	if err := writeOK(data,
-		output.WithSummary("Waiting in HEY: nothing is sent until the person presses Send in the HEY window"),
-		output.WithMeta("status", "pending"),
-	); err != nil {
-		return err
+	case output.FormatIDs, output.FormatCount:
+		// Neither has a list to show: the confirmation's id is the one id there is, and
+		// the words go to stderr so stdout stays what the flag asked for.
+		if writer.EffectiveFormat() == output.FormatIDs && confirmation != "" {
+			fmt.Fprintln(cmd.OutOrStdout(), confirmation)
+		}
+		fmt.Fprintln(cmd.ErrOrStderr(), summary)
+	default:
+		data := map[string]any{"status": "pending"}
+		if len(pending.Confirmation) > 0 {
+			data["confirmation"] = pending.Confirmation
+		}
+		if len(pending.Snapshot) > 0 {
+			data["snapshot"] = pending.Snapshot
+		}
+		if err := writeOK(data, output.WithSummary(summary), output.WithMeta("status", "pending")); err != nil {
+			// A filter that failed on the answer does not make the send any less pending.
+			fmt.Fprintln(cmd.ErrOrStderr(), terminal.SanitizeLine(err.Error()))
+			fmt.Fprintln(cmd.ErrOrStderr(), summary)
+		}
 	}
 	return output.ErrPending
+}
+
+// localConfirmationID is a confirmation's id as a line: a number as written, a word
+// without its quotes.
+func localConfirmationID(raw json.RawMessage) string {
+	var word string
+	if json.Unmarshal(raw, &word) == nil {
+		return terminal.SanitizeLine(word)
+	}
+	return terminal.SanitizeLine(string(raw))
 }
 
 // decodeLocalAnswer reads a command's answer as JSON values, numbers kept exact, so an id
@@ -242,14 +299,18 @@ func decodeLocalAnswer(name string, result *localapp.Result) (any, error) {
 }
 
 // decodeLocalAnswerAs reads a command's answer into the shape the command's sugar knows,
-// and refuses one in any other shape rather than show it as empty.
-func decodeLocalAnswerAs[T any](name string, result *localapp.Result) (T, error) {
+// and refuses one that is not that shape, or that complete says lacks what the command
+// must have, rather than show it as empty or as done.
+func decodeLocalAnswerAs[T any](name string, result *localapp.Result, complete func(T) error) (T, error) {
 	var answer T
 	raw := result.Answer()
 	if raw == nil {
 		return answer, localUnreadable(name, errors.New("it carries no structured answer"))
 	}
 	if err := json.Unmarshal(raw, &answer); err != nil {
+		return answer, localUnreadable(name, err)
+	}
+	if err := complete(answer); err != nil {
 		return answer, localUnreadable(name, err)
 	}
 	return answer, nil

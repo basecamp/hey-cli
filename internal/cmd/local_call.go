@@ -2,7 +2,9 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -92,8 +94,9 @@ func decodeJSONExactly(text string, into any) error {
 	if err := decoder.Decode(into); err != nil {
 		return err
 	}
-	if decoder.More() {
-		return fmt.Errorf("more than one JSON value")
+	// Token reads past whatever follows, a stray bracket included, which More would not.
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("more after the JSON value")
 	}
 	return nil
 }

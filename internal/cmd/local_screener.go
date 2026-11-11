@@ -47,7 +47,13 @@ func decideLocally(cmd *cobra.Command, value, decision string) error {
 	if err != nil {
 		return err
 	}
-	decided, err := decodeLocalAnswerAs[localDecision]("screener.decide", result)
+	// Said back by the app, so a decision it took any other way is never reported as this one.
+	decided, err := decodeLocalAnswerAs("screener.decide", result, func(decided localDecision) error {
+		if decided.Sender != sender || decided.Screened != decision {
+			return fmt.Errorf("it answered sender %d screened %q, not %d screened %q", decided.Sender, decided.Screened, sender, decision)
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
