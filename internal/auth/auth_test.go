@@ -599,6 +599,32 @@ func TestRefreshOnlyCredentialsRecoverAccessToken(t *testing.T) {
 	}
 }
 
+func TestRefreshOnlyRateLimitNeverAuthenticatesAnEmptyToken(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	requests := 0
+	client := &http.Client{Transport: authRequestTransport(func(*http.Request) (*http.Response, error) {
+		requests++
+		return &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Content-Type": {"application/json"}, "Retry-After": {"60"}}, Body: io.NopCloser(strings.NewReader(`{"error":"rate_limit_exceeded"}`))}, nil
+	})}
+	mgr := NewManager("https://mail.example.test", client, t.TempDir())
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{RefreshToken: "valid-refresh", SessionCookie: "obsolete-cookie", ExpiresAt: time.Now().Add(time.Hour).Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	for _, getToken := range []func(context.Context) (string, error){mgr.AccessToken, mgr.StoredAccessToken} {
+		if token, err := getToken(t.Context()); token != "" || err == nil || !strings.Contains(err.Error(), "rate-limiting") {
+			t.Fatal("refresh-only grant did not retain its rate-limit failure")
+		}
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "https://mail.example.test/boxes.json", nil)
+	if err := mgr.AuthenticateRequest(t.Context(), req); err == nil || !strings.Contains(err.Error(), "rate-limiting") {
+		t.Fatal("request authentication did not retain its rate-limit failure")
+	}
+	if req.Header.Get("Authorization") != "" || req.Header.Get("Cookie") != "" || requests != 1 {
+		t.Fatalf("rate-limit hold reached authentication headers or retried: calls=%d", requests)
+	}
+}
+
 func TestAuthenticateRequestRefreshesAndPreservesRefreshToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/oauth/tokens" {
