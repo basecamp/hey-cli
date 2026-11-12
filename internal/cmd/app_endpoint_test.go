@@ -570,3 +570,55 @@ func TestARepositoryAppOnlyEntryHoldsUpADelete(t *testing.T) {
 		t.Errorf("delete = %q", got)
 	}
 }
+
+// A limited app listing says how to see the rest by what the app takes: --all is refused
+// there, so the hint names --limit instead. The Imbox keeps the app's own warning that it
+// has not loaded everything beside it.
+func TestAppLimitedListingsOfferOnlyWhatTheAppTakes(t *testing.T) {
+	door := appImboxDoor(t)
+	door.Answer("drafts.list", map[string]any{
+		"drafts": []map[string]any{
+			{"id": 9001, "made_as": 1731280000123, "kind": "new", "account": "jason@example.com", "from": "jason@example.com",
+				"to": []string{}, "cc": []string{}, "bcc": []string{}, "subject": "One", "summary": "", "saved_at": "2026-11-11T09:30:00Z", "sendable": false},
+			{"id": 9002, "made_as": 1731280000124, "kind": "new", "account": "jason@example.com", "from": "jason@example.com",
+				"to": []string{}, "cc": []string{}, "bcc": []string{}, "subject": "Two", "summary": "", "saved_at": "2026-11-11T09:31:00Z", "sendable": false},
+		},
+	})
+	appTestHome(t, door.Path, true)
+
+	for _, args := range [][]string{{"box", "view", "imbox"}, {"draft", "list"}} {
+		stdout, _, err := runProfileCLI(t, append(args, "--limit", "1", "--json")...)
+		if err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		notice := appEnvelope(t, stdout).Notice
+		if strings.Contains(notice, "--all") || !strings.Contains(notice, "Showing 1 of 2") || !strings.Contains(notice, "without --limit") {
+			t.Errorf("%v notice = %q", args, notice)
+		}
+		if args[0] == "box" && !strings.Contains(notice, "more threads than the HEY app has loaded") {
+			t.Errorf("the Imbox's own warning went: %q", notice)
+		}
+	}
+}
+
+// Deleting the app's profile looks for no credential and revokes nothing: it has none of
+// its own, as profile list and show already hold.
+func TestAppProfileDeleteReadsNoCredential(t *testing.T) {
+	door := appImboxDoor(t)
+	appTestHome(t, door.Path, true)
+	// A credential file nothing can read: any look at it for the app profile fails the delete.
+	home := os.Getenv("XDG_CONFIG_HOME")
+	if err := os.WriteFile(filepath.Join(home, "hey-cli", "credentials.json"), []byte("not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	response, _, err := runProfileJSON(t, "profile", "delete", "this-computer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted := appData[map[string]any](t, response); deleted["status"] != "deleted" || deleted["revoked"] != nil {
+		t.Errorf("delete = %v", deleted)
+	}
+	if calls := door.Calls(); len(calls) != 0 {
+		t.Errorf("the delete asked the app: %s", calls)
+	}
+}

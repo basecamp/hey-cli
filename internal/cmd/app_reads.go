@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -105,12 +106,12 @@ func (c *boxCommand) runApp(cmd *cobra.Command, box string) error {
 		})
 	}
 	notice := ""
-	if *imbox.HasMore {
-		notice = "The Imbox holds more threads than the HEY app has loaded."
-	}
 	if c.limit > 0 && len(rows) > c.limit {
-		notice = output.TruncationNotice(c.limit, len(rows))
+		notice = appTruncationNotice(c.limit, len(rows))
 		rows = rows[:c.limit]
+	}
+	if *imbox.HasMore {
+		notice = strings.TrimSpace(notice + " The Imbox holds more threads than the HEY app has loaded.")
 	}
 
 	const name = "Imbox"
@@ -385,7 +386,7 @@ func (c *draftsCommand) runApp(cmd *cobra.Command) error {
 	}
 	notice := ""
 	if c.limit > 0 && len(drafts) > c.limit {
-		notice = output.TruncationNotice(c.limit, len(drafts))
+		notice = appTruncationNotice(c.limit, len(drafts))
 		drafts = drafts[:c.limit]
 	}
 
@@ -420,6 +421,12 @@ func orEmpty(addresses []string) []string {
 		return []string{}
 	}
 	return addresses
+}
+
+// appTruncationNotice is output.TruncationNotice for the app, which refuses --all
+// (appRefusesAll): the rest is seen by asking again without --limit.
+func appTruncationNotice(shown, total int) string {
+	return fmt.Sprintf("Showing %d of %d results. Run it again without --limit to see them all.", shown, total)
 }
 
 // appRefusesAll refuses --all on the app, which answers with what it has loaded and has no

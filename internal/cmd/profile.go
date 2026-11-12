@@ -346,33 +346,37 @@ func newProfileDeleteCommand() *cobra.Command {
 			}
 
 			fields := map[string]any{"name": name, "status": "deleted"}
-			// The revocation goes to the deleted profile's own saved server, never to
-			// the active configuration's, which may belong to another profile.
-			httpClient := &http.Client{Timeout: 15 * time.Second}
-			cli := auth.NewManager(p.BaseURL, httpClient, config.ConfigDir())
-			cli.UseProfile(name)
-			// An unreadable client id still leaves a credential to remove; its own
-			// record names the client it was issued to.
-			clientID, _, _ := config.MCPClientID(p.BaseURL)
-			mcp := auth.NewMCPManager(p.BaseURL, httpClient, config.ConfigDir(), clientID)
-			mcp.UseProfile(name)
-			for _, mgr := range []*auth.Manager{cli, mcp} {
-				revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
-				if err != nil {
-					// The profile stays, so its credential can still be reached to retry.
-					arg := name
-					if !config.ValidProfileName(name) {
-						arg = shellQuoted(name)
+			// The app's profile has no credential of its own, so its delete looks for none
+			// and revokes nothing, as profile list and show look for none.
+			if !appProfile(p) {
+				// The revocation goes to the deleted profile's own saved server, never to
+				// the active configuration's, which may belong to another profile.
+				httpClient := &http.Client{Timeout: 15 * time.Second}
+				cli := auth.NewManager(p.BaseURL, httpClient, config.ConfigDir())
+				cli.UseProfile(name)
+				// An unreadable client id still leaves a credential to remove; its own
+				// record names the client it was issued to.
+				clientID, _, _ := config.MCPClientID(p.BaseURL)
+				mcp := auth.NewMCPManager(p.BaseURL, httpClient, config.ConfigDir(), clientID)
+				mcp.UseProfile(name)
+				for _, mgr := range []*auth.Manager{cli, mcp} {
+					revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
+					if err != nil {
+						// The profile stays, so its credential can still be reached to retry.
+						arg := name
+						if !config.ValidProfileName(name) {
+							arg = shellQuoted(name)
+						}
+						// A storage error keeps its own class and hint, a refused keyring's.
+						e := *apierr.AsError(auth.CredentialStorageError(fmt.Sprintf("could not delete credentials for profile %q", name), err))
+						if e.Hint == "" {
+							e.Hint = "Run hey doctor -P " + arg + " to check the credential store, then delete the profile again"
+						}
+						return &e
 					}
-					// A storage error keeps its own class and hint, a refused keyring's.
-					e := *apierr.AsError(auth.CredentialStorageError(fmt.Sprintf("could not delete credentials for profile %q", name), err))
-					if e.Hint == "" {
-						e.Hint = "Run hey doctor -P " + arg + " to check the credential store, then delete the profile again"
+					if revoked != nil && mgr == cli {
+						fields["revoked"] = *revoked
 					}
-					return &e
-				}
-				if revoked != nil && mgr == cli {
-					fields["revoked"] = *revoked
 				}
 			}
 			clearProfileHTTPCache(cmd, name)
