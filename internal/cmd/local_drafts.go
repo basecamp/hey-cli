@@ -81,8 +81,8 @@ func (c *localDraftsCommand) run(cmd *cobra.Command, _ []string) error {
 			return errors.New("it lists no drafts")
 		}
 		for _, draft := range drafts.Drafts {
-			if err := draft.complete(); err != nil {
-				return err
+			if incomplete := draft.complete(); incomplete != nil {
+				return incomplete
 			}
 		}
 		return nil
