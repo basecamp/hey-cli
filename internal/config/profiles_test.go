@@ -300,7 +300,7 @@ func TestParseProfilesReadsTheEndpoint(t *testing.T) {
 	if app := entries["this-computer"]; app.Endpoint != EndpointApp || app.BaseURL != defaultBase {
 		t.Errorf("this-computer = %#v", app)
 	}
-	if server := entries["hey.com"]; server.Endpoint != "" {
+	if server := entries["hey.com"]; server.Endpoint != EndpointServer {
 		t.Errorf("hey.com = %#v", server)
 	}
 	if _, ok := entries["bare"]; ok {
@@ -349,5 +349,39 @@ func TestApplyProfileGatesTheAppEndpoint(t *testing.T) {
 	c.Profiles["this-computer"].AccountID = "42"
 	if err := c.ApplyProfile("this-computer", SourceFlag); err == nil || !strings.Contains(err.Error(), "takes no mail account") {
 		t.Errorf("an account on the app profile: %v", err)
+	}
+}
+
+// A nearer file's explicit "server" overrides a farther "app", and an app-only entry counts
+// as a profile wherever entries are counted.
+func TestAnExplicitServerEndpointOverridesTheApp(t *testing.T) {
+	farther, err := parseProfiles("global", map[string]json.RawMessage{"work": json.RawMessage(`{"endpoint":"app"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nearer, err := parseProfiles("repo", map[string]json.RawMessage{"work": json.RawMessage(`{"base_url":"https://app.hey.com","endpoint":"server"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := map[string]*ProfileConfig{}
+	mergeProfile(profiles, "work", farther["work"])
+	mergeProfile(profiles, "work", nearer["work"])
+	if p := profiles["work"]; p.Endpoint == EndpointApp {
+		t.Errorf("work = %#v", p)
+	}
+	if !EntryIsProfile(map[string]any{"endpoint": "app"}) || EntryIsProfile(map[string]any{"endpoint": "server"}) {
+		t.Error("EntryIsProfile misreads an app-only entry")
+	}
+}
+
+func TestAnAppOnlyProfileIsCountedBeforeTheNextBecomesTheDefault(t *testing.T) {
+	home := profileConfigHome(t)
+	writeConfigFile(t, filepath.Join(home, "hey-cli", "config.json"), `{"profiles":{"this-computer":{"endpoint":"app"}},"default_profile":"this-computer"}`)
+	isDefault, err := RegisterProfile("hey.com", ProfileConfig{BaseURL: defaultBase})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isDefault {
+		t.Error("the server profile became the default beside an app-only one")
 	}
 }

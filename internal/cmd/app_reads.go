@@ -59,7 +59,7 @@ type appPosting struct {
 
 // appCreator is a posting's sender; id is the app's sender id.
 type appCreator struct {
-	ID   int64  `json:"id"`
+	ID   int64  `json:"id,omitempty"`
 	Name string `json:"name"`
 }
 
@@ -67,6 +67,9 @@ type appCreator struct {
 func (c *boxCommand) runApp(cmd *cobra.Command, box string) error {
 	if boxKindFor(box) != hey.BoxKindImbox {
 		return appNotOffered(fmt.Sprintf("The box %q", box))
+	}
+	if err := appRefusesAll(c.all); err != nil {
+		return err
 	}
 	if c.page != "" {
 		return appNotOffered("--page")
@@ -105,7 +108,7 @@ func (c *boxCommand) runApp(cmd *cobra.Command, box string) error {
 	if *imbox.HasMore {
 		notice = "The Imbox holds more threads than the HEY app has loaded."
 	}
-	if c.limit > 0 && !c.all && len(rows) > c.limit {
+	if c.limit > 0 && len(rows) > c.limit {
 		notice = output.TruncationNotice(c.limit, len(rows))
 		rows = rows[:c.limit]
 	}
@@ -187,6 +190,9 @@ func readAppScreener(cmd *cobra.Command) (appScreener, error) {
 		if screener.WaitingCount == nil {
 			return errors.New("it does not count who waits")
 		}
+		if *screener.WaitingCount < len(screener.Waiting) {
+			return fmt.Errorf("it counts %d waiting but lists %d", *screener.WaitingCount, len(screener.Waiting))
+		}
 		for _, sender := range append(append([]appSender{}, screener.Waiting...), screener.Decided...) {
 			if sender.ID <= 0 {
 				return errors.New("it lists a sender without an ID")
@@ -209,6 +215,9 @@ func appIDKind(kind string) output.ResponseOption {
 func (c *screenerListCommand) runApp(cmd *cobra.Command) error {
 	if c.page != "" {
 		return appNotOffered("--page")
+	}
+	if err := appRefusesAll(c.all); err != nil {
+		return err
 	}
 	screener, err := readAppScreener(cmd)
 	if err != nil {
@@ -258,6 +267,9 @@ func (c *screenerListCommand) runApp(cmd *cobra.Command) error {
 func (c *screenerHistoryCommand) runApp(cmd *cobra.Command) error {
 	if c.page != "" {
 		return appNotOffered("--page")
+	}
+	if err := appRefusesAll(c.all); err != nil {
+		return err
 	}
 	screener, err := readAppScreener(cmd)
 	if err != nil {
@@ -335,6 +347,9 @@ func (c *draftsCommand) runApp(cmd *cobra.Command) error {
 	if c.page != "" {
 		return appNotOffered("--page")
 	}
+	if err := appRefusesAll(c.all); err != nil {
+		return err
+	}
 	result, err := callApp(cmd, "drafts.list", nil)
 	if err != nil {
 		return err
@@ -365,11 +380,11 @@ func (c *draftsCommand) runApp(cmd *cobra.Command) error {
 		drafts = append(drafts, appDraft{
 			ID: d.ID, Subject: d.Subject, Summary: d.Summary, UpdatedAt: d.SavedAt, ScheduledDeliveryAt: d.SendsAt,
 			MadeAs: d.MadeAs, Kind: d.Kind, Thread: d.Thread, Account: d.Account,
-			From: d.From, To: d.To, Cc: d.Cc, Bcc: d.Bcc, Sendable: *d.Sendable,
+			From: d.From, To: orEmpty(d.To), Cc: orEmpty(d.Cc), Bcc: orEmpty(d.Bcc), Sendable: *d.Sendable,
 		})
 	}
 	notice := ""
-	if c.limit > 0 && !c.all && len(drafts) > c.limit {
+	if c.limit > 0 && len(drafts) > c.limit {
 		notice = output.TruncationNotice(c.limit, len(drafts))
 		drafts = drafts[:c.limit]
 	}
@@ -397,4 +412,21 @@ func (c *draftsCommand) runApp(cmd *cobra.Command) error {
 		output.WithSummary(fmt.Sprintf("%d drafts", len(drafts))),
 		output.WithNotice(notice),
 	)
+}
+
+// orEmpty keeps a missing address list a list in the JSON, never null.
+func orEmpty(addresses []string) []string {
+	if addresses == nil {
+		return []string{}
+	}
+	return addresses
+}
+
+// appRefusesAll refuses --all on the app, which answers with what it has loaded and has no
+// further page to fetch: an answer to "all" that may be partial would read as complete.
+func appRefusesAll(all bool) error {
+	if all {
+		return appNotOffered("--all")
+	}
+	return nil
 }

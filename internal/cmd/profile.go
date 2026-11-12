@@ -481,8 +481,7 @@ func clearProfileHTTPCache(cmd *cobra.Command, name string) {
 // loader reads as a profile: an entry with no base_url is skipped there.
 func localEntrySetsProfile(local *config.LocalConfig, name string) bool {
 	entry, _ := local.Profiles[name].(map[string]any)
-	baseURL, _ := entry["base_url"].(string)
-	return baseURL != ""
+	return config.EntryIsProfile(entry)
 }
 
 // profileEndpoint is a profile's endpoint as profile list and show name it.

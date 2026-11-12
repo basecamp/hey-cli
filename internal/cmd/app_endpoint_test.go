@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -229,6 +230,10 @@ func TestAppRefusesWhatItDoesNotServe(t *testing.T) {
 		{"box", "view", "1234"},
 		{"box", "imbox", "--page", "abc"},
 		{"screener", "list", "--page", "abc"},
+		{"box", "view", "imbox", "--all"},
+		{"screener", "list", "--all"},
+		{"screener", "history", "--all"},
+		{"draft", "list", "--all"},
 		{"thread", "read", "801"},
 		{"compose", "--to", "marcus@example.com", "--subject", "Saturday", "--message", "On my way"},
 		{"draft", "send", "9001"},
@@ -251,6 +256,7 @@ func TestAppRefusesWhatItDoesNotServe(t *testing.T) {
 		{[]string{"auth", "status"}, "needs no sign-in"},
 		{[]string{"login"}, "needs no sign-in"},
 		{[]string{"box", "view", "imbox", "--account", "7"}, "takes no --account"},
+		{[]string{"app", "tools", "--account", "7"}, "takes no --account"},
 	} {
 		_, _, err := runProfileCLI(t, test.args...)
 		if output.ExitCodeFor(err) != output.ExitUsage || !strings.Contains(err.Error(), test.says) {
@@ -446,5 +452,84 @@ func TestAppImboxRowsCarryNoEmptyServerFields(t *testing.T) {
 	}
 	if strings.Contains(stdout, `"note"`) || strings.Contains(stdout, `"bubble_up_schedule"`) || strings.Contains(stdout, "thread read") {
 		t.Errorf("stdout = %s", stdout)
+	}
+}
+
+// The app quitting while it answers is a shut door (6), not a bad answer (7).
+func TestAppClosingMidAnswerIsANetworkFailure(t *testing.T) {
+	path, listener := localapptest.Listen(t)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		lines := bufio.NewScanner(conn)
+		for lines.Scan() {
+			var request struct {
+				ID     json.RawMessage `json:"id"`
+				Method string          `json:"method"`
+			}
+			_ = json.Unmarshal(lines.Bytes(), &request)
+			if request.Method == "tools/call" {
+				return
+			}
+			if request.Method == "initialize" {
+				fmt.Fprintf(conn, `{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"hey"}}}`+"\n", request.ID)
+			}
+		}
+	}()
+	appTestHome(t, path, true)
+
+	_, _, err := runProfileCLI(t, "box", "view", "imbox")
+	if output.ExitCodeFor(err) != output.ExitNetwork || !strings.Contains(apiErrorHint(err), "Let Agents Use HEY") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// An app that offers nothing is signed out: hey app call says so (3).
+func TestAppCallOnASignedOutAppIsAnAuthFailure(t *testing.T) {
+	door := localapptest.Start(t)
+	appTestHome(t, door.Path, true)
+
+	_, _, err := runProfileCLI(t, "app", "call", "imbox.list")
+	if output.ExitCodeFor(err) != output.ExitAuth {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Answers whose parts contradict each other, or leave a list out, are refused or kept a list.
+func TestAppAnswersAreReadWhole(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("screener.list", map[string]any{
+		"waiting":       []map[string]any{{"id": 51, "name": "Priya Raman", "address": "priya@example.com"}, {"id": 54, "name": "Omar Haddad", "address": "omar@example.com"}},
+		"waiting_count": 1,
+		"decided":       []map[string]any{},
+	})
+	door.Answer("drafts.list", map[string]any{"drafts": []map[string]any{
+		{"id": 9002, "kind": "new", "account": "jason@example.com", "from": "jason@example.com", "to": []string{"marcus@example.com"},
+			"subject": "Lunch", "summary": "Thursday?", "saved_at": "2026-11-11T10:00:00Z", "sendable": true},
+	}})
+	door.Answer("imbox.list", map[string]any{"threads": []map[string]any{
+		{"id": 303, "topic": 803, "subject": "Notes for Saturday", "summary": "Pack the tire warmers", "sender": "", "sender_id": 0, "seen": true, "bubbled_up": false},
+	}, "has_more": false})
+	appTestHome(t, door.Path, true)
+
+	if _, _, err := runProfileCLI(t, "screener", "list", "--json"); output.ExitCodeFor(err) != output.ExitAPI {
+		t.Errorf("a count below the list: %v", err)
+	}
+	stdout, _, err := runProfileCLI(t, "draft", "list", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, `"cc": []`) || !strings.Contains(stdout, `"bcc": []`) {
+		t.Errorf("draft list = %s", stdout)
+	}
+	stdout, _, err = runProfileCLI(t, "box", "view", "imbox", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout, `"id": 0`) {
+		t.Errorf("a sender with no id reads as sender 0: %s", stdout)
 	}
 }

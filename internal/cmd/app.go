@@ -143,6 +143,10 @@ A tool whose effect is anything but read is refused before it is called.`,
 			if err != nil {
 				return err
 			}
+			if len(offered) == 0 {
+				// The door lists nothing while nobody is signed in to the app.
+				return &apierr.Error{Code: apierr.CodeAuth, Message: "The HEY app offers nothing now: nobody is signed in", Hint: "Sign in to HEY in the app"}
+			}
 			effect, found := "", false
 			for _, tool := range offered {
 				if tool.Name == name {

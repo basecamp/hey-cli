@@ -155,13 +155,24 @@ func parseEndpoint(path, name string, fields map[string]any) (string, error) {
 	}
 	endpoint, isString := raw.(string)
 	switch {
-	case isString && (endpoint == "" || endpoint == EndpointServer):
+	case isString && endpoint == "":
 		return "", nil
+	case isString && endpoint == EndpointServer:
+		// Kept, not read as "", so a nearer file's "server" overrides a farther "app".
+		return EndpointServer, nil
 	case isString && endpoint == EndpointApp:
 		return EndpointApp, nil
 	default:
 		return "", fmt.Errorf("could not parse config %s: profile %q: endpoint must be %q or %q", path, name, EndpointServer, EndpointApp)
 	}
+}
+
+// EntryIsProfile reports whether a config file's entry names a profile, as parseProfiles
+// reads it: one with a base_url, or one the app answers, which needs none.
+func EntryIsProfile(fields map[string]any) bool {
+	baseURL, _ := fields["base_url"].(string)
+	endpoint, _ := fields["endpoint"].(string)
+	return baseURL != "" || endpoint == EndpointApp
 }
 
 func stringOrNumber(value any) string {
@@ -404,7 +415,7 @@ func RegisterProfile(name string, p ProfileConfig) (isDefault bool, err error) {
 		if other == name || json.Unmarshal(raw, &fields) != nil {
 			continue
 		}
-		if baseURL, _ := fields["base_url"].(string); baseURL != "" {
+		if EntryIsProfile(fields) {
 			isDefault = false
 		}
 	}

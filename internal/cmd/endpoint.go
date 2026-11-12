@@ -50,13 +50,16 @@ func chooseEndpoint(cmd *cobra.Command) error {
 	if isAppCommand(cmd) || cfg.ActiveEndpoint() == config.EndpointApp {
 		answeringEndpoint = config.EndpointApp
 	}
-	if !appEndpoint() || isAppCommand(cmd) {
+	if !appEndpoint() {
 		return nil
 	}
 	if accountFlag != "" {
 		return apierr.ErrUsageHint(
-			fmt.Sprintf("profile %q is answered by the HEY app on this computer, which takes no --account", terminal.SanitizeLine(cfg.ActiveProfile)),
+			"the HEY app on this computer takes no --account",
 			"The app answers for the account its window shows: drop --account, or use a server profile")
+	}
+	if isAppCommand(cmd) {
+		return nil
 	}
 	return appOffers(cmd)
 }
@@ -179,6 +182,14 @@ func appFailure(err error) error {
 			Code:    apierr.CodeNetwork,
 			Message: "The HEY app closed the connection without answering",
 			Hint:    "The HEY app answers only the user account it runs as",
+			Cause:   err,
+		}
+	case errors.As(err, &protocol) && protocol.Closed:
+		// The app quit, or turned the door off, while it answered.
+		return &apierr.Error{
+			Code:    apierr.CodeNetwork,
+			Message: "The HEY app closed the connection before it answered",
+			Hint:    appDoorHint,
 			Cause:   err,
 		}
 	case errors.As(err, &server), errors.As(err, &protocol):
