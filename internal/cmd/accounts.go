@@ -169,7 +169,7 @@ func accountOverrideNotice(source config.Source) string {
 			profileOrigin, profileErr := config.Origin(cfg.Profiles[cfg.ActiveProfile].BaseURL)
 			sameServer := baseURL != "" && entryErr == nil && profileErr == nil && entryOrigin == profileOrigin
 			if account, ok := entry["account_id"]; sameServer && ok && account != nil && account != "" {
-				return saved + "; its entry in " + local.Path + " remains higher precedence."
+				return saved + "; its entry in " + terminal.SanitizeLine(local.Path) + " remains higher precedence."
 			}
 		}
 		return ""

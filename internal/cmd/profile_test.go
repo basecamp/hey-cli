@@ -1196,7 +1196,7 @@ func TestTheTrustPromptPrintsANumericAccountWhole(t *testing.T) {
 func TestCommandsThatReadNoServerSkipProfiles(t *testing.T) {
 	home := profileTestHome(t)
 	writeProfileTestConfig(t, home, `{"default_profile":"broken","profiles":{"broken":{"base_url":"http://remote.example.com"},"work":{"base_url":"https://app.hey.com"}}}`)
-	for _, args := range [][]string{{"version"}, {"commands"}, {"completion", "bash"}} {
+	for _, args := range [][]string{{"version"}, {"commands"}, {"completion", "bash"}, {"shell-completion", "generate", "bash"}} {
 		if _, _, err := runProfileCLI(t, args...); err != nil {
 			t.Errorf("%v: %v", args, err)
 		}
