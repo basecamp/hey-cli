@@ -14,6 +14,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/harness"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 	"github.com/basecamp/hey-cli/internal/version"
 )
 
@@ -84,7 +85,7 @@ func runDoctorChecks(ctx context.Context, root *cobra.Command) []map[string]stri
 		checks = append(checks, map[string]string{
 			"name":    "Profile",
 			"status":  "ok",
-			"message": fmt.Sprintf("%s (%s)", cfg.ActiveProfile, cfg.BaseURL),
+			"message": terminal.SanitizeLine(fmt.Sprintf("%s (%s)", cfg.ActiveProfile, cfg.BaseURL)),
 		})
 	}
 

@@ -261,6 +261,10 @@ Examples:
 
 			isDefault, err := config.RegisterProfile(name, profile)
 			if err != nil {
+				// No profile names the credential just stored, so nothing would reach it.
+				if logoutErr := mgr.Logout(); logoutErr != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), terminal.SanitizeLine(fmt.Sprintf("Warning: could not delete credentials for profile %q: %v", name, logoutErr)))
+				}
 				return err
 			}
 
@@ -298,6 +302,14 @@ func newProfileDeleteCommand() *cobra.Command {
 			if !ok {
 				return apierr.ErrUsage(fmt.Sprintf("Profile %q not found", name))
 			}
+			if !cfg.ProfileInGlobalConfig(name) {
+				// Its entry would outlive the delete and bring the profile back.
+				where := "this repository's .hey/config.json"
+				if local := cfg.LocalConfig(); local != nil {
+					where = local.Path
+				}
+				return apierr.ErrUsage(fmt.Sprintf("Profile %q is set by %s, not the global config; remove it there", name, terminal.SanitizeLine(where)))
+			}
 
 			// The credential delete is irreversible, so prove the config file can take
 			// the entry's removal before it goes.
@@ -311,13 +323,12 @@ func newProfileDeleteCommand() *cobra.Command {
 			httpClient := &http.Client{Timeout: 15 * time.Second}
 			cli := auth.NewManager(p.BaseURL, httpClient, config.ConfigDir())
 			cli.UseProfile(name)
-			managers := []*auth.Manager{cli}
-			if clientID, _, err := config.MCPClientID(p.BaseURL); err == nil {
-				mcp := auth.NewMCPManager(p.BaseURL, httpClient, config.ConfigDir(), clientID)
-				mcp.UseProfile(name)
-				managers = append(managers, mcp)
-			}
-			for _, mgr := range managers {
+			// An unreadable client id still leaves a credential to remove; its own
+			// record names the client it was issued to.
+			clientID, _, _ := config.MCPClientID(p.BaseURL)
+			mcp := auth.NewMCPManager(p.BaseURL, httpClient, config.ConfigDir(), clientID)
+			mcp.UseProfile(name)
+			for _, mgr := range []*auth.Manager{cli, mcp} {
 				revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
 				if err != nil {
 					// Written straight to the terminal, so the store's error text is
@@ -343,6 +354,10 @@ func newProfileDeleteCommand() *cobra.Command {
 // revoked is nil when there was no sign-in to revoke: none stored, or a pasted
 // --token, which hey did not issue and so does not revoke.
 //
+// Delete takes the store's lock once for the revocation and once for the removal, as
+// hey auth logout --mcp does: a refresh another process makes in between leaves its
+// rotated grant unrevoked, listed in HEY's Connected Apps, and nothing else.
+//
 // The refresh token goes only to a server hey would send it to, and only to the one
 // that issued it: a base_url edited since the sign-in, or one on plain HTTP, gets
 // nothing, and the credential is removed unrevoked with a warning.
@@ -355,11 +370,12 @@ func revokeAndForget(cmd *cobra.Command, mgr *auth.Manager, name, baseURL string
 		return nil, err
 	}
 	var revoked *bool
-	if creds.RefreshToken != "" && !revocableAt(baseURL, creds.TokenEndpoint) {
+	issued := creds.OAuthType != "token" && (creds.RefreshToken != "" || creds.AccessToken != "")
+	if issued && !revocableAt(baseURL, creds.TokenEndpoint) {
 		no := false
 		revoked = &no
 		fmt.Fprintln(cmd.ErrOrStderr(), terminal.SanitizeLine(fmt.Sprintf("warning: not revoking profile %q's sign-in at %s, which did not issue it or takes no credential; remove it in HEY's Connected Apps", name, baseURL)))
-	} else if creds.RefreshToken != "" {
+	} else if issued {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 		revokeErr := mgr.Revoke(ctx)
 		cancel()
@@ -379,7 +395,8 @@ func revocableAt(baseURL, tokenEndpoint string) bool {
 		return false
 	}
 	if tokenEndpoint == "" {
-		return true
+		// Nothing says which server issued it.
+		return false
 	}
 	profileOrigin, err := config.Origin(baseURL)
 	if err != nil {

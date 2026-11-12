@@ -100,6 +100,9 @@ func newRootCmd() *cobra.Command {
 				return err
 			}
 			if baseURL != "" {
+				if err := cfg.CheckProfileServer("--base-url", baseURL); err != nil {
+					return err
+				}
 				if err := cfg.SetFromFlag("base_url", baseURL); err != nil {
 					return err
 				}
@@ -622,6 +625,9 @@ func selectProfile(cmd *cobra.Command) error {
 		// A profile hey refuses to send a credential to (a plain-HTTP server, say)
 		// must not lock out the commands that repair it: hey profile delete and
 		// set-default run on the top-level configuration instead.
+		if completing {
+			return nil
+		}
 		if isProfileCommand(cmd) {
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: not using profile %q: %s\n", terminal.SanitizeLine(name), terminal.SanitizeLine(apierr.AsError(err).Message))
 			return nil

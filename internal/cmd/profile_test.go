@@ -706,10 +706,11 @@ func TestProfileDeleteRevokesAndForgets(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := auth.NewStore(filepath.Join(home, "hey-cli"))
-	if err := store.Save("profile:work", &auth.Credentials{AccessToken: "work-access", RefreshToken: "work-refresh", OAuthType: "oauth"}); err != nil {
+	issuer := server.URL + "/oauth/tokens"
+	if err := store.Save("profile:work", &auth.Credentials{AccessToken: "work-access", RefreshToken: "work-refresh", OAuthType: "oauth", TokenEndpoint: issuer}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Save("mcp:profile:work", &auth.Credentials{AccessToken: "mcp-access", RefreshToken: "mcp-refresh", OAuthType: "oauth"}); err != nil {
+	if err := store.Save("mcp:profile:work", &auth.Credentials{AccessToken: "mcp-access", RefreshToken: "mcp-refresh", OAuthType: "oauth", TokenEndpoint: issuer}); err != nil {
 		t.Fatal(err)
 	}
 	profileCache := filepath.Join(home, "hey-cli", "profiles", "work", "http")
@@ -959,5 +960,101 @@ func TestABrokenDefaultProfileCanStillBeRepaired(t *testing.T) {
 	}
 	if data := statusData(t, response); data["profile"] != "work" {
 		t.Errorf("status = %#v", data)
+	}
+}
+
+// hey config set base_url sets the top-level URL, which no profile's credential uses,
+// so a profile does not refuse it.
+func TestConfigSetBaseURLUnderAProfile(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"https://app.hey.com"}}}`)
+	if _, _, err := runProfileJSON(t, "config", "set", "base_url", "https://staging.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if written := readProfileTestConfig(t, home); written["base_url"] != "https://staging.example.com" {
+		t.Errorf("config = %#v", written)
+	}
+}
+
+// A stored sign-in issued by another server than the profile's is refused, so an
+// edited base_url never takes the old server's token somewhere new.
+func TestAProfilesSignInIsRefusedAtAnotherServer(t *testing.T) {
+	home := profileTestHome(t)
+	server := noRequestServer(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"`+server.URL+`"}}}`)
+	store := auth.NewStore(filepath.Join(home, "hey-cli"))
+	if err := store.Save("profile:work", &auth.Credentials{AccessToken: "work-access", RefreshToken: "work-refresh", OAuthType: "oauth", TokenEndpoint: "https://app.hey.com/oauth/tokens"}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := runProfileJSON(t, "account", "list")
+	var cliErr *apierr.Error
+	if !errors.As(err, &cliErr) || !strings.Contains(cliErr.Message, `profile "work"'s sign-in was issued by https://app.hey.com/oauth/tokens`) || cliErr.Hint != "Run: hey auth login -P work" {
+		t.Errorf("err = %#v", err)
+	}
+
+	// A pasted token records its server too.
+	if _, _, err := runProfileJSON(t, "auth", "login", "--token", "pasted"); err != nil {
+		t.Fatal(err)
+	}
+	creds, err := store.Load("profile:work")
+	if err != nil || creds.TokenEndpoint != server.URL+"/oauth/tokens" {
+		t.Errorf("pasted token = %#v, %v", creds, err)
+	}
+}
+
+func TestDeletingARepositoryOnlyProfileIsRefused(t *testing.T) {
+	home := profileTestHome(t)
+	workspace := filepath.Join(home, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, ".hey"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".hey", "config.json"), []byte(`{"profiles":{"local":{"base_url":"https://local.example.com"}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	if _, _, err := runProfileJSON(t, "config", "trust-local"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := runProfileJSON(t, "profile", "delete", "local")
+	if got := errorMessage(err); !strings.Contains(got, `Profile "local" is set by `) || !strings.Contains(got, "not the global config; remove it there") {
+		t.Errorf("delete = %q", got)
+	}
+}
+
+// The commands that manage config files run with several profiles and none selected,
+// so a repository's profiles can be trusted from there; config show still refuses.
+func TestConfigCommandsRunWithNoProfileSelected(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"beta":{"base_url":"https://beta.hey.com"},"work":{"base_url":"https://app.hey.com"}}}`)
+	if _, _, err := runProfileJSON(t, "config", "trusted-locals"); err != nil {
+		t.Errorf("trusted-locals: %v", err)
+	}
+	if _, _, err := runProfileJSON(t, "config", "show"); !strings.Contains(errorMessage(err), "none selected") {
+		t.Errorf("config show: %v", err)
+	}
+}
+
+func TestLoggedOutStatusNamesTheProfilesLogin(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"https://app.hey.com"}}}`)
+	response, _, err := runProfileJSON(t, "auth", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Breadcrumbs) != 1 || response.Breadcrumbs[0].Command != "hey auth login -P work" {
+		t.Errorf("breadcrumbs = %#v", response.Breadcrumbs)
+	}
+}
+
+func TestCompletionSurvivesARefusedProfile(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"https://app.hey.com"}}}`)
+	t.Setenv("HEY_BASE_URL", "https://staging.example.com")
+	stdout, _, err := runProfileCLI(t, "__complete", "-P", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "work\thttps://app.hey.com") {
+		t.Errorf("completion = %q", stdout)
 	}
 }

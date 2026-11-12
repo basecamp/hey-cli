@@ -115,7 +115,7 @@ hey profile create work --account 12345                           # with a linke
 hey profile list                                                  # every profile, signed in or not
 hey profile show staging                                          # one profile's details
 hey profile set-default personal                                  # used when nothing else chooses
-hey profile delete staging                                        # revoke its sign-in and remove it
+hey profile delete staging                                        # revoke its sign-in where it can, then remove it
 hey -P staging box view imbox                                     # one command as a profile
 HEY_PROFILE=staging hey search "quarterly planning"
 ```

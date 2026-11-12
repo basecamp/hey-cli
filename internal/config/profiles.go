@@ -85,7 +85,11 @@ func parseProfiles(path string, raw map[string]json.RawMessage) (map[string]prof
 			continue
 		}
 		entry := profileEntry{BaseURL: baseURL}
-		if account := stringOrNumber(fields["account_id"]); account != "" {
+		if raw, present := fields["account_id"]; present && raw != nil {
+			account := stringOrNumber(raw)
+			if account == "" {
+				return nil, fmt.Errorf("could not parse config %s: profile %q: account_id must be a string or number", path, name)
+			}
 			normalized, err := normalizeAccountID(account)
 			if err != nil {
 				return nil, fmt.Errorf("could not parse config %s: profile %q: %w", path, name, err)
@@ -139,6 +143,12 @@ func (c *Config) applyFileProfiles(file fileConfig, source Source) {
 		c.Profiles = make(map[string]*ProfileConfig, len(file.profiles))
 	}
 	for name, entry := range file.profiles {
+		if source == SourceGlobal {
+			if c.globalProfiles == nil {
+				c.globalProfiles = map[string]bool{}
+			}
+			c.globalProfiles[name] = true
+		}
 		// A credential is keyed by the profile's name, so a repository entry that
 		// moved a global profile to another server would take its sign-in there.
 		if existing := c.Profiles[name]; source == SourceLocal && existing != nil && originOrSelf(existing.BaseURL) != originOrSelf(entry.BaseURL) {
@@ -233,6 +243,25 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	return nil
 }
 
+// CheckProfileServer refuses a server override, named by, that is not the active
+// profile's own server. hey config set base_url is no override: it sets the top-level
+// URL, which no profile's credential uses.
+func (c *Config) CheckProfileServer(by, value string) error {
+	if c.ActiveProfile == "" {
+		return nil
+	}
+	if p := c.Profiles[c.ActiveProfile]; p != nil && originOrSelf(value) != originOrSelf(p.BaseURL) {
+		return errProfileServerOverride(by, value, c.ActiveProfile, p.BaseURL)
+	}
+	return nil
+}
+
+// ProfileInGlobalConfig reports whether the global config file defines name, as
+// opposed to a trusted repository config alone.
+func (c *Config) ProfileInGlobalConfig(name string) bool {
+	return c.globalProfiles[name]
+}
+
 func errProfileServerOverride(by, override, name, profileURL string) error {
 	return apierr.ErrUsageHint(
 		fmt.Sprintf("%s %s is not profile %q's server (%s)", by, terminal.SanitizeLine(override), name, terminal.SanitizeLine(profileURL)),
@@ -271,7 +300,17 @@ func RegisterProfile(name string, p ProfileConfig) (isDefault bool, err error) {
 		return false, fmt.Errorf("could not marshal profile: %w", err)
 	}
 	profiles[name] = encoded
-	isDefault = len(profiles) == 1
+	// Counted as the loader counts them: an entry with no base_url is no profile.
+	isDefault = true
+	for other, raw := range profiles {
+		var fields map[string]any
+		if other == name || json.Unmarshal(raw, &fields) != nil {
+			continue
+		}
+		if baseURL, _ := fields["base_url"].(string); baseURL != "" {
+			isDefault = false
+		}
+	}
 	if err := setRaw(data, "profiles", profiles); err != nil {
 		return false, err
 	}

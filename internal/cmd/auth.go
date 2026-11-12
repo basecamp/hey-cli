@@ -214,7 +214,7 @@ func newAuthStatusCommand() *cobra.Command {
 				return auth.CredentialStorageError("could not read authentication status", err)
 			}
 			if err == nil && creds.AccessToken == "" && creds.RefreshToken == "" && creds.SessionCookie != "" {
-				status["sign_in_required"] = "Browser session cookie authentication is no longer supported. Run: hey auth login"
+				status["sign_in_required"] = "Browser session cookie authentication is no longer supported. Run: " + authMgr.LoginCommand()
 				if writer.IsStyled() {
 					fmt.Fprintln(cmd.OutOrStdout(), status["sign_in_required"])
 				}
@@ -235,7 +235,7 @@ func newAuthStatusCommand() *cobra.Command {
 				return writeOK(status, output.WithSummary("Not logged in"),
 					output.WithBreadcrumbs(output.Breadcrumb{
 						Action:      "login",
-						Command:     "hey auth login",
+						Command:     authMgr.LoginCommand(),
 						Description: "Authenticate with HEY",
 					}),
 				)

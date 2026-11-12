@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/config"
 )
 
 // Built-in OAuth client ID for the CLI app.
@@ -381,6 +382,10 @@ func (m *Manager) LoginWithToken(token string) error {
 		AccessToken: token,
 		OAuthType:   "token",
 	}
+	if m.profile != "" {
+		// Recorded so checkProfileIssuer knows which server a profile's token is for.
+		creds.TokenEndpoint = m.baseURL + "/oauth/tokens"
+	}
 	return m.saveCredentials(creds)
 }
 
@@ -430,12 +435,33 @@ func (m *Manager) reloadCredentialsLocked() (*Credentials, error) {
 	if err == nil {
 		err = m.checkPinnedGrant(creds)
 	}
+	if err == nil {
+		err = m.checkProfileIssuer(creds)
+	}
 	if err != nil {
 		m.cachedCredentials = nil
 		return nil, err
 	}
 	m.cachedCredentials = cloneCredentials(creds)
 	return cloneCredentials(creds), nil
+}
+
+// checkProfileIssuer refuses a profile's credential issued by another server than the
+// one this manager talks to. A profile's credential is keyed by its name, not by a
+// server, so an edited base_url would otherwise send it somewhere new; the key by
+// origin that the top-level credential uses makes this check needless there.
+func (m *Manager) checkProfileIssuer(creds *Credentials) error {
+	if m.profile == "" || creds.TokenEndpoint == "" {
+		return nil
+	}
+	issuer, issuerErr := config.Origin(creds.TokenEndpoint)
+	server, serverErr := config.Origin(m.baseURL)
+	if issuerErr == nil && serverErr == nil && issuer == server {
+		return nil
+	}
+	err := apierr.ErrAuth(fmt.Sprintf("profile %q's sign-in was issued by %s, not %s", m.profile, creds.TokenEndpoint, m.baseURL))
+	err.Hint = "Run: " + m.LoginCommand()
+	return err
 }
 
 func (m *Manager) saveCredentials(creds *Credentials) error {

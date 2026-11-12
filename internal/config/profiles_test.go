@@ -116,8 +116,11 @@ func TestApplyProfileTakesItsServerAndAccount(t *testing.T) {
 	if cfg.AccountID != "5" || cfg.SourceOf("base_url") != SourceEnv {
 		t.Errorf("the environment lost to the profile: %q %q", cfg.BaseURL, cfg.AccountID)
 	}
-	if err := cfg.SetFromFlag("base_url", "https://beta.hey.com"); err == nil {
+	if err := cfg.CheckProfileServer("--base-url", "https://beta.hey.com"); err == nil {
 		t.Error("--base-url on another server was taken under a profile")
+	}
+	if err := cfg.CheckProfileServer("--base-url", "https://staging.hey.com/"); err != nil {
+		t.Errorf("the profile's own server was refused: %v", err)
 	}
 	t.Setenv("HEY_ACCOUNT_ID", "")
 
@@ -231,5 +234,46 @@ func TestValidProfileName(t *testing.T) {
 		if got := ProfileNameIsPathSafe(name); got != want {
 			t.Errorf("ProfileNameIsPathSafe(%q) = %v, want %v", name, got, want)
 		}
+	}
+}
+
+// A repository's account_id was trusted for the files' server: it does not follow a
+// profile that names no account to another one.
+func TestARepositoryAccountStaysOnItsServer(t *testing.T) {
+	home := profileConfigHome(t)
+	writeConfigFile(t, filepath.Join(home, configDirName, configFile), `{"profiles":{
+		"elsewhere":{"base_url":"https://staging.hey.com"},
+		"here":{"base_url":"https://app.hey.com"}}}`)
+	workspace := filepath.Join(home, "workspace")
+	writeConfigFile(t, filepath.Join(workspace, ".hey", configFile), `{"account_id":"42"}`)
+	t.Chdir(workspace)
+
+	for name, want := range map[string]string{"elsewhere": AllAccounts, "here": "42"} {
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cfg.ApplyProfile(name, SourceFlag); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.AccountID != want {
+			t.Errorf("%s: account = %q, want %q", name, cfg.AccountID, want)
+		}
+	}
+}
+
+func TestProfileAccountMustBeAStringOrNumber(t *testing.T) {
+	if _, err := parseProfiles("config.json", map[string]json.RawMessage{"work": json.RawMessage(`{"base_url":"https://app.hey.com","account_id":true}`)}); err == nil || !strings.Contains(err.Error(), "account_id must be a string or number") {
+		t.Errorf("account_id true: %v", err)
+	}
+}
+
+// An entry the loader skips does not stop the first real profile becoming the default.
+func TestTheFirstRealProfileBecomesTheDefault(t *testing.T) {
+	home := profileConfigHome(t)
+	writeConfigFile(t, filepath.Join(home, configDirName, configFile), `{"profiles":{"draft":{"account_id":"1"}}}`)
+	isDefault, err := RegisterProfile("work", ProfileConfig{BaseURL: "https://app.hey.com"})
+	if err != nil || !isDefault {
+		t.Errorf("register: %v, default %v", err, isDefault)
 	}
 }

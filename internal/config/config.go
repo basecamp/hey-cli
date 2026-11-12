@@ -43,6 +43,7 @@ type Config struct {
 	ActiveProfile  string                    `json:"-"`
 
 	warnings            []string
+	globalProfiles      map[string]bool
 	sources             map[string]Source
 	globalConfig        fileConfig
 	localConfig         *LocalConfig
@@ -338,9 +339,6 @@ func (c *Config) SetFromFlag(key, value string) error {
 	case "base_url":
 		if err := validateBaseURL(value); err != nil {
 			return err
-		}
-		if p := c.Profiles[c.ActiveProfile]; p != nil && originOrSelf(value) != originOrSelf(p.BaseURL) {
-			return errProfileServerOverride("--base-url", value, c.ActiveProfile, p.BaseURL)
 		}
 		accountSource := c.SourceOf("account_id")
 		c.BaseURL = value

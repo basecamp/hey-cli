@@ -90,8 +90,8 @@ func resolveProfile(cmd *cobra.Command, c *config.Config, mayLeaveUnselected boo
 
 // commandMayRunWithoutProfile reports whether a command may run with no profile
 // selected among several: the profile commands, which manage them, and the commands
-// that read neither the server nor the account. `hey config` is not one of them,
-// though the local trust gate passes it, since `config show` reports what a run uses.
+// that read neither the server nor the account, and the config commands but `config
+// show`, which reports what a run uses.
 func commandMayRunWithoutProfile(cmd *cobra.Command) bool {
 	parts := strings.Fields(cmd.CommandPath())
 	if len(parts) < 2 {
@@ -100,7 +100,11 @@ func commandMayRunWithoutProfile(cmd *cobra.Command) bool {
 	if isProfileCommand(cmd) {
 		return true
 	}
-	return parts[1] != "config" && (commandIgnoresLocalConfig(cmd) || !commandUsesRuntimeConfig(cmd))
+	if parts[1] == "config" {
+		// trust-local, set and the rest manage the files a profile comes from.
+		return len(parts) >= 3 && parts[2] != "show"
+	}
+	return commandIgnoresLocalConfig(cmd) || !commandUsesRuntimeConfig(cmd)
 }
 
 // promptForProfile asks which profile to use, on stderr so stdout stays data. A seam
@@ -151,9 +155,10 @@ func addressLoginHint(err error) error {
 	return err
 }
 
-// completeProfileNames offers the global config's profiles for -P.
+// completeProfileNames offers the profiles -P can name here, a trusted repository's
+// included.
 func completeProfileNames(_ *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
-	loaded, err := config.LoadGlobal()
+	loaded, err := config.Load()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}

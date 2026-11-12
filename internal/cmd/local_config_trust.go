@@ -116,6 +116,9 @@ func promptForLocalConfigTrust(cmd *cobra.Command, local *config.LocalConfig) (l
 			if baseURL, ok := entry["base_url"].(string); ok && baseURL != "" {
 				server = baseURL
 			}
+			if account, ok := entry["account_id"]; ok && account != nil {
+				server += fmt.Sprintf(", mail account %v", account)
+			}
 		}
 		fmt.Fprintf(w, "%s%s  %s\n", label, terminal.SanitizeLine(name), terminal.SanitizeLine(server))
 	}
