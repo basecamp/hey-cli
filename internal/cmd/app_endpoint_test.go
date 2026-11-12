@@ -548,3 +548,25 @@ func TestAppAnswersAreReadWhole(t *testing.T) {
 		t.Errorf("a sender with no id reads as sender 0: %s", stdout)
 	}
 }
+
+// A repository's app-only entry is a profile too, so it holds up a delete that would
+// otherwise leave it to bring the profile back.
+func TestARepositoryAppOnlyEntryHoldsUpADelete(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"https://app.hey.com"}}}`)
+	workspace := filepath.Join(home, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, ".hey"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".hey", "config.json"), []byte(`{"profiles":{"work":{"endpoint":"app"}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	if _, _, err := runProfileJSON(t, "config", "trust-local"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := runProfileJSON(t, "profile", "delete", "work")
+	if got := errorMessage(err); !strings.Contains(got, `Profile "work" is also set by `) {
+		t.Errorf("delete = %q", got)
+	}
+}
