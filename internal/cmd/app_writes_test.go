@@ -414,7 +414,7 @@ func TestAppDraftSendAnswerNotPendingIsNotASend(t *testing.T) {
 
 	_, _, err := runProfileCLI(t, "draft", "send", "9001")
 	if output.ExitCodeFor(err) != output.ExitAPI || !strings.Contains(err.Error(), "may have done something") ||
-		!strings.Contains(apiErrorHint(err), "before asking again") {
+		!strings.Contains(apiErrorHint(err), "before running it again") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -547,7 +547,7 @@ func TestAppScreenerAddressInAPartialListIsNotNotFound(t *testing.T) {
 	appTestHome(t, door.Path, true)
 
 	_, _, err := runProfileCLI(t, "screener", "approve", "someone-unlisted@example.com")
-	if output.ExitCodeFor(err) != output.ExitAPI || !strings.Contains(apiErrorHint(err), "sender ID") {
+	if output.ExitCodeFor(err) != output.ExitAPI || !strings.Contains(apiErrorHint(err), "hey -P this-computer screener list") {
 		t.Fatalf("err = %v (hint %q)", err, apiErrorHint(err))
 	}
 	if names := appCallNames(appCalls(t, door)); names != "screener.list" {

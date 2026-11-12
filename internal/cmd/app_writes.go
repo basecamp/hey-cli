@@ -130,7 +130,7 @@ func appSenderFor(cmd *cobra.Command, value string) (appSender, error) {
 		return appSender{}, &apierr.Error{
 			Code:    apierr.CodeAPI,
 			Message: fmt.Sprintf("The HEY app lists %d of the %d senders waiting, and none of them sends from %s", len(screener.Waiting), *screener.WaitingCount, terminal.SanitizeLine(value)),
-			Hint:    "Use the sender ID once hey screener list shows them, or screen them in HEY",
+			Hint:    "Screen them in HEY, or by sender ID once " + appCommandLine("screener list") + " lists them",
 		}
 	case len(found) == 0:
 		return appSender{}, apierr.ErrNotFoundHint("sender", value,
@@ -303,7 +303,7 @@ func (c *draftSendCommand) runApp(cmd *cobra.Command, args []string) error {
 	return &apierr.Error{
 		Code:    apierr.CodeAPI,
 		Message: terminal.SanitizeLine("The HEY app's answer to message.send is not a send waiting for you, and it may have done something: " + answer),
-		Hint:    "Check in HEY what it did before asking again",
+		Hint:    "Check in HEY what it did before running it again",
 	}
 }
 
