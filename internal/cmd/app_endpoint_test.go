@@ -417,3 +417,34 @@ func TestAppCallRunsReadsAlone(t *testing.T) {
 func apiErrorHint(err error) string { return apierr.AsError(err).Hint }
 
 func apiErrorMeta(err error) map[string]any { return apierr.AsError(err).Meta }
+
+// Completion and profile listing on an app profile read no server and no credential.
+func TestAppProfileKeepsCompletionAndReadsNoCredential(t *testing.T) {
+	door := appImboxDoor(t)
+	appTestHome(t, door.Path, true)
+
+	if _, _, err := runProfileCLI(t, "__complete", "box", "view", ""); err != nil {
+		t.Errorf("completion: %v", err)
+	}
+	response, _, err := runProfileJSON(t, "profile", "show")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shown := appData[map[string]any](t, response); shown["endpoint"] != "app" || shown["authenticated"] != nil {
+		t.Errorf("profile show = %v", shown)
+	}
+}
+
+// The Imbox rows carry only what the app has, none of the server's empty fields.
+func TestAppImboxRowsCarryNoEmptyServerFields(t *testing.T) {
+	door := appImboxDoor(t)
+	appTestHome(t, door.Path, true)
+
+	stdout, _, err := runProfileCLI(t, "box", "view", "imbox", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout, `"note"`) || strings.Contains(stdout, `"bubble_up_schedule"`) || strings.Contains(stdout, "thread read") {
+		t.Errorf("stdout = %s", stdout)
+	}
+}

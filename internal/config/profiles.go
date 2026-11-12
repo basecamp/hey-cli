@@ -153,10 +153,11 @@ func parseEndpoint(path, name string, fields map[string]any) (string, error) {
 	if !present || raw == nil {
 		return "", nil
 	}
-	switch endpoint, _ := raw.(string); endpoint {
-	case "", EndpointServer:
+	endpoint, isString := raw.(string)
+	switch {
+	case isString && (endpoint == "" || endpoint == EndpointServer):
 		return "", nil
-	case EndpointApp:
+	case isString && endpoint == EndpointApp:
 		return EndpointApp, nil
 	default:
 		return "", fmt.Errorf("could not parse config %s: profile %q: endpoint must be %q or %q", path, name, EndpointServer, EndpointApp)

@@ -311,6 +311,11 @@ func TestParseProfilesReadsTheEndpoint(t *testing.T) {
 	}); err == nil || !strings.Contains(err.Error(), "endpoint must be") {
 		t.Errorf("err = %v", err)
 	}
+	if _, err := parseProfiles("config.json", map[string]json.RawMessage{
+		"flag": json.RawMessage(`{"base_url":"https://app.hey.com","endpoint":true}`),
+	}); err == nil || !strings.Contains(err.Error(), "endpoint must be") {
+		t.Errorf("err = %v", err)
+	}
 }
 
 // Only HEY_EXPERIMENTAL=app honours an app profile, and the app takes no mail account.

@@ -80,9 +80,12 @@ func newProfileListCommand() *cobra.Command {
 			for _, name := range names {
 				p := cfg.Profiles[name]
 				entry := map[string]any{
-					"name":          name,
-					"base_url":      p.BaseURL,
-					"authenticated": profileAuthenticated(name),
+					"name":     name,
+					"base_url": p.BaseURL,
+				}
+				// The app's profile has no credential of its own to look for.
+				if !appProfile(p) {
+					entry["authenticated"] = profileAuthenticated(name)
 				}
 				if cfg.DefaultProfile == name {
 					entry["default"] = true
@@ -115,7 +118,7 @@ func newProfileListCommand() *cobra.Command {
 					if cfg.DefaultProfile == name {
 						marks = append(marks, "default")
 					}
-					if p.Endpoint == config.EndpointApp && config.ExperimentalApp() {
+					if appProfile(p) {
 						signedIn = "the HEY app"
 					}
 					table.addRow([]string{terminal.SanitizeLine(name), terminal.SanitizeLine(p.BaseURL), p.AccountID, signedIn, strings.Join(marks, ", ")})
@@ -153,9 +156,8 @@ func newProfileShowCommand() *cobra.Command {
 			}
 
 			result := map[string]any{
-				"name":          name,
-				"base_url":      p.BaseURL,
-				"authenticated": false,
+				"name":     name,
+				"base_url": p.BaseURL,
 			}
 			if p.AccountID != "" {
 				result["account_id"] = p.AccountID
@@ -166,7 +168,12 @@ func newProfileShowCommand() *cobra.Command {
 			if cfg.DefaultProfile == name {
 				result["default"] = true
 			}
-			creds, err := authMgr.GetStore().Load(auth.ProfileCredentialKey(name))
+			var creds *auth.Credentials
+			err := auth.ErrCredentialsNotFound
+			if !appProfile(p) {
+				result["authenticated"] = false
+				creds, err = authMgr.GetStore().Load(auth.ProfileCredentialKey(name))
+			}
 			if err != nil && !errors.Is(err, auth.ErrCredentialsNotFound) {
 				return auth.CredentialStorageError("could not read the profile's credential", err)
 			}
@@ -187,13 +194,15 @@ func newProfileShowCommand() *cobra.Command {
 				if p.AccountID != "" {
 					fmt.Fprintf(w, "Mail:      %s\n", p.AccountID)
 				}
-				if p.Endpoint == config.EndpointApp && config.ExperimentalApp() {
+				if appProfile(p) {
 					fmt.Fprintln(w, "Endpoint:  the HEY app on this computer")
 				}
 				if cfg.DefaultProfile == name {
 					fmt.Fprintln(w, "Default:   yes")
 				}
-				if result["authenticated"] == true {
+				if appProfile(p) {
+					fmt.Fprintln(w, "Status:    Answered by the HEY app")
+				} else if result["authenticated"] == true {
 					fmt.Fprintln(w, "Status:    Logged in")
 				} else {
 					fmt.Fprintln(w, "Status:    Not logged in")
@@ -482,4 +491,10 @@ func profileEndpoint(p *config.ProfileConfig) string {
 		return config.EndpointApp
 	}
 	return config.EndpointServer
+}
+
+// appProfile reports a profile the HEY app answers in this build: one that needs, and
+// has, no credential of its own.
+func appProfile(p *config.ProfileConfig) bool {
+	return p.Endpoint == config.EndpointApp && config.ExperimentalApp()
 }

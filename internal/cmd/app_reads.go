@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	"github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/output"
@@ -40,9 +39,28 @@ type appImbox struct {
 // appBoxOutput is hey box view's --json answer on the app: the box's kind and name, as the
 // server's box payload carries them, and its postings.
 type appBoxOutput struct {
-	Kind     string                `json:"kind"`
-	Name     string                `json:"name"`
-	Postings []sourcePostingOutput `json:"postings"`
+	Kind     string       `json:"kind"`
+	Name     string       `json:"name"`
+	Postings []appPosting `json:"postings"`
+}
+
+// appPosting is an Imbox row under the server posting's field names, with only the fields
+// the app has: a generated.Posting would add the server's empty ones.
+type appPosting struct {
+	ID        int64      `json:"id"`
+	TopicID   int64      `json:"topic_id"`
+	Kind      string     `json:"kind"`
+	Name      string     `json:"name"`
+	Summary   string     `json:"summary"`
+	Seen      bool       `json:"seen"`
+	BubbledUp bool       `json:"bubbled_up"`
+	Creator   appCreator `json:"creator"`
+}
+
+// appCreator is a posting's sender; id is the app's sender id.
+type appCreator struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
 }
 
 // runApp answers hey box view from the app, which holds the Imbox alone.
@@ -76,19 +94,11 @@ func (c *boxCommand) runApp(cmd *cobra.Command, box string) error {
 		return err
 	}
 
-	rows := make([]sourcePostingOutput, 0, len(imbox.Threads))
+	rows := make([]appPosting, 0, len(imbox.Threads))
 	for _, thread := range imbox.Threads {
-		rows = append(rows, sourcePostingOutput{
-			Posting: generated.Posting{
-				Id:        thread.ID,
-				Kind:      "topic",
-				Name:      thread.Subject,
-				Summary:   thread.Summary,
-				Seen:      thread.Seen,
-				BubbledUp: thread.BubbledUp,
-				Creator:   generated.Contact{Id: thread.SenderID, Name: thread.Sender},
-			},
-			TopicID: thread.Topic,
+		rows = append(rows, appPosting{
+			ID: thread.ID, TopicID: thread.Topic, Kind: "topic", Name: thread.Subject, Summary: thread.Summary,
+			Seen: thread.Seen, BubbledUp: thread.BubbledUp, Creator: appCreator{ID: thread.SenderID, Name: thread.Sender},
 		})
 	}
 	notice := ""
@@ -109,7 +119,7 @@ func (c *boxCommand) runApp(cmd *cobra.Command, box string) error {
 		table.addRow([]string{"ID", "Thread", "From", "Summary"})
 		for _, row := range rows {
 			table.addRow([]string{
-				fmt.Sprintf("%d", row.Id),
+				fmt.Sprintf("%d", row.ID),
 				fmt.Sprintf("%d", row.TopicID),
 				terminal.SanitizeLine(row.Creator.Name),
 				truncate(terminal.SanitizeLine(row.Summary), 60),
@@ -129,7 +139,7 @@ func (c *boxCommand) runApp(cmd *cobra.Command, box string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "# %s\n\n", name)
 		markdown := make([]sourcePostingRow, 0, len(rows))
 		for _, row := range rows {
-			markdown = append(markdown, sourcePostingRow{ID: row.Id, TopicID: row.TopicID, From: row.Creator.Name, Summary: row.Summary})
+			markdown = append(markdown, sourcePostingRow{ID: row.ID, TopicID: row.TopicID, From: row.Creator.Name, Summary: row.Summary})
 		}
 		if err := writeOK(markdown); err != nil {
 			return err
@@ -144,7 +154,6 @@ func (c *boxCommand) runApp(cmd *cobra.Command, box string) error {
 			output.WithSummary(boxSummary(len(rows), name)),
 			output.WithNotice(notice),
 			output.WithMeta("has_more", *imbox.HasMore),
-			output.WithBreadcrumbs(boxListing.breadcrumbs[0]),
 		)
 	}
 }

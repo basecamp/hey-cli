@@ -77,7 +77,9 @@ func appOffers(cmd *cobra.Command) error {
 	path := cmd.CommandPath()
 	parts := strings.Fields(path)
 	switch {
-	case appRoutes[path], len(parts) < 2, isProfileCommand(cmd), !commandUsesRuntimeConfig(cmd):
+	case appRoutes[path], len(parts) < 2, isProfileCommand(cmd), !commandUsesRuntimeConfig(cmd),
+		// Completion lists commands and profile names, and reads no server.
+		cmd.Name() == cobra.ShellCompRequestCmd, cmd.Name() == cobra.ShellCompNoDescRequestCmd:
 		return nil
 	case parts[1] == "mcp":
 		return apierr.ErrUsageHint(
