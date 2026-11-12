@@ -381,6 +381,9 @@ func (v *screenerView) update(msg tea.Msg) (tea.Cmd, bool) {
 		v.decided = true
 		return notify("The Screener is clearing. Everyone waiting will be asked about again on their next email."), true
 	}
+	if v.preview != nil && v.preview.find.editing {
+		return v.preview.find.update(msg), true
+	}
 	return nil, false
 }
 
@@ -423,11 +426,23 @@ func (v *screenerView) HelpBindings() []helpBinding {
 		}
 	}
 	if v.preview != nil {
-		return []helpBinding{
-			{"↑↓", "scroll"},
-			{key: v.screenQuestion()},
-			{"space/esc", "close preview"},
+		if v.preview.find.editing {
+			return v.preview.find.helpBindings()
 		}
+		closeKey := "space/esc"
+		if v.preview.find.query != "" {
+			closeKey = "space/q"
+		}
+		bindings := []helpBinding{
+			{"↑↓", "scroll"},
+			{closeKey, "close preview"},
+		}
+		if v.preview.find.query == "" {
+			bindings = append(bindings, helpBinding{key: v.screenQuestion()})
+		} else {
+			bindings = append(bindings, helpBinding{"y", "screen in"})
+		}
+		return append(bindings, v.preview.find.helpBindings()...)
 	}
 	bindings := []helpBinding{{"↑↓", "navigate"}}
 	if v.tab == screenerPendingTab {

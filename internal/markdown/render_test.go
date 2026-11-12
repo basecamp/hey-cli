@@ -254,3 +254,28 @@ func TestRenderNeverHidesWhereAURLShapedImageLabelGoes(t *testing.T) {
 		t.Errorf("rendered = %q, want the label and the destination it really links to", out)
 	}
 }
+
+func TestLinkedRenderKeepsVisibleURLFragmentsForSearch(t *testing.T) {
+	md := htmlutil.ToMarkdown(`<p><a href="https://example.org/xxxxxxxxxxxxxxxunsubscribe?newsletter=monthly">Manage preferences</a></p>`)
+	linked := RenderLinked(md, 40, -1)
+	if len(linked.Links) != 1 {
+		t.Fatalf("links = %d, want one", len(linked.Links))
+	}
+	lines := strings.Split(linked.Text, "\n")
+	var visibleURL string
+	for _, run := range linked.Links[0].TextRuns {
+		if !run.Destination {
+			continue
+		}
+		for _, span := range run.Spans {
+			plain := ansi.Strip(lines[span.Line])
+			visibleURL += strings.TrimSpace(plain[span.Start:span.End])
+		}
+	}
+	if visibleURL != linked.Links[0].Destination {
+		t.Errorf("visible URL fragments = %q, want %q", visibleURL, linked.Links[0].Destination)
+	}
+	if SameURL("https://example.org/a%2Fb", "https://example.org/a/b") {
+		t.Error("URL identity must preserve escaped ASCII delimiters")
+	}
+}
