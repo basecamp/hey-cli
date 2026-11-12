@@ -52,6 +52,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			answeringEndpoint = ""
 			jqRequested := cmd.Flags().Changed("jq")
 			format := output.FormatFromFlags(jsonFlag || jqRequested, quietFlag, idsOnly, countFlag, markdownF, styledFlag, agentFlag)
 			if htmlOutput {
@@ -107,14 +108,21 @@ func newRootCmd() *cobra.Command {
 					return err
 				}
 			}
+			if err := chooseEndpoint(cmd); err != nil {
+				return err
+			}
 			if accountFlag != "" {
 				if err := cfg.SetFromFlag("account_id", accountFlag); err != nil {
 					return err
 				}
 			}
 
-			if err := ensureLocalConfigTrusted(cmd); err != nil {
-				return err
+			// The app endpoint sends nothing to a server: a repository's server and
+			// account, which trusting it approves, are never used.
+			if !appEndpoint() {
+				if err := ensureLocalConfigTrusted(cmd); err != nil {
+					return err
+				}
 			}
 
 			cleanupUpgradeSidecars()
@@ -144,11 +152,11 @@ func newRootCmd() *cobra.Command {
 			// (config set, trust-local, the wizard's onboarded flag) would
 			// silently DELETE legacy embedded credentials otherwise, because
 			// fileConfig has no fields to carry them through the rewrite.
-			if !commandSkipsCredentialMigration(cmd) {
+			if !commandSkipsCredentialMigration(cmd) && !appEndpoint() {
 				migrateOldCredentials(configDir)
 			}
 
-			if commandUsesAccountScope(cmd) {
+			if commandUsesAccountScope(cmd) && !appEndpoint() {
 				authenticated, err := authMgr.AuthenticationStatus()
 				if err != nil {
 					return err
@@ -175,7 +183,11 @@ func newRootCmd() *cobra.Command {
 			}
 			// First run: an interactive, logged-out bare `hey` gets the
 			// onboarding wizard (lite once onboarded — sign-in only). Every
-			// other bare `hey` prints help; the app lives at `hey tui`.
+			// other bare `hey` prints help; the app lives at `hey tui`. A profile
+			// the HEY app answers needs no sign-in, so it never gets the wizard.
+			if appEndpoint() {
+				return cmd.Help()
+			}
 			authenticated, err := authMgr.AuthenticationStatus()
 			if err != nil {
 				return err
@@ -254,6 +266,9 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newHeyCommand().cmd)
 	root.AddCommand(newSkillCommand().cmd)
 	root.AddCommand(newMCPCommand().cmd)
+	if config.ExperimentalApp() {
+		root.AddCommand(newAppCommand().cmd)
+	}
 	root.AddCommand(newHelpTopicCommands()...)
 	root.AddCommand(newCommandsCommand())
 	root.AddCommand(newShellCompletionCommand())
@@ -327,10 +342,10 @@ func Execute() {
 	}
 }
 
-// withProfileMeta names the active profile on a failed answer as on a successful one,
-// on a copy, since an error value may be shared.
+// withProfileMeta names the active profile, and in an experimental build the endpoint, on
+// a failed answer as on a successful one, on a copy, since an error value may be shared.
 func withProfileMeta(err error) error {
-	if cfg == nil || cfg.ActiveProfile == "" {
+	if (cfg == nil || cfg.ActiveProfile == "") && answeringEndpoint == "" {
 		return err
 	}
 	e := *apierr.AsError(err)
@@ -338,7 +353,12 @@ func withProfileMeta(err error) error {
 	for k, v := range e.Meta {
 		meta[k] = v
 	}
-	meta["profile"] = cfg.ActiveProfile
+	if cfg != nil && cfg.ActiveProfile != "" {
+		meta["profile"] = cfg.ActiveProfile
+	}
+	if answeringEndpoint != "" {
+		meta["endpoint"] = answeringEndpoint
+	}
 	e.Meta = meta
 	return &e
 }
@@ -612,7 +632,7 @@ func profileOption() output.ResponseOption {
 // every command response includes request stats when --stats is set, and the profile
 // when one is active.
 func writeOK(data any, opts ...output.ResponseOption) error {
-	return writer.OK(data, append(opts, statsOption(), profileOption())...)
+	return writer.OK(data, append(opts, statsOption(), profileOption(), endpointOption())...)
 }
 
 // selectProfile resolves the profile for this invocation and applies it. A bare `hey`

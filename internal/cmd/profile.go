@@ -93,6 +93,9 @@ func newProfileListCommand() *cobra.Command {
 				if p.AccountID != "" {
 					entry["account_id"] = p.AccountID
 				}
+				if config.ExperimentalApp() {
+					entry["endpoint"] = profileEndpoint(p)
+				}
 				profiles = append(profiles, entry)
 			}
 
@@ -111,6 +114,9 @@ func newProfileListCommand() *cobra.Command {
 					}
 					if cfg.DefaultProfile == name {
 						marks = append(marks, "default")
+					}
+					if p.Endpoint == config.EndpointApp && config.ExperimentalApp() {
+						signedIn = "the HEY app"
 					}
 					table.addRow([]string{terminal.SanitizeLine(name), terminal.SanitizeLine(p.BaseURL), p.AccountID, signedIn, strings.Join(marks, ", ")})
 				}
@@ -154,6 +160,9 @@ func newProfileShowCommand() *cobra.Command {
 			if p.AccountID != "" {
 				result["account_id"] = p.AccountID
 			}
+			if config.ExperimentalApp() {
+				result["endpoint"] = profileEndpoint(p)
+			}
 			if cfg.DefaultProfile == name {
 				result["default"] = true
 			}
@@ -177,6 +186,9 @@ func newProfileShowCommand() *cobra.Command {
 				fmt.Fprintf(w, "Base URL:  %s\n", terminal.SanitizeLine(p.BaseURL))
 				if p.AccountID != "" {
 					fmt.Fprintf(w, "Mail:      %s\n", p.AccountID)
+				}
+				if p.Endpoint == config.EndpointApp && config.ExperimentalApp() {
+					fmt.Fprintln(w, "Endpoint:  the HEY app on this computer")
 				}
 				if cfg.DefaultProfile == name {
 					fmt.Fprintln(w, "Default:   yes")
@@ -462,4 +474,12 @@ func localEntrySetsProfile(local *config.LocalConfig, name string) bool {
 	entry, _ := local.Profiles[name].(map[string]any)
 	baseURL, _ := entry["base_url"].(string)
 	return baseURL != ""
+}
+
+// profileEndpoint is a profile's endpoint as profile list and show name it.
+func profileEndpoint(p *config.ProfileConfig) string {
+	if p.Endpoint == config.EndpointApp {
+		return config.EndpointApp
+	}
+	return config.EndpointServer
 }
