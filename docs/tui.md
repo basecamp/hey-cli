@@ -80,7 +80,9 @@ A thread opens on its latest message; `k` steps back through the ones before it 
 
 Sending a reply or a forward from a thread closes the thread and returns you to the list you opened it from — the Imbox, a search, a bundle. A send that fails keeps the form open — except one HEY refused and kept as a draft (usually the account's sending limit): that closes the form, since sending again would only make another draft, and says "Not sent" with the draft it was saved as. An address HEY would not deliver to keeps the form open too: the form names it (`Not a valid email address: a`) rather than sending a message HEY would quietly keep as a draft, or send without that recipient.
 
-While reading a thread, the From header shows the actual send-as address when HEY records one separately from the account user.
+While reading a thread, the From header shows the actual send-as address when HEY records one separately from the account user. Otherwise a sender with both a name and an address — inbound or mail you sent — is shown as `Name <address>`. An alternative sender name replaces that line on its own, and a note or a share notice keeps the name alone.
+
+The same header shows where the message arrived and who it was addressed to, when HEY recorded them. `Via` is the exact account address an inbound message arrived through, including a plus-tag or a catch-all alias, and it is left out for mail you sent. `To`, `Cc` and `Bcc` follow, each left out when that line is empty. A note or a share notice shows none of these. A line too long for the screen is cut short. The Screener preview shows the same lines.
 
 While reading a thread, links can be selected without a mouse. Tab selects the next link in document order and Shift+Tab selects the previous one; both wrap at the ends. A fixed row above the shortcut bar shows the selected destination without moving the thread. A destination too long for one row wraps onto as many rows as it needs, so you always see all of it. Press Enter to open it; opening stays unavailable until the terminal is tall enough to show the whole destination. Press Escape once to clear the selection, and Escape again to leave the thread. A thread with no selectable links keeps the normal global Tab focus behavior. Existing OSC 8 mouse links remain available.
 
@@ -184,9 +186,11 @@ last sender screened in or out, or the whole Screener cleared — it closes on i
 takes you to the Imbox, as the web app does.
 
 Space opens a bigger preview of the selected sender's most recent email: the whole message,
-not just the first line the list has room for. Arrow keys and PgUp/PgDn scroll it, `y` and
-`n` answer for that sender straight from it, and Space or Escape closes it again. Opening a
-preview only reads the email; it doesn't screen the sender or tell them anything.
+not just the first line the list has room for. The header names the address it arrived
+through and the To, Cc and Bcc lines, the same way an opened thread does. Arrow keys and
+PgUp/PgDn scroll it, `y` and `n` answer for that sender straight from it, and Space or
+Escape closes it again. Opening a preview only reads the email; it doesn't screen the
+sender or tell them anything.
 
 ## Imbox cover art
 

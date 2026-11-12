@@ -16,6 +16,11 @@ import (
 //
 // Body is Markdown, converted once here at the edge, and BodyHTML keeps the HTML HEY
 // served so the image and attachment extractors still have the attributes Markdown drops.
+//
+// Recipients and ReceivedVia come from the message the way the body does, so both are
+// empty when that message was not read. ReceivedVia is the exact account address an
+// inbound message arrived through, including a plus-tag or catch-all alias, and not the
+// contact HEY resolved that address to. Mail you sent has none.
 type Entry struct {
 	ID                    int64
 	CreatedAt             time.Time
@@ -24,10 +29,12 @@ type Entry struct {
 	AlternativeSenderName string
 	// Kind is HEY's Entry#kind: a message, or a note (comment) or share notice
 	// (access_notice) that was never emailed. See InternalEntryLabel.
-	Kind     string
-	Summary  string
-	Body     htmlutil.Markdown
-	BodyHTML string
+	Kind        string
+	Recipients  Recipients
+	ReceivedVia []string
+	Summary     string
+	Body        htmlutil.Markdown
+	BodyHTML    string
 	// BodyState is what became of the body when the entry came through threadload:
 	// hydrated, bodyless, over_limit or failed. Empty for an entry read another way.
 	BodyState string
@@ -63,6 +70,7 @@ func NewEntry(entry generated.Entry, message generated.Message) Entry {
 	if summary == "" {
 		summary = message.Subject
 	}
+	recipients, receivedVia := Envelope(message)
 
 	return Entry{
 		ID:                    entry.Id,
@@ -71,8 +79,58 @@ func NewEntry(entry generated.Entry, message generated.Message) Entry {
 		Sender:                contactOf(message.Sender),
 		AlternativeSenderName: terminal.SanitizeLine(entry.AlternativeSenderName),
 		Kind:                  entry.Kind,
+		Recipients:            recipients,
+		ReceivedVia:           receivedVia,
 		Summary:               terminal.SanitizeLine(summary),
 		Body:                  htmlutil.ToMarkdown(message.Content),
 		BodyHTML:              message.Content,
 	}
+}
+
+// Recipients is a message's visible envelope: the To, Cc and Bcc lines HEY recorded.
+type Recipients struct {
+	To  []Contact
+	Cc  []Contact
+	Bcc []Contact
+}
+
+// Envelope reads who a message was addressed to and the exact account addresses it
+// arrived through. A delivery address is kept as HEY wrote it. The contact HEY resolved
+// that address to is a different fact, and it is not what arrived. Both results are
+// empty when HEY served none.
+func Envelope(message generated.Message) (Recipients, []string) {
+	return Recipients{
+		To:  contactsOf(message.Addressed.Directly),
+		Cc:  contactsOf(message.Addressed.Copied),
+		Bcc: contactsOf(message.Addressed.Blindcopied),
+	}, receivedViaOf(message.ReceivedVia)
+}
+
+func contactsOf(contacts []generated.Contact) []Contact {
+	if len(contacts) == 0 {
+		return nil
+	}
+	described := make([]Contact, len(contacts))
+	for i, contact := range contacts {
+		described[i] = contactOf(contact)
+	}
+	return described
+}
+
+func receivedViaOf(deliveries []generated.MessageReceivedVia) []string {
+	if len(deliveries) == 0 {
+		return nil
+	}
+	addresses := make([]string, 0, len(deliveries))
+	for _, delivery := range deliveries {
+		address := terminal.SanitizeLine(delivery.EmailAddress)
+		if address == "" {
+			continue
+		}
+		addresses = append(addresses, address)
+	}
+	if len(addresses) == 0 {
+		return nil
+	}
+	return addresses
 }

@@ -11,6 +11,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/markdown"
 )
 
@@ -21,6 +22,8 @@ type screenerPreviewLoadedMsg struct {
 	requestID   uint64
 	clearanceID int64
 	body        htmlutil.Markdown
+	recipients  mail.Recipients
+	receivedVia []string
 	err         error
 }
 
@@ -28,12 +31,14 @@ type screenerPreviewLoadedMsg struct {
 // recent email in full, over the queue, where a row only has room for its first line.
 // It is read-only — the answer is still Yes or No, and either one closes it.
 type screenerPreview struct {
-	row      screenerRow
-	loading  bool
-	failure  string
-	body     htmlutil.Markdown
-	width    int // the width body was last rendered at, 0 when it needs rendering again
-	viewport viewport.Model
+	row         screenerRow
+	loading     bool
+	failure     string
+	body        htmlutil.Markdown
+	recipients  mail.Recipients
+	receivedVia []string
+	width       int // the width body was last rendered at, 0 when it needs rendering again
+	viewport    viewport.Model
 }
 
 // openPreview reads the most recent email of the sender under the cursor. HEY serves its
@@ -68,7 +73,14 @@ func (v *screenerView) openPreview() tea.Cmd {
 		if err != nil {
 			return screenerPreviewLoadedMsg{requestID: requestID, clearanceID: clearanceID, err: err}
 		}
-		return screenerPreviewLoadedMsg{requestID: requestID, clearanceID: clearanceID, body: htmlToMarkdown(message.Content)}
+		recipients, receivedVia := mail.Envelope(*message)
+		return screenerPreviewLoadedMsg{
+			requestID:   requestID,
+			clearanceID: clearanceID,
+			body:        htmlToMarkdown(message.Content),
+			recipients:  recipients,
+			receivedVia: receivedVia,
+		}
 	}
 }
 
@@ -82,6 +94,8 @@ func (v *screenerView) previewLoaded(msg screenerPreviewLoadedMsg) {
 		return
 	}
 	v.preview.body = msg.body
+	v.preview.recipients = msg.recipients
+	v.preview.receivedVia = msg.receivedVia
 	v.preview.width = 0
 	v.layoutPreview()
 	v.preview.viewport.GotoTop()
@@ -152,6 +166,9 @@ func (v *screenerView) previewHeader() string {
 	b.WriteString("  " + lipgloss.NewStyle().Foreground(colorBright).Bold(true).Render(name))
 	b.WriteString(lipgloss.NewStyle().Foreground(colorBright).Render(address))
 	b.WriteString(styleMuted.Render(date) + "\n")
+	for _, line := range envelopeLines(v.preview.recipients, v.preview.receivedVia, width-2) {
+		b.WriteString("  " + styleMuted.Render(line) + "\n")
+	}
 	b.WriteString("  " + lipgloss.NewStyle().Foreground(colorLink).Bold(true).Render(subject) + "\n\n")
 	return b.String()
 }

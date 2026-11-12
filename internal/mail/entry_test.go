@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+
+	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
 func TestNewEntryKeepsTheSelectedSender(t *testing.T) {
@@ -64,5 +66,44 @@ func TestNewEntryFallsBackToTheMessage(t *testing.T) {
 	}
 	if entry.Creator.Name != "Jane Dawson" {
 		t.Errorf("creator = %+v, want the message's", entry.Creator)
+	}
+}
+
+// The delivery address is the address HEY recorded, not the contact it resolved that
+// address to. A message that was not read has neither.
+func TestNewEntryKeepsTheEnvelopeApartFromTheResolvedContact(t *testing.T) {
+	entry := NewEntry(generated.Entry{Id: 11}, generated.Message{
+		Addressed: generated.Addressed{
+			Directly:    []generated.Contact{{Id: 21, Name: "Elija\nSorensen", EmailAddress: "eli@example.com"}},
+			Copied:      []generated.Contact{{Id: 22, Name: "Sam Rivera", EmailAddress: "sam@example.com"}},
+			Blindcopied: []generated.Contact{{Id: 23, EmailAddress: "audit@example.com"}},
+		},
+		ReceivedVia: []generated.MessageReceivedVia{{
+			EmailAddress: "eli+receipts@example.com",
+			Contact:      &generated.Contact{Id: 21, Name: "Elija Sorensen", EmailAddress: "eli@example.com"},
+		}, {
+			EmailAddress: "invoices@example.org",
+		}},
+	})
+
+	if got, want := entry.Recipients.To[0], (Contact{ID: 21, Name: "Elija Sorensen", EmailAddress: "eli@example.com"}); got != want {
+		t.Errorf("to = %+v, want %+v", got, want)
+	}
+	if len(entry.Recipients.Cc) != 1 || entry.Recipients.Cc[0].EmailAddress != "sam@example.com" {
+		t.Errorf("cc = %+v", entry.Recipients.Cc)
+	}
+	if len(entry.Recipients.Bcc) != 1 || entry.Recipients.Bcc[0].Name != "" || entry.Recipients.Bcc[0].EmailAddress != "audit@example.com" {
+		t.Errorf("bcc = %+v", entry.Recipients.Bcc)
+	}
+	wantVia := []string{"eli+receipts@example.com", "invoices@example.org"}
+	if len(entry.ReceivedVia) != len(wantVia) || entry.ReceivedVia[0] != wantVia[0] || entry.ReceivedVia[1] != wantVia[1] {
+		t.Errorf("received via = %q, want %q", entry.ReceivedVia, wantVia)
+	}
+}
+
+func TestLoadedEntryWithoutAMessageHasNoEnvelope(t *testing.T) {
+	entry := LoadedEntry(threadload.Entry{Entry: generated.Entry{Id: 11}, State: threadload.StateFailed})
+	if len(entry.Recipients.To) != 0 || len(entry.Recipients.Cc) != 0 || len(entry.Recipients.Bcc) != 0 || len(entry.ReceivedVia) != 0 {
+		t.Errorf("unread entry envelope = %+v via %q, want none", entry.Recipients, entry.ReceivedVia)
 	}
 }
