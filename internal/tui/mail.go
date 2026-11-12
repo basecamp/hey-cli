@@ -3742,11 +3742,12 @@ func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, 
 		offsets = append(offsets, lineCount)
 
 		from, tag, internal := headingFrom(e)
-		date := v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt))
+		date := formatDisplayDateTime(e.CreatedAt)
 		if internal {
-			date += v.vc.styles.entryDate.Render("  · " + tag)
+			date += "  · " + tag
 		}
-		heading := v.vc.styles.entryFrom.Render(from)
+		date = truncateStr(date, max(v.vc.width-2, 0))
+		heading := v.vc.styles.entryFrom.Render(truncateStr(from, max(v.vc.width-2-displayWidth(date), 0)))
 
 		// Each arm below opens with a blank line, which is what separates the header
 		// from whatever follows it. The summary is HEY's ~105-character preview of the
@@ -3754,7 +3755,7 @@ func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, 
 		// as printThreadStyled in internal/cmd/topic.go. Printed beside a body it repeats
 		// the message's opening line; printed for a body that was read and rendered to
 		// nothing, or for one that was not read, it passes a preview off as the message.
-		write(fmt.Sprintf("%s  %s\n", heading, date))
+		write(fmt.Sprintf("%s  %s\n", heading, v.vc.styles.entryDate.Render(date)))
 		if !internal {
 			for _, line := range envelopeLines(e.Recipients, e.ReceivedVia, max(v.vc.width, 1)) {
 				write(v.vc.styles.entryDate.Render(line) + "\n")

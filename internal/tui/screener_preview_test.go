@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 // openedPreview presses space on the first sender and lands the email it reads.
@@ -181,7 +184,7 @@ func TestScreenerPreviewHidesTheEnvelopeUntilTheMessageArrives(t *testing.T) {
 // A long email scrolls inside the preview; the header stays put.
 func TestScreenerPreviewScrolls(t *testing.T) {
 	view, _ := openedPreview(t)
-	view.vc.height = 6
+	view.vc.height = 10
 	view.preview.body = htmlToMarkdown(strings.Repeat("<p>Another paragraph about the quarterly budget.</p>", 30))
 	view.preview.width = 0
 
@@ -192,5 +195,33 @@ func TestScreenerPreviewScrolls(t *testing.T) {
 	}
 	if screen := plainText(view.View()); !strings.Contains(screen, "Jane Doe <jane@example.com>") {
 		t.Errorf("the header scrolled away:\n%s", screen)
+	}
+}
+
+func TestScreenerPreviewFitsShortTerminals(t *testing.T) {
+	view, _ := openedPreview(t)
+	view.preview.recipients.Bcc = []mail.Contact{{EmailAddress: "audit@example.org"}}
+	for _, height := range []int{1, 3, 6, 7, 8, 20, 6, 20} {
+		for _, notice := range []string{"", "Screening decision saved"} {
+			t.Run(fmt.Sprintf("height=%d/notice=%s", height, notice), func(t *testing.T) {
+				view.vc.height = height
+				view.notice = notice
+				view.preview.viewport.GotoTop()
+				screen := view.previewView()
+				if rows := strings.Count(screen, "\n") + 1; rows > height {
+					t.Fatalf("preview uses %d rows with %d available:\n%s", rows, height, plainText(screen))
+				}
+				seen := ansi.Strip(screen)
+				for !view.preview.viewport.AtBottom() {
+					view.HandleContentKey(keyPress("down"))
+					seen += ansi.Strip(view.previewView())
+				}
+				for _, want := range []string{"Via  eli+screen@example.com", "To   Elija Sorensen", "Cc   Sam Rivera", "Bcc  audit@example.org", "walk through the budget"} {
+					if !strings.Contains(seen, want) {
+						t.Errorf("preview lost %q while scrolling:\n%s", want, seen)
+					}
+				}
+			})
+		}
 	}
 }

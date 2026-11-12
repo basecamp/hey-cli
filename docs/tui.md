@@ -188,8 +188,9 @@ takes you to the Imbox, as the web app does.
 Space opens a bigger preview of the selected sender's most recent email: the whole message,
 not just the first line the list has room for. The header names the address it arrived
 through and the To, Cc and Bcc lines, the same way an opened thread does. Arrow keys and
-PgUp/PgDn scroll it, `y` and `n` answer for that sender straight from it, and Space or
-Escape closes it again. Opening a preview only reads the email; it doesn't screen the
+PgUp/PgDn scroll it; on short terminals the headers scroll with the message so every
+address remains accessible. `y` and `n` answer for that sender straight from it, and
+Space or Escape closes it again. Opening a preview only reads the email; it doesn't screen the
 sender or tell them anything.
 
 ## Imbox cover art
