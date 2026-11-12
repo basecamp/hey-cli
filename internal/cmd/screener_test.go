@@ -558,3 +558,27 @@ func TestScreenerAddressPastThePageCapIsNotNotFound(t *testing.T) {
 		t.Error("screened someone")
 	}
 }
+
+// An empty last page that still carries a next link ends the list, as collectPages ends
+// it, and is no cap: the address is looked up in what was read.
+func TestScreenerAddressLookupEndsOnAnEmptyPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case req.Method == http.MethodGet && req.URL.Query().Get("page") == "":
+			w.Header().Set("Link", `<https://app.hey.com/clearances.json?page=2>; rel="next"`)
+			_, _ = w.Write([]byte(`{"pending_clearances_count":1,"clearances":[
+				{"id":91,"status":"pending","petitioner":{"id":51,"name":"Hollis Heimboch","email_address":"hollis@example.com"}}]}`))
+		case req.Method == http.MethodGet:
+			w.Header().Set("Link", `<https://app.hey.com/clearances.json?page=3>; rel="next"`)
+			_, _ = w.Write([]byte(`{"pending_clearances_count":1,"clearances":[]}`))
+		default:
+			_, _ = w.Write([]byte(`{"id":91,"status":"approved","petitioner":{"id":51,"name":"Hollis Heimboch"}}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	if _, err := runScreener(t, server, "approve", "hollis@example.com"); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+}

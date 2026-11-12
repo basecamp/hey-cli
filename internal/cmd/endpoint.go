@@ -269,9 +269,6 @@ func appRefusal(name string, arguments map[string]any, result *localapp.Result) 
 		Meta:    map[string]any{"refusal": reason},
 	}
 	arg, _ := reason["arg"].(string)
-	if arg == "" && name == "message.send" {
-		arg = "draft"
-	}
 	_, namesIDs := reason["available"]
 	switch {
 	case why == "signed_out":
@@ -304,7 +301,8 @@ func appRefusal(name string, arguments map[string]any, result *localapp.Result) 
 		// The draft is there, but not one HEY would ask to send now; available lists those it would.
 		refusal.Code = apierr.CodeUsage
 		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("The HEY app won't send draft %v now: it is scheduled, goes to nobody, has a file still uploading, or is a forward", arguments["draft"]))
-		refusal.Hint = terminal.SanitizeLine(appArgumentHint(arg, reason))
+		// The draft is the one argument a send takes, whether or not the app names it.
+		refusal.Hint = terminal.SanitizeLine(appArgumentHint("draft", reason))
 		if appOffersNothing(reason) {
 			refusal.Code = apierr.CodeAPI
 			refusal.Hint = "No draft can be sent from here now: hey draft list shows which are sendable"

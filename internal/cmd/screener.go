@@ -133,9 +133,10 @@ func clearancesByAddress[T any](ctx context.Context, read pageReader[T], key fun
 	if err != nil {
 		return nil, err
 	}
-	if collected.Cursor != "" {
+	if collected.Truncated {
 		// Stopped at the cap with pages left: an address missing from what was read was
-		// not searched for, which is no answer that nobody sends from it.
+		// not searched for, which is no answer that nobody sends from it; and one found
+		// there may be found again past the cap, so none is taken.
 		return nil, &apierr.Error{
 			Code:    apierr.CodeAPI,
 			Message: fmt.Sprintf("The Screener holds more than %d pages, so an address could not be looked up in all of it", maxScreenerPages),
