@@ -152,14 +152,14 @@ func writeLocalDraft(cmd *cobra.Command, name string, result *localapp.Result, t
 		return writeMutationLine(cmd,
 			saved+" HEY can't send it from here: finish it in HEY.",
 			fmt.Sprintf("Draft %d saved; HEY would not send it from here now", draft.ID),
-			draft,
+			localOneOf(draft),
 		)
 	}
 	send := fmt.Sprintf("hey local %ssend %d", localSocketArgument(), draft.ID)
 	return writeMutationLine(cmd,
 		saved+" Ask HEY to send it with: "+send,
 		fmt.Sprintf("Draft %d saved; nothing has been sent", draft.ID),
-		draft,
+		localOneOf(draft),
 		output.WithBreadcrumbs(output.Breadcrumb{Action: "send", Command: send, Description: "Ask HEY to send it: the person presses Send in the HEY window"}),
 	)
 }

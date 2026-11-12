@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
 type localWriteCommand struct {
@@ -38,6 +40,10 @@ one you don't want in HEY.`,
 }
 
 func (c *localWriteCommand) run(cmd *cobra.Command, _ []string) error {
+	// Left out, the draft would go to nobody, which HEY won't send; --to "" still writes one.
+	if !cmd.Flags().Changed("to") {
+		return apierr.ErrUsage("--to is required: the To line, or --to \"\" for a draft to nobody")
+	}
 	body, err := localMessageBody(c.message)
 	if err != nil {
 		return err

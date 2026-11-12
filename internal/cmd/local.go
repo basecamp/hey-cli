@@ -193,16 +193,22 @@ func localRefusal(name string, arguments map[string]any, result *localapp.Result
 		// The pieces of --to that read as no address; nothing was written.
 		refusal.Code = apierr.CodeUsage
 		refusal.Message = terminal.SanitizeLine("HEY can't read these as addresses: " + localJoined(reason["given"]))
-		refusal.Hint = "Give --to as addresses, or Name <address>, separated by commas"
+		refusal.Hint = "Give the To line as addresses, or Name <address>, separated by commas"
 	case why == "not_saved":
 		localNotSaved(refusal, name, reason)
 	case why == "not_a_sender":
 		// No confirmation waits and no sheet shows: HEY would refuse it at Send.
 		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("HEY won't send draft %v: it goes from %v, which this account no longer sends from", reason["draft"], reason["from"]))
 		refusal.Hint = "Change From in HEY, or write a new draft with hey local write"
+	// The app answers unavailable both for a thread it couldn't read and for a draft it saved
+	// that went (sent, deleted or refused elsewhere) before HEY listed it: neither is said
+	// as nothing having happened.
 	case why == "unavailable" && arg == "" && name == "draft.reply":
-		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("HEY couldn't read thread %v", arguments["thread"]))
-		refusal.Hint = "hey local imbox lists the threads a reply takes, in its Thread column"
+		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("HEY couldn't read thread %v, or the draft it saved went before HEY listed it", arguments["thread"]))
+		refusal.Hint = "Check hey local drafts before writing it again; hey local imbox lists the threads a reply takes"
+	case why == "unavailable" && arg == "" && name == "draft.write":
+		refusal.Message = "HEY couldn't show the draft it saved: it may have gone before HEY listed it"
+		refusal.Hint = "Check hey local drafts before writing it again"
 	case why == "disabled" && name == "message.send":
 		// The draft is there, but not one HEY would ask to send now; available lists those it would.
 		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("HEY won't send draft %v now: it is scheduled, goes to nobody, has a file still uploading, or is a forward", arguments["draft"]))
@@ -231,9 +237,28 @@ func localRefusal(name string, arguments map[string]any, result *localapp.Result
 	return refusal
 }
 
-// localNotSaved says why HEY saved no draft: past what one message takes. The words and
-// recipients of draft.write, and the words of a reply, are the caller's to change (1); a
-// reply's recipients and files are the thread's, for the person to deal with in HEY (7).
+// localOneOf is an answer of one thing with an id, a draft saved, as a list of one for
+// --ids-only and --count: a draft written is never followed by a failure that reads as
+// nothing having happened, and a retry that writes another.
+func localOneOf(answer any) any {
+	format := writer.EffectiveFormat()
+	if format != output.FormatIDs && format != output.FormatCount {
+		return answer
+	}
+	switch one := answer.(type) {
+	case map[string]any:
+		if _, ok := one["id"]; ok {
+			return []any{one}
+		}
+	case localDraft:
+		return []localDraft{one}
+	}
+	return answer
+}
+
+// localNotSaved says why HEY saved no draft: past what one message takes. draft.write's
+// words and recipients are the caller's to change (1); a reply's recipients, files and
+// quote are the thread's, so a reply past a limit is the person's to write in HEY (7).
 func localNotSaved(refusal *apierr.Error, name string, reason map[string]any) {
 	why, _ := reason["refusal"].(string)
 	past := map[string]string{
@@ -246,12 +271,14 @@ func localNotSaved(refusal *apierr.Error, name string, reason map[string]any) {
 	}
 	refusal.Message = terminal.SanitizeLine("HEY didn't save the draft: " + past)
 	switch {
-	case why == "too_large":
+	case why == "too_large" && name == "draft.write":
 		refusal.Code = apierr.CodeUsage
 		refusal.Hint = "Shorten the message"
 	case why == "too_many_recipients" && name == "draft.write":
 		refusal.Code = apierr.CodeUsage
 		refusal.Hint = "Write it to fewer people"
+	case why == "too_large" && name == "draft.reply":
+		refusal.Hint = "Shorten the message, or reply in HEY: a reply's quote counts too"
 	case name == "draft.reply":
 		refusal.Hint = "Reply to this thread in HEY"
 	}
@@ -308,7 +335,7 @@ func writeLocalAnswer(cmd *cobra.Command, name string, result *localapp.Result) 
 		fmt.Fprintln(cmd.OutOrStdout(), terminal.Sanitize(string(indented)))
 		return nil
 	}
-	return writeOK(answer, output.WithSummary("HEY ran "+name))
+	return writeOK(localOneOf(answer), output.WithSummary("HEY ran "+name))
 }
 
 // writeLocalPending says a command waits in HEY's window, and returns ErrPending so the

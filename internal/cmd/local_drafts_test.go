@@ -171,12 +171,15 @@ func TestLocalDraftRefusalsSayWhatHappened(t *testing.T) {
 	}{
 		{"not an address", "draft.write", map[string]any{"error": "not_an_address", "arg": "to", "given": []string{"marcus", "@@"}},
 			[]string{"write", "--to", "marcus, @@", "--subject", "s", "-m", "b"}, output.ExitUsage,
-			"HEY can't read these as addresses: marcus, @@", "Give --to as addresses, or Name <address>, separated by commas"},
+			"HEY can't read these as addresses: marcus, @@", "Give the To line as addresses, or Name <address>, separated by commas"},
 		{"too many recipients", "draft.write", map[string]any{"error": "not_saved", "refusal": "too_many_recipients"},
 			[]string{"write", "--to", "a@example.com", "--subject", "s", "-m", "b"}, output.ExitUsage,
 			"HEY didn't save the draft: it goes to more people than HEY sends one message to", "Write it to fewer people"},
 		{"too large", "draft.reply", map[string]any{"error": "not_saved", "refusal": "too_large"},
-			[]string{"reply", "801", "-m", "b"}, output.ExitUsage,
+			[]string{"reply", "801", "-m", "b"}, output.ExitAPI,
+			"HEY didn't save the draft: it is larger than HEY sends in one message", "Shorten the message, or reply in HEY: a reply's quote counts too"},
+		{"write too large", "draft.write", map[string]any{"error": "not_saved", "refusal": "too_large"},
+			[]string{"write", "--to", "a@example.com", "--subject", "s", "-m", "b"}, output.ExitUsage,
 			"HEY didn't save the draft: it is larger than HEY sends in one message", "Shorten the message"},
 		{"reply to too many", "draft.reply", map[string]any{"error": "not_saved", "refusal": "too_many_recipients"},
 			[]string{"reply", "801", "-m", "b"}, output.ExitAPI,
@@ -189,7 +192,13 @@ func TestLocalDraftRefusalsSayWhatHappened(t *testing.T) {
 			"HEY won't send draft 1731280000123: it goes from old@hey.example, which this account no longer sends from", "Change From in HEY, or write a new draft with hey local write"},
 		{"thread unreadable", "draft.reply", map[string]any{"error": "unavailable"},
 			[]string{"reply", "801", "-m", "b"}, output.ExitAPI,
-			"HEY couldn't read thread 801", "hey local imbox lists the threads a reply takes, in its Thread column"},
+			"HEY couldn't read thread 801, or the draft it saved went before HEY listed it", "Check hey local drafts before writing it again; hey local imbox lists the threads a reply takes"},
+		{"written draft gone", "draft.write", map[string]any{"error": "unavailable"},
+			[]string{"write", "--to", "a@example.com", "--subject", "s", "-m", "b"}, output.ExitAPI,
+			"HEY couldn't show the draft it saved: it may have gone before HEY listed it", "Check hey local drafts before writing it again"},
+		{"no draft sendable now", "message.send", map[string]any{"error": "disabled", "arg": "draft", "of": "draft", "available": []int64{}},
+			[]string{"send", "1731280000999"}, output.ExitAPI,
+			"HEY won't send draft 1731280000999 now: it is scheduled, goes to nobody, has a file still uploading, or is a forward", "No draft can be sent from here now: hey local drafts shows which are sendable"},
 		{"draft not sendable now", "message.send", map[string]any{"error": "disabled", "arg": "draft", "of": "draft", "available": []int64{1731280000123}},
 			[]string{"send", "1731280000999"}, output.ExitUsage,
 			"HEY won't send draft 1731280000999 now: it is scheduled, goes to nobody, has a file still uploading, or is a forward", "draft takes one of: 1731280000123"},
@@ -208,5 +217,45 @@ func TestLocalDraftRefusalsSayWhatHappened(t *testing.T) {
 				t.Errorf("meta.refusal = %v", failure.Meta["refusal"])
 			}
 		})
+	}
+}
+
+// A draft saved is never followed by a failure: --ids-only prints its id and --count 1, so
+// nobody retries a run that wrote one, and writes another.
+func TestLocalADraftSavedGivesItsIDToIDsOnly(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("draft.write", localDraftAnswer(1731280000123, "new", true))
+	door.Answer("draft.reply", localDraftAnswer(1731280000123, "reply", true))
+
+	for _, args := range [][]string{
+		{"write", "--to", "a@example.com", "--subject", "s", "-m", "b", "--ids-only"},
+		{"reply", "801", "-m", "b", "--ids-only"},
+		{"call", "draft.write", `{"to":"a@example.com","subject":"s","body":"b"}`, "--ids-only"},
+	} {
+		stdout, _, err := runLocal(t, door.Path, args...)
+		if err != nil || stdout != "1731280000123\n" {
+			t.Errorf("%v: stdout = %q (%v)", args, stdout, err)
+		}
+	}
+	count, _, err := runLocal(t, door.Path, "write", "--to", "a@example.com", "--subject", "s", "-m", "b", "--count")
+	if err != nil || strings.TrimSpace(count) != "1" {
+		t.Errorf("--count = %q (%v)", count, err)
+	}
+}
+
+// Leaving out --to would write a draft to nobody that HEY won't send; --to "" still can.
+func TestLocalWriteAsksForTheToLine(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("draft.write", localDraftAnswer(1731280000123, "new", false))
+
+	_, _, err := runLocal(t, door.Path, "write", "--subject", "s", "-m", "b")
+	if output.ExitCodeFor(err) != output.ExitUsage || !strings.Contains(apierr.AsError(err).Message, "--to") {
+		t.Errorf("exit = %d (%v)", output.ExitCodeFor(err), err)
+	}
+	if calls := door.Calls(); len(calls) != 0 {
+		t.Errorf("calls = %s", calls)
+	}
+	if _, _, err := runLocal(t, door.Path, "write", "--to", "", "--subject", "s", "-m", "b"); err != nil {
+		t.Errorf("--to \"\": %v", err)
 	}
 }

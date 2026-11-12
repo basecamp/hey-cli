@@ -203,7 +203,8 @@ shown. No command or flag here can confirm it.
 
 So an agent can carry a message end to end: `hey local write` (or `hey local reply` with a
 thread from the Thread column of `hey local imbox`) saves a draft and answers its id, and
-`hey local send <id>` asks HEY to send it, which waits for you. Writing sends nothing, and
+`hey local send <id>` asks HEY to send it, which waits for you. `--ids-only` prints the draft's
+id. Writing sends nothing, and
 each run writes one more draft: nothing here edits or deletes one, so a wrong draft is yours
 to delete in HEY. The message is plain text, above your name tag; Cc, Bcc, files and a
 schedule are yours to add in HEY. A reply goes to everyone the thread's last message went
@@ -216,10 +217,10 @@ The draft commands' refusals say what happened, and nothing was saved or waits:
 | Refusal | Exit | Means |
 |---------|------|-------|
 | `not_an_address` | 1 | Pieces of `--to` read as no address; the message names them |
-| `not_saved` | 1 or 7 | Past what HEY takes of one message: too many people, too many files, or too large. 1 where the words or `--to` were yours to change; 7 where a reply's recipients or files come from the thread |
+| `not_saved` | 1 or 7 | Past what HEY takes of one message: too many people, too many files, or too large. 1 for `write`, whose words and `--to` are yours to change; 7 for `reply`, whose recipients, files and quote come from the thread |
 | `not_a_sender` | 7 | The draft goes from an address this account no longer sends from; change From in HEY, or write a new draft |
-| `disabled` | 1 | `send` of a draft HEY won't send now (scheduled, to nobody, a file still uploading, or a forward); the hint lists those it would |
-| `unavailable` | 7 | `reply` of a thread the app couldn't read |
+| `disabled` | 1, or 7 when HEY would send none | `send` of a draft HEY won't send now (scheduled, to nobody, a file still uploading, or a forward); the hint lists those it would |
+| `unavailable` | 7 | `reply` of a thread the app couldn't read, or a draft `write` or `reply` saved that went before HEY listed it: check `hey local drafts` before writing it again |
 
 `hey local call <command>` runs any command `hey local tools` lists. Arguments come as a
 JSON object, as `--arg name=value` pairs, or both, the pairs over the object; a value is
