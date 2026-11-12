@@ -620,7 +620,8 @@ func writeOK(data any, opts ...output.ResponseOption) error {
 // selection never hides the help that explains it.
 func selectProfile(cmd *cobra.Command) error {
 	if commandIgnoresLocalConfig(cmd) || commandReadsNoServer(cmd) {
-		// These read no server and no credential; the installer runs them anywhere.
+		// These use no profile and send nothing to a server; the installer runs them
+		// anywhere.
 		return nil
 	}
 	bareRoot := cmd.Parent() == nil

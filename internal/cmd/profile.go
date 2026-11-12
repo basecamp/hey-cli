@@ -339,9 +339,13 @@ func newProfileDeleteCommand() *cobra.Command {
 				revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
 				if err != nil {
 					// The profile stays, so its credential can still be reached to retry.
+					doctor := "hey doctor"
+					if config.ValidProfileName(name) {
+						doctor += " -P " + name
+					}
 					return apierr.ErrUsageHint(
 						fmt.Sprintf("could not delete credentials for profile %q: %v", name, err),
-						"Run hey doctor to check the credential store, then delete the profile again")
+						"Run "+doctor+" to check the credential store, then delete the profile again")
 				}
 				if revoked != nil && mgr == cli {
 					fields["revoked"] = *revoked
