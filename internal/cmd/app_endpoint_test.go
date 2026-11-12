@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -432,12 +433,26 @@ func TestAppProfileKeepsCompletionAndReadsNoCredential(t *testing.T) {
 	if _, _, err := runProfileCLI(t, "__complete", "box", "view", ""); err != nil {
 		t.Errorf("completion: %v", err)
 	}
+	// A credential file nothing can read: any look at it for the app profile fails the run.
+	home := os.Getenv("XDG_CONFIG_HOME")
+	if err := os.WriteFile(filepath.Join(home, "hey-cli", "credentials.json"), []byte("not json"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	response, _, err := runProfileJSON(t, "profile", "show")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if shown := appData[map[string]any](t, response); shown["endpoint"] != "app" || shown["authenticated"] != nil {
 		t.Errorf("profile show = %v", shown)
+	}
+	response, _, err = runProfileJSON(t, "-P", "this-computer", "profile", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range appData[[]map[string]any](t, response) {
+		if row["name"] == "this-computer" && row["authenticated"] != nil {
+			t.Errorf("profile list = %v", row)
+		}
 	}
 }
 
