@@ -117,7 +117,7 @@ func promptForLocalConfigTrust(cmd *cobra.Command, local *config.LocalConfig) (l
 			if baseURL, ok := entry["base_url"].(string); ok && baseURL != "" {
 				server = baseURL
 			}
-			if account, ok := entry["account_id"]; ok && account != nil {
+			if account, ok := entry["account_id"]; ok && account != nil && account != "" {
 				if n, isNumber := account.(float64); isNumber {
 					account = strconv.FormatFloat(n, 'f', -1, 64)
 				}

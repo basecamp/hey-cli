@@ -1148,6 +1148,26 @@ func TestDeletingAProfileARepositoryAlsoSetsIsRefused(t *testing.T) {
 	}
 }
 
+// A repository entry with no base_url is no profile, so it doesn't hold up a delete.
+func TestARepositoryEntryWithNoServerDoesNotHoldUpADelete(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"https://app.hey.com"}}}`)
+	workspace := filepath.Join(home, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, ".hey"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".hey", "config.json"), []byte(`{"profiles":{"work":{"account_id":"42"}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	if _, _, err := runProfileJSON(t, "config", "trust-local"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runProfileJSON(t, "profile", "delete", "work"); err != nil {
+		t.Errorf("delete: %v", err)
+	}
+}
+
 func TestTheTrustPromptPrintsANumericAccountWhole(t *testing.T) {
 	previousCfg := cfg
 	cfg = &config.Config{BaseURL: "https://app.hey.com"}
@@ -1158,12 +1178,15 @@ func TestTheTrustPromptPrintsANumericAccountWhole(t *testing.T) {
 	cmd.SetErr(&output)
 	if _, err := promptForLocalConfigTrust(cmd, &config.LocalConfig{
 		Path:         "/workspace/.hey/config.json",
-		ProfileNames: []string{"work"},
-		Profiles:     map[string]any{"work": map[string]any{"base_url": "https://app.hey.com", "account_id": float64(4567890)}},
+		ProfileNames: []string{"blank", "work"},
+		Profiles: map[string]any{
+			"blank": map[string]any{"base_url": "https://app.hey.com", "account_id": ""},
+			"work":  map[string]any{"base_url": "https://app.hey.com", "account_id": float64(4567890)},
+		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(output.String(), "mail account 4567890") {
+	if !strings.Contains(output.String(), "mail account 4567890") || !strings.Contains(output.String(), "blank  https://app.hey.com\n") {
 		t.Errorf("prompt = %q", output.String())
 	}
 }

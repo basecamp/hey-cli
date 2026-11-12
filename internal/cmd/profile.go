@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -314,7 +313,7 @@ func newProfileDeleteCommand() *cobra.Command {
 				}
 				return apierr.ErrUsage(fmt.Sprintf("Profile %q is set by %s, not the global config; remove it there", name, terminal.SanitizeLine(where)))
 			}
-			if local := cfg.LocalConfig(); local != nil && local.Trusted && slices.Contains(local.ProfileNames, name) {
+			if local := cfg.LocalConfig(); local != nil && local.Trusted && localEntrySetsProfile(local, name) {
 				// Its repository entry would bring the profile back, signed out, here.
 				return apierr.ErrUsage(fmt.Sprintf("Profile %q is also set by %s; remove it there first", name, terminal.SanitizeLine(local.Path)))
 			}
@@ -447,4 +446,12 @@ func clearProfileHTTPCache(cmd *cobra.Command, name string) {
 	if dir := profileHTTPCacheDir(name); dir != "" {
 		clearHTTPCacheDir(cmd.ErrOrStderr(), dir)
 	}
+}
+
+// localEntrySetsProfile reports whether a repository config's entry for name is one the
+// loader reads as a profile: an entry with no base_url is skipped there.
+func localEntrySetsProfile(local *config.LocalConfig, name string) bool {
+	entry, _ := local.Profiles[name].(map[string]any)
+	baseURL, _ := entry["base_url"].(string)
+	return baseURL != ""
 }
