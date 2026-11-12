@@ -111,7 +111,7 @@ func appSendRefusal(cmd *cobra.Command) error {
 	}
 	return apierr.ErrUsageHint(
 		fmt.Sprintf("%s would send now, and the HEY app on this computer sends nothing without you: %s", path, instead),
-		"Then ask HEY to send it with hey draft send <id>: it waits in HEY until you press Send")
+		"Then ask HEY to send it with "+appCommandLine("draft send <id>")+": it waits in HEY until you press Send")
 }
 
 // appOffers refuses a command the app endpoint does not answer. Commands that read no
@@ -416,9 +416,30 @@ func decodeAppAnswer[T any](name string, result *localapp.Result, complete func(
 		return answer, appUnreadable(name, err)
 	}
 	if err := complete(answer); err != nil {
+		var otherwise *appOtherwiseError
+		if errors.As(err, &otherwise) {
+			return answer, appAnsweredOtherwise(name, err)
+		}
 		return answer, appUnreadable(name, err)
 	}
 	return answer, nil
+}
+
+// appOtherwiseError is what a complete func returns for an answer whose shape is right but
+// which says the app did something other than what was asked.
+type appOtherwiseError struct{ said string }
+
+func (e *appOtherwiseError) Error() string { return e.said }
+
+// appAnsweredOtherwise is an answer that says the app did something other than what was
+// asked: something may have changed, so the person is sent to look, not to upgrade.
+func appAnsweredOtherwise(name string, cause error) error {
+	return &apierr.Error{
+		Code:    apierr.CodeAPI,
+		Message: terminal.SanitizeLine(fmt.Sprintf("The HEY app's answer to %s is not what was asked: %v", name, cause)),
+		Hint:    "Check in HEY what it did before running it again",
+		Cause:   cause,
+	}
 }
 
 func appUnreadable(name string, cause error) error {

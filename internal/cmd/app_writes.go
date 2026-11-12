@@ -60,7 +60,7 @@ func screenInApp(cmd *cobra.Command, args []string, decision string) error {
 	// Said back by the app, so a decision it took any other way is never reported as this one.
 	if _, err := decodeAppAnswer("screener.decide", result, func(decided appDecision) error {
 		if decided.Sender != sender.ID || decided.Screened != decision {
-			return fmt.Errorf("it says sender %d was screened %q, not sender %d screened %s", decided.Sender, decided.Screened, sender.ID, decision)
+			return &appOtherwiseError{fmt.Sprintf("it says sender %d was screened %q, not sender %d screened %s", decided.Sender, decided.Screened, sender.ID, decision)}
 		}
 		return nil
 	}); err != nil {
@@ -122,11 +122,20 @@ func appSenderFor(cmd *cobra.Command, value string) (appSender, error) {
 			found = append(found, sender)
 		}
 	}
-	switch len(found) {
-	case 0:
+	switch {
+	case len(found) == 0 && *screener.WaitingCount > len(screener.Waiting):
+		// The app lists only part of who waits, so an address missing from the list was not
+		// searched for. One found in it is taken, so a waiting sender stays
+		// reachable by address while the app lists only the first of a long Screener.
+		return appSender{}, &apierr.Error{
+			Code:    apierr.CodeAPI,
+			Message: fmt.Sprintf("The HEY app lists %d of the %d senders waiting, and none of them sends from %s", len(screener.Waiting), *screener.WaitingCount, terminal.SanitizeLine(value)),
+			Hint:    "Use the sender ID once hey screener list shows them, or screen them in HEY",
+		}
+	case len(found) == 0:
 		return appSender{}, apierr.ErrNotFoundHint("sender", value,
 			"Nobody the HEY app's Screener lists sends from that address: hey screener list, hey screener history")
-	case 1:
+	case len(found) == 1:
 		return found[0], nil
 	}
 	matches := make([]string, 0, len(found))
@@ -231,10 +240,10 @@ func writeAppDraft(cmd *cobra.Command, name string, result *localapp.Result, thr
 			return fmt.Errorf("it does not say whether draft %d can be sent", draft.ID)
 		}
 		if draft.Kind != kind {
-			return fmt.Errorf("it saved draft %d as %q, not %s", draft.ID, draft.Kind, kind)
+			return &appOtherwiseError{fmt.Sprintf("it saved draft %d as %q, not %s", draft.ID, draft.Kind, kind)}
 		}
 		if thread != 0 && (draft.Thread == nil || *draft.Thread != thread) {
-			return fmt.Errorf("it saved draft %d, not a reply on thread %d", draft.ID, thread)
+			return &appOtherwiseError{fmt.Sprintf("it saved draft %d, not a reply on thread %d", draft.ID, thread)}
 		}
 		return nil
 	})
@@ -293,8 +302,8 @@ func (c *draftSendCommand) runApp(cmd *cobra.Command, args []string) error {
 	}
 	return &apierr.Error{
 		Code:    apierr.CodeAPI,
-		Message: terminal.SanitizeLine("The HEY app's answer to message.send is not a send waiting for you: " + answer),
-		Hint:    "Check in HEY whether it waits for you to press Send",
+		Message: terminal.SanitizeLine("The HEY app's answer to message.send is not a send waiting for you, and it may have done something: " + answer),
+		Hint:    "Check in HEY what it did before asking again",
 	}
 }
 

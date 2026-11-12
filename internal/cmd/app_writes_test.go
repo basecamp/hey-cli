@@ -125,6 +125,11 @@ func TestAppScreenerDenyByAddress(t *testing.T) {
 // An address the app's Screener does not hold is not found, and nobody is decided.
 func TestAppScreenerAddressNobodySentIsNotFound(t *testing.T) {
 	door := appWritesDoor(t)
+	door.Answer("screener.list", map[string]any{
+		"waiting":       []map[string]any{{"id": 51, "name": "Priya Raman", "address": "priya@example.com"}},
+		"waiting_count": 1,
+		"decided":       []map[string]any{{"id": 53, "name": "Dana Whitfield", "address": "dana@example.com", "screened_in": true}},
+	})
 	appTestHome(t, door.Path, true)
 
 	_, _, err := runProfileCLI(t, "screener", "approve", "nobody@example.com")
@@ -167,7 +172,7 @@ func TestAppScreenerDecisionOtherwiseIsNotReportedAsDone(t *testing.T) {
 	appTestHome(t, door.Path, true)
 
 	_, _, err := runProfileCLI(t, "screener", "approve", "51")
-	if output.ExitCodeFor(err) != output.ExitAPI {
+	if output.ExitCodeFor(err) != output.ExitAPI || !strings.Contains(apiErrorHint(err), "Check in HEY") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -306,7 +311,7 @@ func TestAppReplyDraftOnAnotherThreadIsNotReportedAsDone(t *testing.T) {
 	appTestHome(t, door.Path, true)
 
 	_, _, err := runProfileCLI(t, "reply", "801", "--draft", "-m", "Works for me")
-	if output.ExitCodeFor(err) != output.ExitAPI {
+	if output.ExitCodeFor(err) != output.ExitAPI || !strings.Contains(apiErrorHint(err), "Check in HEY") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -357,7 +362,7 @@ func TestAppRefusesWhatWouldSendNow(t *testing.T) {
 	} {
 		_, _, err := runProfileCLI(t, append(args, "--json")...)
 		if output.ExitCodeFor(err) != output.ExitUsage || !strings.Contains(err.Error(), "--draft") ||
-			!strings.Contains(apiErrorHint(err), "hey draft send") {
+			!strings.Contains(apiErrorHint(err), "hey -P this-computer draft send") {
 			t.Errorf("%v: err = %v (hint %q)", args, err, apiErrorHint(err))
 		}
 	}
@@ -408,7 +413,8 @@ func TestAppDraftSendAnswerNotPendingIsNotASend(t *testing.T) {
 	appTestHome(t, door.Path, true)
 
 	_, _, err := runProfileCLI(t, "draft", "send", "9001")
-	if output.ExitCodeFor(err) != output.ExitAPI {
+	if output.ExitCodeFor(err) != output.ExitAPI || !strings.Contains(err.Error(), "may have done something") ||
+		!strings.Contains(apiErrorHint(err), "before asking again") {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -532,4 +538,19 @@ func TestAppWritesNeverReachHEYsServer(t *testing.T) {
 func homeOf(t *testing.T) string {
 	t.Helper()
 	return os.Getenv("XDG_CONFIG_HOME")
+}
+
+// An address missing from a Screener the app lists only part of was not searched for:
+// that is no answer that nobody sends from it.
+func TestAppScreenerAddressInAPartialListIsNotNotFound(t *testing.T) {
+	door := appWritesDoor(t)
+	appTestHome(t, door.Path, true)
+
+	_, _, err := runProfileCLI(t, "screener", "approve", "someone-unlisted@example.com")
+	if output.ExitCodeFor(err) != output.ExitAPI || !strings.Contains(apiErrorHint(err), "sender ID") {
+		t.Fatalf("err = %v (hint %q)", err, apiErrorHint(err))
+	}
+	if names := appCallNames(appCalls(t, door)); names != "screener.list" {
+		t.Errorf("calls = %s", names)
+	}
 }

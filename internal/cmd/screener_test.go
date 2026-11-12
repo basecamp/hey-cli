@@ -572,8 +572,12 @@ func TestScreenerAddressLookupEndsOnAnEmptyPage(t *testing.T) {
 		case req.Method == http.MethodGet:
 			w.Header().Set("Link", `<https://app.hey.com/clearances.json?page=3>; rel="next"`)
 			_, _ = w.Write([]byte(`{"pending_clearances_count":1,"clearances":[]}`))
-		default:
+		case req.Method == http.MethodPatch && req.URL.Path == "/clearances/91.json":
 			_, _ = w.Write([]byte(`{"id":91,"status":"approved","petitioner":{"id":51,"name":"Hollis Heimboch"}}`))
+		default:
+			t.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"unexpected request"}`))
 		}
 	}))
 	t.Cleanup(server.Close)
