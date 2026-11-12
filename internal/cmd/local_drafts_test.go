@@ -259,3 +259,15 @@ func TestLocalWriteAsksForTheToLine(t *testing.T) {
 		t.Errorf("--to \"\": %v", err)
 	}
 }
+
+// --ids-only keeps the id alone on stdout, but a draft HEY won't send says so on stderr,
+// so nobody asks to send it and meets a refusal.
+func TestLocalADraftHEYWontSendSaysSoUnderIDsOnly(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("draft.write", localDraftAnswer(1731280000123, "new", false))
+
+	stdout, stderr, err := runLocal(t, door.Path, "write", "--to", "", "--subject", "s", "-m", "b", "--ids-only")
+	if err != nil || stdout != "1731280000123\n" || !strings.Contains(stderr, "HEY would not send it from here") {
+		t.Errorf("stdout = %q, stderr = %q (%v)", stdout, stderr, err)
+	}
+}

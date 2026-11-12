@@ -33,7 +33,7 @@ one you don't want in HEY.`,
 		RunE: writeCommand.run,
 		Args: cobra.NoArgs,
 	}
-	writeCommand.cmd.Flags().StringVar(&writeCommand.to, "to", "", "Recipients, as HEY's To line reads them")
+	writeCommand.cmd.Flags().StringVar(&writeCommand.to, "to", "", "Recipients, as HEY's To line reads them (required; --to \"\" for a draft to nobody)")
 	writeCommand.cmd.Flags().StringVar(&writeCommand.subject, "subject", "", "Subject")
 	writeCommand.cmd.Flags().StringVarP(&writeCommand.message, "message", "m", "", "Message as plain text (or pipe it to stdin)")
 	return writeCommand

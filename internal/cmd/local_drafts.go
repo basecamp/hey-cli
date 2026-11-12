@@ -149,9 +149,14 @@ func writeLocalDraft(cmd *cobra.Command, name string, result *localapp.Result, t
 	}
 	saved := fmt.Sprintf("Draft %d saved, to %s. Nothing has been sent.", draft.ID, to)
 	if !*draft.Sendable {
+		summary := fmt.Sprintf("Draft %d saved; HEY would not send it from here now", draft.ID)
+		// --ids-only and --count carry no summary; this one goes where a waiting send's does.
+		if format := writer.EffectiveFormat(); format == output.FormatIDs || format == output.FormatCount {
+			fmt.Fprintln(cmd.ErrOrStderr(), summary)
+		}
 		return writeMutationLine(cmd,
 			saved+" HEY can't send it from here: finish it in HEY.",
-			fmt.Sprintf("Draft %d saved; HEY would not send it from here now", draft.ID),
+			summary,
 			localOneOf(draft),
 		)
 	}
