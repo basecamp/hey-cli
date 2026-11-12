@@ -408,7 +408,8 @@ func RegisterProfile(name string, p ProfileConfig) (isDefault bool, err error) {
 		return false, fmt.Errorf("could not marshal profile: %w", err)
 	}
 	profiles[name] = encoded
-	// Counted as the loader counts them: an entry with no base_url is no profile.
+	// Counted as the loader counts them: an entry with no base_url is no profile, unless
+	// the app answers it (EntryIsProfile).
 	isDefault = true
 	for other, raw := range profiles {
 		var fields map[string]any

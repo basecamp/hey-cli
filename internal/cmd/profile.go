@@ -478,7 +478,8 @@ func clearProfileHTTPCache(cmd *cobra.Command, name string) {
 }
 
 // localEntrySetsProfile reports whether a repository config's entry for name is one the
-// loader reads as a profile: an entry with no base_url is skipped there.
+// loader reads as a profile: an entry with no base_url is skipped there, unless the app
+// answers it (config.EntryIsProfile).
 func localEntrySetsProfile(local *config.LocalConfig, name string) bool {
 	entry, _ := local.Profiles[name].(map[string]any)
 	return config.EntryIsProfile(entry)
