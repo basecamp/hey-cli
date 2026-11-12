@@ -1191,8 +1191,9 @@ func TestTheTrustPromptPrintsANumericAccountWhole(t *testing.T) {
 	}
 }
 
-// version, upgrade, commands and completion read no server, so a profile hey refuses
-// can't stop them, and several with none chosen ask nothing.
+// version, commands and shell completion read no server, so a profile hey refuses can't
+// stop them, and several with none chosen ask nothing. upgrade takes the same path but
+// reaches GitHub, so it isn't run here.
 func TestCommandsThatReadNoServerSkipProfiles(t *testing.T) {
 	home := profileTestHome(t)
 	writeProfileTestConfig(t, home, `{"default_profile":"broken","profiles":{"broken":{"base_url":"http://remote.example.com"},"work":{"base_url":"https://app.hey.com"}}}`)

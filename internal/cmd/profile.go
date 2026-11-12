@@ -339,13 +339,16 @@ func newProfileDeleteCommand() *cobra.Command {
 				revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
 				if err != nil {
 					// The profile stays, so its credential can still be reached to retry.
-					doctor := "hey doctor"
-					if config.ValidProfileName(name) {
-						doctor += " -P " + name
+					arg := name
+					if !config.ValidProfileName(name) {
+						arg = shellQuoted(name)
 					}
-					return apierr.ErrUsageHint(
-						fmt.Sprintf("could not delete credentials for profile %q: %v", name, err),
-						"Run "+doctor+" to check the credential store, then delete the profile again")
+					// A storage error keeps its own class and hint, a refused keyring's.
+					e := *apierr.AsError(auth.CredentialStorageError(fmt.Sprintf("could not delete credentials for profile %q", name), err))
+					if e.Hint == "" {
+						e.Hint = "Run hey doctor -P " + arg + " to check the credential store, then delete the profile again"
+					}
+					return &e
 				}
 				if revoked != nil && mgr == cli {
 					fields["revoked"] = *revoked

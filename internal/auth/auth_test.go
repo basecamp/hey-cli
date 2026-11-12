@@ -1570,6 +1570,13 @@ func TestRefreshRefusesAProfileTokenAnotherServerIssued(t *testing.T) {
 	t.Setenv("HEY_TOKEN", "")
 	mgr := testManager(t, server)
 	mgr.UseProfile("work")
+	// The running manager has its own server's sign-in cached.
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{AccessToken: "ours", RefreshToken: "our-refresh", TokenEndpoint: server.URL + "/oauth/tokens"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if token, err := mgr.AccessToken(t.Context()); err != nil || token != "ours" {
+		t.Fatalf("AccessToken = %q, %v", token, err)
+	}
 	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{AccessToken: "other-server", RefreshToken: "other-refresh", TokenEndpoint: "https://other.example/oauth/tokens"}); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -1582,7 +1589,7 @@ func TestRefreshRefusesAProfileTokenAnotherServerIssued(t *testing.T) {
 	if calls != 0 {
 		t.Errorf("requests = %d, want none", calls)
 	}
-	if token, _ := mgr.AccessToken(t.Context()); token == "other-server" {
-		t.Error("the other server's token was adopted")
+	if token, err := mgr.AccessToken(t.Context()); err == nil {
+		t.Errorf("AccessToken after the refusal = %q, want an error", token)
 	}
 }

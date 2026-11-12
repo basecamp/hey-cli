@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 const (
@@ -507,7 +508,7 @@ func (c *Config) SaveAccountID(accountID string) error {
 			if c.localConfig != nil {
 				where = c.localConfig.Path
 			}
-			return apierr.ErrUsage(fmt.Sprintf("Profile %q is set by %s, not the global config; set its account_id there", c.ActiveProfile, where))
+			return apierr.ErrUsage(fmt.Sprintf("Profile %q is set by %s, not the global config; set its account_id there", c.ActiveProfile, terminal.SanitizeLine(where)))
 		}
 		// A profile's account is the profile's own, as basecamp-cli binds one.
 		return bindProfileAccount(c.ActiveProfile, accountID)
