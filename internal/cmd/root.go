@@ -16,6 +16,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 	"github.com/basecamp/hey-cli/internal/tui"
 	"github.com/basecamp/hey-cli/internal/version"
 )
@@ -92,6 +93,12 @@ func newRootCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			for _, warning := range cfg.Warnings() {
+				fmt.Fprintln(cmd.ErrOrStderr(), warning)
+			}
+			if err := selectProfile(cmd); err != nil {
+				return err
+			}
 			if baseURL != "" {
 				if err := cfg.SetFromFlag("base_url", baseURL); err != nil {
 					return err
@@ -116,6 +123,9 @@ func newRootCmd() *cobra.Command {
 			configDir := config.ConfigDir()
 			httpClient := &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
+			if cfg.ActiveProfile != "" {
+				authMgr.UseProfile(cfg.ActiveProfile)
+			}
 			// A refresh token HEY refuses is forgotten by the manager itself, on
 			// whatever command happened to send it. Cached mail must not outlive
 			// that credential any more than it outlives a logout.
@@ -187,6 +197,8 @@ func newRootCmd() *cobra.Command {
 	_ = root.PersistentFlags().MarkHidden("agent") // flag is registered immediately above
 	root.PersistentFlags().StringVar(&baseURL, "base-url", "", "Override server URL")
 	root.PersistentFlags().StringVar(&accountFlag, "account", "", "Select a linked mail account ID or all")
+	root.PersistentFlags().StringVarP(&profileFlag, "profile", "P", "", "Named profile")
+	_ = root.RegisterFlagCompletionFunc("profile", completeProfileNames) // flag is registered immediately above
 	root.PersistentFlags().CountVarP(&verboseFlag, "verbose", "v", "Show request details")
 	root.PersistentFlags().BoolVar(&statsFlag, "stats", false, "Include request stats in response meta")
 	root.PersistentFlags().StringVar(&jqFlag, "jq", "", "Filter JSON with a built-in jq expression")
@@ -244,6 +256,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newShellCompletionCommand())
 	root.AddCommand(newDoctorCommand())
 	root.AddCommand(newConfigCommand().cmd)
+	root.AddCommand(newProfileCommand().cmd)
 	root.AddCommand(newUpgradeCommand().cmd)
 	root.AddCommand(newVersionCommand().cmd)
 	configureHelpCommand(root)
@@ -275,7 +288,7 @@ func commandUsesAccountScope(cmd *cobra.Command) bool {
 		return true
 	}
 	switch parts[1] {
-	case "account", "auth", "commands", "config", "doctor", "login", "logout", "setup", "shell-completion", "skill", "upgrade", "version":
+	case "account", "auth", "commands", "config", "doctor", "login", "logout", "profile", "setup", "shell-completion", "skill", "upgrade", "version":
 		return false
 	case "mcp":
 		// hey mcp scopes its own clients, on its own credential (mcp.go): the shared
@@ -291,7 +304,7 @@ func Execute() {
 
 	err := root.Execute()
 	if err != nil {
-		err = normalizeCobraError(err)
+		err = addressLoginHint(normalizeCobraError(err))
 		if writer == nil {
 			// An error Cobra raised before the pre-run — an unknown flag — gets the
 			// writer the pre-run would have built, --html included, so an --html
@@ -436,7 +449,7 @@ func requireAuth() error {
 	}
 	notLoggedIn := apierr.ErrAuth("Not logged in")
 	notLoggedIn.Hint = auth.NotLoggedInHint()
-	return notLoggedIn
+	return addressLoginHint(notLoggedIn)
 }
 
 // migrateOldCredentials migrates credentials from the old config.json format
@@ -567,10 +580,57 @@ func statsOption() output.ResponseOption {
 	})
 }
 
-// writeOK wraps writer.OK and always injects statsOption() so every command
-// response includes request stats when --stats is set.
+// profileOption names the active profile in the response meta, so an agent can tell
+// which sign-in answered. With no profile it adds nothing.
+func profileOption() output.ResponseOption {
+	if cfg == nil || cfg.ActiveProfile == "" {
+		return func(*output.Response) {}
+	}
+	return output.WithMeta("profile", cfg.ActiveProfile)
+}
+
+// writeOK wraps writer.OK and always injects statsOption() and profileOption() so
+// every command response includes request stats when --stats is set, and the profile
+// when one is active.
 func writeOK(data any, opts ...output.ResponseOption) error {
-	return writer.OK(data, append(opts, statsOption())...)
+	return writer.OK(data, append(opts, statsOption(), profileOption())...)
+}
+
+// selectProfile resolves the profile for this invocation and applies it. A bare `hey`
+// tolerates a selection it cannot make, as basecamp-cli's bare root does, so a broken
+// selection never hides the help that explains it.
+func selectProfile(cmd *cobra.Command) error {
+	if commandIgnoresLocalConfig(cmd) {
+		// These read no server and no credential; the installer runs them anywhere.
+		return nil
+	}
+	bareRoot := cmd.Parent() == nil
+	name, source, err := resolveProfile(cmd, cfg, bareRoot || commandMayRunWithoutProfile(cmd))
+	if err != nil {
+		if bareRoot {
+			return nil
+		}
+		return err
+	}
+	if name == "" {
+		return nil
+	}
+	if err := cfg.ApplyProfile(name, source); err != nil {
+		// A profile hey refuses to send a credential to (a plain-HTTP server, say)
+		// must not lock out the commands that repair it: hey profile delete and
+		// set-default run on the top-level configuration instead.
+		if isProfileCommand(cmd) {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: not using profile %q: %s\n", terminal.SanitizeLine(name), terminal.SanitizeLine(apierr.AsError(err).Message))
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func isProfileCommand(cmd *cobra.Command) bool {
+	parts := strings.Fields(cmd.CommandPath())
+	return len(parts) >= 2 && parts[1] == "profile"
 }
 
 func printAgentHelp(cmd *cobra.Command) {

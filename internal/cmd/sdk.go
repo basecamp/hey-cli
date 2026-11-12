@@ -109,10 +109,24 @@ func initSDK(authMgr *auth.Manager, baseURL string) {
 // httpCacheDir is where the SDK keeps its ETag response cache, or empty when no
 // cache location can be resolved, which leaves caching off.
 func httpCacheDir() string {
+	if cfg != nil && cfg.ActiveProfile != "" {
+		return profileHTTPCacheDir(cfg.ActiveProfile)
+	}
 	if dir := config.CacheDir(); dir != "" {
 		return filepath.Join(dir, "http")
 	}
 	return ""
+}
+
+// profileHTTPCacheDir is a profile's own response cache, as basecamp-cli keeps a cache
+// per profile: two sign-ins on one server must not revalidate each other's mail. A name
+// that would not stay one directory deep gets none.
+func profileHTTPCacheDir(profile string) string {
+	dir := config.CacheDir()
+	if dir == "" || !config.ProfileNameIsPathSafe(profile) {
+		return ""
+	}
+	return filepath.Join(dir, "profiles", profile, "http")
 }
 
 // clearHTTPCache drops the SDK's response cache. It runs after a credential
@@ -120,10 +134,12 @@ func httpCacheDir() string {
 // the command that carried it: the warning names the directory left to
 // remove by hand.
 func clearHTTPCache(errOut io.Writer) {
-	dir := httpCacheDir()
-	if dir == "" {
-		return
+	if dir := httpCacheDir(); dir != "" {
+		clearHTTPCacheDir(errOut, dir)
 	}
+}
+
+func clearHTTPCacheDir(errOut io.Writer, dir string) {
 	if err := hey.NewCache(dir).Clear(); err != nil {
 		fmt.Fprintf(errOut, "warning: could not clear cached responses in %s: %v\n", dir, err)
 	}

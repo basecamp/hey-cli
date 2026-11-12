@@ -165,6 +165,13 @@ func newConfigShowCommand() *cobra.Command {
 					"source": "global",
 				},
 			}
+			if cfg.ActiveProfile != "" {
+				entries = append(entries, map[string]string{
+					"key":    "profile",
+					"value":  cfg.ActiveProfile,
+					"source": string(cfg.SourceOf("profile")),
+				})
+			}
 			if local := cfg.LocalConfig(); local != nil {
 				trust := "untrusted"
 				if local.Trusted {

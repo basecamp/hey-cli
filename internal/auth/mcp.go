@@ -46,6 +46,7 @@ func NewMCPManager(baseURL string, httpClient *http.Client, configDir, clientID 
 		origin = canonical
 	}
 	m.storeKey = mcpStoreKeyPrefix + origin
+	m.mcp = true
 	m.clientID = clientID
 	m.scope = MCPScope
 	m.honorEnvToken = false

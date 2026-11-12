@@ -57,6 +57,8 @@ The setup wizard, the Omarchy bar plugin and the skill refresh hook are in
 
 Configuration (the base URL, the default linked account, the Imbox's cover, and the `onboarded` flag) is stored in `~/.config/hey-cli/config.json`; `onboarded` is read from the global file only, never from a repository's `.hey/config.json`. Credentials are stored in the system keyring (service name: `hey`) with automatic fallback to `~/.config/hey-cli/credentials.json` when the keyring is unavailable. Set `HEY_NO_KEYRING=1` to force file storage.
 
+Named profiles (`profiles` and `default_profile` in the global config, chosen by `-P`/`--profile`, `HEY_PROFILE` or `default_profile`) are ported from basecamp-cli and live in `internal/config/profiles.go` and `internal/cmd/profile*.go`. A credential is keyed by its origin with no profile active, and `profile:<name>` (`mcp:profile:<name>` for `hey mcp`) with one. With no profiles configured nothing reads differently; keep it that way. A repository's `.hey/config.json` sets the profile keys only once `hey config trust-local` trusts them.
+
 ### CLI
 
 The README is the front door, not the manual: install, first run, a dozen examples, and

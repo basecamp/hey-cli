@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
 	"github.com/basecamp/hey-cli/internal/output"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 type authCommand struct {
@@ -173,6 +175,9 @@ func newAuthStatusCommand() *cobra.Command {
 				"authenticated":  false,
 				"mcp":            mcpStatus,
 			}
+			if cfg.ActiveProfile != "" {
+				status["profile"] = cfg.ActiveProfile
+			}
 
 			// The install identifier is install-scoped: it survives logout and
 			// is sent on every OAuth login and refresh. Surface it in every
@@ -190,6 +195,7 @@ func newAuthStatusCommand() *cobra.Command {
 
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
+					printProfileLine(w)
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
 					fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
 					if installID != "" {
@@ -216,6 +222,7 @@ func newAuthStatusCommand() *cobra.Command {
 			if errors.Is(err, auth.ErrCredentialsNotFound) || (creds.AccessToken == "" && creds.RefreshToken == "") {
 				if writer.IsStyled() {
 					w := cmd.OutOrStdout()
+					printProfileLine(w)
 					fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
 					fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
 					if installID != "" {
@@ -253,6 +260,7 @@ func newAuthStatusCommand() *cobra.Command {
 			}
 			if writer.IsStyled() {
 				w := cmd.OutOrStdout()
+				printProfileLine(w)
 				fmt.Fprintf(w, "Base URL:  %s\n", cfg.BaseURL)
 				fmt.Fprintf(w, "Mail:      %s (%s)\n", cfg.AccountID, cfg.SourceOf("account_id"))
 				fmt.Fprintln(w, "Status:    Logged in")
@@ -293,6 +301,14 @@ func newAuthStatusCommand() *cobra.Command {
 
 			return writeOK(status, output.WithSummary("Logged in"))
 		},
+	}
+}
+
+// printProfileLine names the active profile in a styled status, and prints nothing
+// with none.
+func printProfileLine(w io.Writer) {
+	if cfg.ActiveProfile != "" {
+		fmt.Fprintf(w, "Profile:   %s\n", terminal.SanitizeLine(cfg.ActiveProfile))
 	}
 }
 

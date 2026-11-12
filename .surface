@@ -8,6 +8,7 @@ hey --ids-only
 hey --jq
 hey --json
 hey --markdown
+hey --profile
 hey --quiet
 hey --stats
 hey --styled
@@ -291,6 +292,15 @@ hey mcp --domains
 hey mcp --read-only
 hey move
 hey move --to
+hey profile
+hey profile create
+hey profile create --account
+hey profile create --base-url
+hey profile create --no-browser
+hey profile delete
+hey profile list
+hey profile set-default
+hey profile show
 hey reply
 hey reply --attach
 hey reply --bcc

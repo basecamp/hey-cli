@@ -106,11 +106,20 @@ func promptForLocalConfigTrust(cmd *cobra.Command, local *config.LocalConfig) (l
 	fmt.Fprintf(w, "  Configuration:       %s\n", terminal.SanitizeLine(local.Path))
 	fmt.Fprintf(w, "  Local server:        %s\n", localTrustDisplayValue(local.BaseURL))
 	fmt.Fprintf(w, "  Local mail account:  %s\n", localTrustDisplayValue(local.AccountID))
+	if len(local.ProfileNames) > 0 {
+		fmt.Fprintf(w, "  Local profiles:      %s\n", terminal.SanitizeLine(strings.Join(local.ProfileNames, ", ")))
+	}
+	if local.DefaultProfile != "" {
+		fmt.Fprintf(w, "  Local default:       %s\n", terminal.SanitizeLine(local.DefaultProfile))
+	}
 	fmt.Fprintf(w, "  Effective server:    %s\n", terminal.SanitizeLine(cfg.BaseURL))
 	fmt.Fprintf(w, "  Effective account:   %s\n", terminal.SanitizeLine(cfg.AccountID))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Always trust approves the exact local values above for this effective server origin.")
 	fmt.Fprintln(w, "Commands run here may send credentials to that server and read or send mail using that account.")
+	if len(local.ProfileNames) > 0 {
+		fmt.Fprintln(w, "It also approves the local profiles, which choose the server a command here signs in to.")
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  [1] Use once")
 	fmt.Fprintln(w, "  [2] Always trust these settings")

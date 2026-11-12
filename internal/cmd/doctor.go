@@ -79,6 +79,15 @@ func runDoctorChecks(ctx context.Context, root *cobra.Command) []map[string]stri
 		})
 	}
 
+	// Profile, only where one is active: with none the checks read as they always did.
+	if cfg != nil && cfg.ActiveProfile != "" {
+		checks = append(checks, map[string]string{
+			"name":    "Profile",
+			"status":  "ok",
+			"message": fmt.Sprintf("%s (%s)", cfg.ActiveProfile, cfg.BaseURL),
+		})
+	}
+
 	// Credentials
 	if authMgr != nil {
 		store := authMgr.GetStore()

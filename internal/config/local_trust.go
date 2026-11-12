@@ -18,6 +18,12 @@ type LocalConfig struct {
 	ServerOrigin string `json:"server_origin"`
 	Digest       string `json:"digest"`
 	Trusted      bool   `json:"trusted"`
+
+	// Profiles and DefaultProfile are the profile keys it sets, which trust approves
+	// with the rest; ProfileNames lists the profiles by name for a person to review.
+	Profiles       map[string]any `json:"-"`
+	ProfileNames   []string       `json:"profiles,omitempty"`
+	DefaultProfile string         `json:"default_profile,omitempty"`
 }
 
 // TrustedLocalConfig identifies a repository-local configuration trusted by this user.
@@ -37,7 +43,7 @@ type trustedLocalConfigRecord struct {
 }
 
 func makeLocalConfig(path string, file fileConfig, effectiveBaseURL string, trusted map[string]trustedLocalConfigRecord) (*LocalConfig, error) {
-	if file.BaseURL == "" && file.AccountID == "" {
+	if file.BaseURL == "" && file.AccountID == "" && !file.hasProfiles && file.defaultProfile == "" {
 		return nil, nil
 	}
 	canonicalPath, err := canonicalConfigPath(path)
@@ -45,9 +51,24 @@ func makeLocalConfig(path string, file fileConfig, effectiveBaseURL string, trus
 		return nil, err
 	}
 	local := &LocalConfig{
-		Path:      canonicalPath,
-		BaseURL:   file.BaseURL,
-		AccountID: file.AccountID,
+		Path:           canonicalPath,
+		BaseURL:        file.BaseURL,
+		AccountID:      file.AccountID,
+		DefaultProfile: file.defaultProfile,
+	}
+	if file.hasProfiles {
+		// Decoded, so the digest reads the entries with their keys sorted: the same
+		// profiles written in another order need no new trust.
+		local.Profiles = make(map[string]any, len(file.profilesRaw))
+		for name, raw := range file.profilesRaw {
+			var entry any
+			if err := json.Unmarshal(raw, &entry); err != nil {
+				return nil, fmt.Errorf("could not parse config %s: profile %q: %w", path, name, err)
+			}
+			local.Profiles[name] = entry
+			local.ProfileNames = append(local.ProfileNames, name)
+		}
+		sort.Strings(local.ProfileNames)
 	}
 	if err := fingerprintLocalConfig(local, effectiveBaseURL); err != nil {
 		return nil, err
@@ -61,14 +82,20 @@ func fingerprintLocalConfig(local *LocalConfig, effectiveBaseURL string) error {
 	if err != nil {
 		return err
 	}
+	// The profile keys are omitted when unset, so a configuration trusted before
+	// profiles existed keeps its digest.
 	payload, err := json.Marshal(struct {
-		BaseURL      string `json:"base_url,omitempty"`
-		AccountID    string `json:"account_id,omitempty"`
-		ServerOrigin string `json:"server_origin"`
+		BaseURL        string         `json:"base_url,omitempty"`
+		AccountID      string         `json:"account_id,omitempty"`
+		ServerOrigin   string         `json:"server_origin"`
+		Profiles       map[string]any `json:"profiles,omitempty"`
+		DefaultProfile string         `json:"default_profile,omitempty"`
 	}{
-		BaseURL:      local.BaseURL,
-		AccountID:    local.AccountID,
-		ServerOrigin: origin,
+		BaseURL:        local.BaseURL,
+		AccountID:      local.AccountID,
+		ServerOrigin:   origin,
+		Profiles:       local.Profiles,
+		DefaultProfile: local.DefaultProfile,
 	})
 	if err != nil {
 		return fmt.Errorf("could not fingerprint local config %s: %w", local.Path, err)

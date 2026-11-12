@@ -59,6 +59,7 @@ CONNECTION & AUTHENTICATION
   HEY_MCP_CLIENT_ID  Override the HEY MCP (local) client id hey auth login --mcp signs in as.
   HEY_BASE_URL       Override the HEY server URL.
   HEY_ACCOUNT_ID     Select a linked mail account ID or all.
+  HEY_PROFILE        Use a named profile, as -P does (see hey profile).
   HEY_NO_KEYRING     Store credentials in the config directory instead of a keyring.
 
 INTERACTION & DIAGNOSTICS
@@ -89,9 +90,10 @@ ONE INVOCATION
 SELECTION ORDER
   1. --account
   2. HEY_ACCOUNT_ID
-  3. A trusted repository .hey/config.json
-  4. The global default for the active server
-  5. All Accounts
+  3. The active profile's account_id
+  4. A trusted repository .hey/config.json
+  5. The global default for the active server, when no profile is active
+  6. All Accounts
 
 Compose and contact creation use an individually selected account. Replies and forwards use the thread's account. Calendar, task, time tracking, and journal commands remain identity-wide.`,
 		},
