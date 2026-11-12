@@ -4007,6 +4007,65 @@ func TestMailViewReadsEveryPageOfAThreadAndMarksUnreadBodies(t *testing.T) {
 	}
 }
 
+// The envelope on an opened thread is whatever fetchTopic asked the loader to keep.
+// A render test that builds an Entry by hand stays green if those flags go back off.
+func TestMailViewKeepsTheEnvelopeItLoaded(t *testing.T) {
+	const message = `{"id":501,"content":"<p>Your invoice is ready.</p>",` +
+		`"creator":{"id":9,"name":"Maria Gonzalez","email_address":"maria.gonzalez@example.com"},` +
+		`"addressed":{"directly":[{"id":1,"name":"Elija Sorensen","email_address":"eli@example.com"}],` +
+		`"copied":[{"id":2,"email_address":"ops@example.com"}]},` +
+		`"received_via":[` +
+		`{"email_address":"eli+receipts@example.com","contact":{"id":1,"name":"Elija Sorensen","email_address":"eli@example.com"}},` +
+		`{"email_address":"invoices@example.org"}]}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/topics/100/entries.json":
+			_, _ = w.Write([]byte(`[{"id":501,"kind":"message","summary":"Invoice"}]`))
+		case "/messages/501.json":
+			_, _ = w.Write([]byte(message))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := hey.NewClient(&hey.Config{BaseURL: server.URL}, &hey.StaticTokenProvider{Token: "test-token"}, hey.WithMaxRetries(0))
+	vc := testVC()
+	vc.sdk = client
+	v := newMailView(vc)
+	v.vc.width = 80
+	loaded := v.fetchTopic(context.Background(), 1, 1, 100, 500, "Invoice")().(topicLoadedMsg)
+	if loaded.err != nil {
+		t.Fatalf("fetch topic: %v", loaded.err)
+	}
+	if len(loaded.entries) != 1 {
+		t.Fatalf("entries = %+v, want the one message", loaded.entries)
+	}
+	entry := loaded.entries[0]
+	if got, want := entry.ReceivedVia, []string{"eli+receipts@example.com", "invoices@example.org"}; !slices.Equal(got, want) {
+		t.Errorf("received via = %#v, want %#v (the delivery address, not the resolved contact)", got, want)
+	}
+	if len(entry.Recipients.To) != 1 || entry.Recipients.To[0].Name != "Elija Sorensen" || entry.Recipients.To[0].EmailAddress != "eli@example.com" {
+		t.Errorf("to = %+v", entry.Recipients.To)
+	}
+	if len(entry.Recipients.Cc) != 1 || entry.Recipients.Cc[0].EmailAddress != "ops@example.com" {
+		t.Errorf("cc = %+v", entry.Recipients.Cc)
+	}
+
+	rendered := ansi.Strip(mustRender(t, v, loaded.entries))
+	for _, want := range []string{
+		"Maria Gonzalez <maria.gonzalez@example.com>",
+		"Via  eli+receipts@example.com, invoices@example.org",
+		"To   Elija Sorensen <eli@example.com>",
+		"Cc   ops@example.com",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("opened thread is missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
 // HEY's summary is its ~105-character preview of the body, so it belongs on screen only
 // where the body itself cannot be. Beside a body it repeats the message's opening line;
 // for a body that was not read it would pass a preview off as the message.
@@ -4059,6 +4118,104 @@ func TestRenderEntriesShowsTheBodyRatherThanHEYsPreviewOfIt(t *testing.T) {
 	if strings.Contains(rendered, "Markup only") || !strings.Contains(rendered, "(empty body)") {
 		t.Errorf("a body that was read and rendered to nothing should say so rather than show a preview:\n%s", rendered)
 	}
+}
+
+func TestRenderEntriesShowsTheEnvelopeUnderTheSender(t *testing.T) {
+	v := newMailView(testVC())
+	v.vc.width = 80
+	inbound := mail.Entry{
+		Creator: mail.Contact{Name: "Maria Gonzalez", EmailAddress: "maria.gonzalez@example.com"},
+		Recipients: mail.Recipients{
+			To:  []mail.Contact{{Name: "Elija Sorensen", EmailAddress: "eli@example.com"}},
+			Cc:  []mail.Contact{{EmailAddress: "ops@example.com"}},
+			Bcc: []mail.Contact{{Name: "Audit", EmailAddress: "audit@example.com"}},
+		},
+		ReceivedVia: []string{"eli+receipts@example.com", "invoices@example.org"},
+		Body:        htmlutil.ToMarkdown("<p>Your invoice is ready.</p>"),
+		BodyState:   string(threadload.StateHydrated),
+	}
+	sent := mail.Entry{
+		Creator:    mail.Contact{Name: "Elija Sorensen", EmailAddress: "eli@example.com"},
+		Recipients: mail.Recipients{To: []mail.Contact{{Name: "Maria Gonzalez", EmailAddress: "maria.gonzalez@example.com"}}},
+		Body:       htmlutil.ToMarkdown("<p>Thanks, filed.</p>"),
+		BodyState:  string(threadload.StateHydrated),
+	}
+	note := mail.Entry{
+		Kind:        mail.EntryKindComment,
+		Creator:     mail.Contact{Name: "Priya Raman", EmailAddress: "priya@example.com"},
+		Recipients:  mail.Recipients{To: []mail.Contact{{EmailAddress: "hidden@example.com"}}},
+		ReceivedVia: []string{"hidden-via@example.com"},
+		Body:        htmlutil.ToMarkdown("<p>A note to the thread.</p>"),
+		BodyState:   string(threadload.StateHydrated),
+	}
+	named := mail.Entry{
+		Creator:               mail.Contact{Name: "Rick Sanchez", EmailAddress: "rick@example.com"},
+		AlternativeSenderName: "Support",
+		Body:                  htmlutil.ToMarkdown("<p>We got your note.</p>"),
+		BodyState:             string(threadload.StateHydrated),
+	}
+
+	rendered := ansi.Strip(mustRender(t, v, []mail.Entry{inbound, sent, note, named}))
+	for _, want := range []string{
+		"Maria Gonzalez <maria.gonzalez@example.com>",
+		"Via  eli+receipts@example.com, invoices@example.org",
+		"To   Elija Sorensen <eli@example.com>",
+		"Cc   ops@example.com",
+		"Bcc  Audit <audit@example.com>",
+		"To   Maria Gonzalez <maria.gonzalez@example.com>",
+		"Support",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("thread is missing %q:\n%s", want, rendered)
+		}
+	}
+	viaLines := 0
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.HasPrefix(line, "Via ") {
+			viaLines++
+		}
+	}
+	if viaLines != 1 {
+		t.Errorf("want one Via line, on the inbound message, found %d:\n%s", viaLines, rendered)
+	}
+	if strings.Contains(rendered, "hidden@example.com") || strings.Contains(rendered, "hidden-via@example.com") || strings.Contains(rendered, "priya@example.com") || strings.Contains(rendered, "rick@example.com") {
+		t.Errorf("a note or an alternative sender name showed an address it should not:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "Note by Priya Raman") {
+		t.Errorf("the note lost its heading:\n%s", rendered)
+	}
+	sentFrom := false
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.HasPrefix(line, "Elija Sorensen <eli@example.com>") {
+			sentFrom = true
+		}
+	}
+	if !sentFrom {
+		t.Errorf("mail you sent should name the creator as Name <address>:\n%s", rendered)
+	}
+	for _, line := range strings.Split(rendered, "\n") {
+		if strings.HasPrefix(line, "To   Elija") && displayWidth(line) > v.vc.width {
+			t.Errorf("envelope line is %d wide on an %d-wide screen: %q", displayWidth(line), v.vc.width, line)
+		}
+	}
+
+	v.vc.width = 24
+	narrow := ansi.Strip(mustRender(t, v, []mail.Entry{inbound}))
+	var toLine string
+	for _, line := range strings.Split(narrow, "\n") {
+		if strings.HasPrefix(line, "To ") {
+			toLine = line
+		}
+	}
+	if toLine == "" || !strings.HasSuffix(toLine, "…") || displayWidth(toLine) > 24 {
+		t.Errorf("narrow To line = %q, want it cut to 24", toLine)
+	}
+}
+
+func mustRender(t *testing.T, v *mailView, entries []mail.Entry) string {
+	t.Helper()
+	rendered, _ := v.renderEntries(entries)
+	return rendered
 }
 
 func TestRenderEntriesShowsTheSelectedSendAsAddress(t *testing.T) {

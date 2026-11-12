@@ -22,11 +22,12 @@ because both were mis-stated here before:
   `failed`. Hydration and retained message metadata are the caller's decisions:
   `hey thread read --count` and `--ids-only` read the index only, JSON thread output
   retains both ordinary To/CC/BCC recipients and inbound `received_via` delivery records,
-  HTML retains only the recipients it renders, and body-only callers such as the TUI and
-  `hey attachment list` retain neither kind. Delivery records keep HEY's exact account
-  address (including plus tags and catch-all aliases) and an optional identity-only
-  contact; all of those retained strings are charged atomically with the message against
-  the byte budget. A thread that could be read only in part is refused without
+  HTML retains only the recipients it renders, the TUI thread read retains both kinds so
+  the opened thread can show them, and `hey attachment list` retains neither kind. The
+  opened thread keeps a delivery's exact account address and leaves the resolved contact
+  behind. What the loader retains is the full record: that exact address (including plus
+  tags and catch-all aliases) and an optional identity-only contact. All of those
+  retained strings are charged atomically with the message against the byte budget. A thread that could be read only in part is refused without
   `--allow-partial`; with it the notice says what is missing (`threadNotice` in
   `internal/cmd/thread_source.go`). The package takes a `Source` interface rather than the
   SDK; `threadload.NewSDKSource` is the adapter both the CLI and the TUI hand it, and the TUI's `mailView.fetchTopic` reads through it

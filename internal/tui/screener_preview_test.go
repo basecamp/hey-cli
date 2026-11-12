@@ -141,6 +141,43 @@ func TestScreenerPreviewHeaderFitsTheWidth(t *testing.T) {
 	}
 }
 
+// The preview already read the message, so the header can say which address it arrived
+// through and who was written on it. The queue row never had either.
+func TestScreenerPreviewShowsWhoTheMailArrivedFor(t *testing.T) {
+	view, _ := openedPreview(t)
+
+	header := ansi.Strip(view.previewHeader())
+	for _, want := range []string{
+		"Via  eli+screen@example.com",
+		"To   Elija Sorensen <eli@example.com>",
+		"Cc   Sam Rivera <sam@example.com>",
+	} {
+		if !strings.Contains(header, want) {
+			t.Errorf("preview header is missing %q:\n%s", want, header)
+		}
+	}
+	if strings.Contains(header, "Bcc") {
+		t.Errorf("an empty Bcc line is on the preview:\n%s", header)
+	}
+}
+
+// The envelope arrives with the message. Until then the header is the row's sender.
+func TestScreenerPreviewHidesTheEnvelopeUntilTheMessageArrives(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.vc.width = 80
+	view.vc.height = 20
+
+	view.HandleContentKey(keyPress("space"))
+
+	header := ansi.Strip(view.previewHeader())
+	if !strings.Contains(header, "Jane Doe <jane@example.com>") {
+		t.Fatalf("the loading preview lost its sender:\n%s", header)
+	}
+	if strings.Contains(header, "Via  ") || strings.Contains(header, "To   ") {
+		t.Errorf("the envelope is showing before the message arrived:\n%s", header)
+	}
+}
+
 // A long email scrolls inside the preview; the header stays put.
 func TestScreenerPreviewScrolls(t *testing.T) {
 	view, _ := openedPreview(t)
