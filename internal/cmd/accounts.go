@@ -159,8 +159,20 @@ func accountOverrideNotice(source config.Source) string {
 		case config.SourceFlag:
 			return saved + "; --account controls only this invocation."
 		default:
-			return ""
+			// A repository entry may still hold the account, below.
 		}
+		if local := cfg.LocalConfig(); local != nil && local.Trusted {
+			// An entry refines the profile only on its own server, as the loader merges it.
+			entry, _ := local.Profiles[cfg.ActiveProfile].(map[string]any)
+			baseURL, _ := entry["base_url"].(string)
+			entryOrigin, entryErr := config.Origin(baseURL)
+			profileOrigin, profileErr := config.Origin(cfg.Profiles[cfg.ActiveProfile].BaseURL)
+			sameServer := baseURL != "" && entryErr == nil && profileErr == nil && entryOrigin == profileOrigin
+			if account, ok := entry["account_id"]; sameServer && ok && account != nil && account != "" {
+				return saved + "; its entry in " + local.Path + " remains higher precedence."
+			}
+		}
+		return ""
 	}
 	switch source {
 	case config.SourceLocal:

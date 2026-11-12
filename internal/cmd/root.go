@@ -322,9 +322,25 @@ func Execute() {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(output.ExitCodeFor(err))
 		}
-		writer.Err(err)
+		writer.Err(withProfileMeta(err))
 		os.Exit(output.ExitCodeFor(err))
 	}
+}
+
+// withProfileMeta names the active profile on a failed answer as on a successful one,
+// on a copy, since an error value may be shared.
+func withProfileMeta(err error) error {
+	if cfg == nil || cfg.ActiveProfile == "" {
+		return err
+	}
+	e := *apierr.AsError(err)
+	meta := make(map[string]any, len(e.Meta)+1)
+	for k, v := range e.Meta {
+		meta[k] = v
+	}
+	meta["profile"] = cfg.ActiveProfile
+	e.Meta = meta
+	return &e
 }
 
 // htmlRequested reports --html among raw arguments. Parsing stops at the first unknown
@@ -603,7 +619,7 @@ func writeOK(data any, opts ...output.ResponseOption) error {
 // tolerates a selection it cannot make, as basecamp-cli's bare root does, so a broken
 // selection never hides the help that explains it.
 func selectProfile(cmd *cobra.Command) error {
-	if commandIgnoresLocalConfig(cmd) {
+	if commandIgnoresLocalConfig(cmd) || commandReadsNoServer(cmd) {
 		// These read no server and no credential; the installer runs them anywhere.
 		return nil
 	}

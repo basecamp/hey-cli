@@ -1190,3 +1190,90 @@ func TestTheTrustPromptPrintsANumericAccountWhole(t *testing.T) {
 		t.Errorf("prompt = %q", output.String())
 	}
 }
+
+// version, upgrade, commands and completion read no server, so a profile hey refuses
+// can't stop them, and several with none chosen ask nothing.
+func TestCommandsThatReadNoServerSkipProfiles(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"default_profile":"broken","profiles":{"broken":{"base_url":"http://remote.example.com"},"work":{"base_url":"https://app.hey.com"}}}`)
+	for _, args := range [][]string{{"version"}, {"commands"}, {"completion", "bash"}} {
+		if _, _, err := runProfileCLI(t, args...); err != nil {
+			t.Errorf("%v: %v", args, err)
+		}
+	}
+	t.Setenv("HEY_PROFILE", "missing")
+	if _, _, err := runProfileCLI(t, "version"); err != nil {
+		t.Errorf("version with an unknown HEY_PROFILE: %v", err)
+	}
+}
+
+func TestAFailedAnswerNamesTheProfile(t *testing.T) {
+	previous := cfg
+	t.Cleanup(func() { cfg = previous })
+	cfg = &config.Config{ActiveProfile: "work"}
+	shared := &apierr.Error{Code: "not_found", Message: "resource not found", Meta: map[string]any{"status": 404}}
+	got := apierr.AsError(withProfileMeta(shared))
+	if got.Meta["profile"] != "work" || got.Meta["status"] != 404 {
+		t.Errorf("meta = %#v", got.Meta)
+	}
+	if _, touched := shared.Meta["profile"]; touched {
+		t.Error("the shared error was changed")
+	}
+	cfg = &config.Config{}
+	if withProfileMeta(shared) != error(shared) {
+		t.Error("an error with no profile active changed")
+	}
+}
+
+// A credential store hey can't read or clear keeps the profile, so a retry can still
+// reach its credential.
+func TestProfileDeleteKeepsTheProfileWhenItsCredentialStays(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"https://app.hey.com"}}}`)
+	// A directory where the credential file belongs: the store can neither read nor
+	// rewrite it.
+	if err := os.MkdirAll(filepath.Join(home, "hey-cli", "credentials.json"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runProfileJSON(t, "profile", "delete", "work"); !strings.Contains(errorMessage(err), `could not delete credentials for profile "work"`) {
+		t.Errorf("delete = %v", err)
+	}
+	if _, ok := readProfileTestConfig(t, home)["profiles"].(map[string]any)["work"]; !ok {
+		t.Error("the profile went while its credential could not")
+	}
+}
+
+func TestAccountUseUnderARepositoryProfile(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"https://app.hey.com"}}}`)
+	workspace := filepath.Join(home, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, ".hey"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".hey", "config.json"), []byte(`{"profiles":{"work":{"base_url":"https://app.hey.com","account_id":"42"},"local":{"base_url":"https://app.hey.com"}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	if _, _, err := runProfileJSON(t, "config", "trust-local"); err != nil {
+		t.Fatal(err)
+	}
+	previous := cfg
+	t.Cleanup(func() { cfg = previous })
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.ApplyProfile("work", config.SourceFlag); err != nil {
+		t.Fatal(err)
+	}
+	cfg = loaded
+	if notice := accountOverrideNotice(config.SourceProfile); !strings.Contains(notice, "remains higher precedence") {
+		t.Errorf("notice = %q", notice)
+	}
+	if err := loaded.ApplyProfile("local", config.SourceFlag); err != nil {
+		t.Fatal(err)
+	}
+	if err := loaded.SaveAccountID("all"); !strings.Contains(errorMessage(err), `Profile "local" is set by `) || !strings.Contains(errorMessage(err), "set its account_id there") {
+		t.Errorf("save = %v", err)
+	}
+}

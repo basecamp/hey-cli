@@ -501,6 +501,12 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 		m.cachedCredentials = nil
 		return pinErr
 	}
+	// Another process may have signed the profile in at another server since this one
+	// loaded it.
+	if issuerErr := m.checkProfileIssuer(stored); issuerErr != nil {
+		m.cachedCredentials = nil
+		return issuerErr
+	}
 	m.cachedCredentials = cloneCredentials(stored)
 	changed := stored.AccessToken != creds.AccessToken
 	if changed && stored.AccessToken != "" {

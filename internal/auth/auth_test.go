@@ -1556,3 +1556,33 @@ func TestNotLoggedInHintInsideCodexSandbox(t *testing.T) {
 		})
 	}
 }
+
+// A profile signed in again at another server by another process: a running manager
+// must not adopt that token and send it to its own server.
+func TestRefreshRefusesAProfileTokenAnotherServerIssued(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	mgr := testManager(t, server)
+	mgr.UseProfile("work")
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), &Credentials{AccessToken: "other-server", RefreshToken: "other-refresh", TokenEndpoint: "https://other.example/oauth/tokens"}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	stale := &Credentials{AccessToken: "ours", RefreshToken: "our-refresh", TokenEndpoint: server.URL + "/oauth/tokens"}
+	err := mgr.refreshLocked(t.Context(), stale)
+	if err == nil || !strings.Contains(err.Error(), "was issued by https://other.example/oauth/tokens") {
+		t.Errorf("refreshLocked = %v", err)
+	}
+	if calls != 0 {
+		t.Errorf("requests = %d, want none", calls)
+	}
+	if token, _ := mgr.AccessToken(t.Context()); token == "other-server" {
+		t.Error("the other server's token was adopted")
+	}
+}

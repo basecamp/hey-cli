@@ -502,6 +502,13 @@ func (c *Config) SaveAccountID(accountID string) error {
 		return err
 	}
 	if c.ActiveProfile != "" {
+		if !c.ProfileInGlobalConfig(c.ActiveProfile) {
+			where := "this repository's .hey/config.json"
+			if c.localConfig != nil {
+				where = c.localConfig.Path
+			}
+			return apierr.ErrUsage(fmt.Sprintf("Profile %q is set by %s, not the global config; set its account_id there", c.ActiveProfile, where))
+		}
 		// A profile's account is the profile's own, as basecamp-cli binds one.
 		return bindProfileAccount(c.ActiveProfile, accountID)
 	}

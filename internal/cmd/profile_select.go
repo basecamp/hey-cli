@@ -170,3 +170,11 @@ func completeProfileNames(_ *cobra.Command, _ []string, toComplete string) ([]co
 	}
 	return completions, cobra.ShellCompDirectiveNoFileComp
 }
+
+// commandReadsNoServer reports the commands that never use a profile, so a broken or
+// unchosen one can't stop them: version, upgrade, commands and completion. The config
+// commands read none either, but config show reports the selected profile.
+func commandReadsNoServer(cmd *cobra.Command) bool {
+	parts := strings.Fields(cmd.CommandPath())
+	return len(parts) >= 2 && parts[1] != "config" && !commandUsesRuntimeConfig(cmd)
+}

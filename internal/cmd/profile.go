@@ -338,9 +338,8 @@ func newProfileDeleteCommand() *cobra.Command {
 			for _, mgr := range []*auth.Manager{cli, mcp} {
 				revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
 				if err != nil {
-					// Written straight to the terminal, so the store's error text is
-					// scrubbed here rather than at a sink.
-					fmt.Fprintln(cmd.ErrOrStderr(), terminal.SanitizeLine(fmt.Sprintf("Warning: could not delete credentials for profile %q: %v", name, err)))
+					// The profile stays, so its credential can still be reached to retry.
+					return apierr.ErrAuth(fmt.Sprintf("could not delete credentials for profile %q: %v", name, err))
 				}
 				if revoked != nil && mgr == cli {
 					fields["revoked"] = *revoked
