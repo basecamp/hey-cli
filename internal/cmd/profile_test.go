@@ -18,6 +18,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/auth"
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/internal/output"
 )
 
@@ -1056,5 +1057,113 @@ func TestCompletionSurvivesARefusedProfile(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "work\thttps://app.hey.com") {
 		t.Errorf("completion = %q", stdout)
+	}
+}
+
+// hey auth logout --mcp revokes a profile's grant only at the server that issued it,
+// and still forgets it here.
+func TestProfileMCPLogoutRevokesOnlyWhereTheSignInWasIssued(t *testing.T) {
+	for name, endpoint := range map[string]string{"another server": "https://app.hey.com/oauth/tokens", "no server recorded": ""} {
+		t.Run(name, func(t *testing.T) {
+			home := profileTestHome(t)
+			server := noRequestServer(t)
+			writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"`+server.URL+`"}}}`)
+			store := auth.NewStore(filepath.Join(home, "hey-cli"))
+			if err := store.Save("mcp:profile:work", &auth.Credentials{AccessToken: "mcp-access", RefreshToken: "mcp-refresh", OAuthType: "oauth", TokenEndpoint: endpoint}); err != nil {
+				t.Fatal(err)
+			}
+			response, stderr, err := runProfileJSON(t, "auth", "logout", "--mcp")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if data, _ := response.Data.(map[string]any); data["revoked"] != false || !strings.Contains(stderr, "couldn't revoke") {
+				t.Errorf("logout = %#v, stderr %q", response.Data, stderr)
+			}
+			if _, err := store.Load("mcp:profile:work"); !errors.Is(err, auth.ErrCredentialsNotFound) {
+				t.Errorf("credential kept: %v", err)
+			}
+		})
+	}
+}
+
+// A sign-in whose profile could not be written is revoked as well as forgotten, so no
+// grant is left that nothing here names.
+func TestAFailedProfileCreateRevokesItsSignIn(t *testing.T) {
+	home := profileTestHome(t)
+	var revoked []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/oauth/tokens" {
+			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		form, _ := url.ParseQuery(string(body))
+		revoked = append(revoked, form.Get("token"))
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	previous := signInProfile
+	signInProfile = func(_ context.Context, mgr *auth.Manager, _ auth.LoginOptions) error {
+		if err := mgr.GetStore().Save(mgr.CredentialKey(), &auth.Credentials{AccessToken: "access", RefreshToken: "refresh", OAuthType: "oauth", TokenEndpoint: server.URL + "/oauth/tokens"}); err != nil {
+			return err
+		}
+		// The config file breaks while the browser sign-in runs.
+		writeProfileTestConfig(t, home, `{`)
+		return nil
+	}
+	t.Cleanup(func() { signInProfile = previous })
+
+	if _, _, err := runProfileJSON(t, "profile", "create", "work", "--base-url", server.URL); err == nil {
+		t.Fatal("create succeeded on a broken config")
+	}
+	if len(revoked) != 1 || revoked[0] != "refresh" {
+		t.Errorf("revoked = %q", revoked)
+	}
+	if _, err := auth.NewStore(filepath.Join(home, "hey-cli")).Load("profile:work"); !errors.Is(err, auth.ErrCredentialsNotFound) {
+		t.Errorf("credential kept: %v", err)
+	}
+}
+
+// A trusted repository entry for a global profile would bring it back, signed out,
+// once the global entry went, so delete refuses and names the file.
+func TestDeletingAProfileARepositoryAlsoSetsIsRefused(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"https://app.hey.com"}}}`)
+	workspace := filepath.Join(home, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, ".hey"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".hey", "config.json"), []byte(`{"profiles":{"work":{"base_url":"https://app.hey.com","account_id":"42"}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	if _, _, err := runProfileJSON(t, "config", "trust-local"); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := runProfileJSON(t, "profile", "delete", "work")
+	if got := errorMessage(err); !strings.Contains(got, `Profile "work" is also set by `) {
+		t.Errorf("delete = %q", got)
+	}
+	if _, ok := readProfileTestConfig(t, home)["profiles"].(map[string]any)["work"]; !ok {
+		t.Error("the global entry went anyway")
+	}
+}
+
+func TestTheTrustPromptPrintsANumericAccountWhole(t *testing.T) {
+	previousCfg := cfg
+	cfg = &config.Config{BaseURL: "https://app.hey.com"}
+	t.Cleanup(func() { cfg = previousCfg })
+	cmd := newRootCmd()
+	cmd.SetIn(strings.NewReader("\n"))
+	var output bytes.Buffer
+	cmd.SetErr(&output)
+	if _, err := promptForLocalConfigTrust(cmd, &config.LocalConfig{
+		Path:         "/workspace/.hey/config.json",
+		ProfileNames: []string{"work"},
+		Profiles:     map[string]any{"work": map[string]any{"base_url": "https://app.hey.com", "account_id": float64(4567890)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "mail account 4567890") {
+		t.Errorf("prompt = %q", output.String())
 	}
 }

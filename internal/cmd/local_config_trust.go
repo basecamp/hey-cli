@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -117,6 +118,9 @@ func promptForLocalConfigTrust(cmd *cobra.Command, local *config.LocalConfig) (l
 				server = baseURL
 			}
 			if account, ok := entry["account_id"]; ok && account != nil {
+				if n, isNumber := account.(float64); isNumber {
+					account = strconv.FormatFloat(n, 'f', -1, 64)
+				}
 				server += fmt.Sprintf(", mail account %v", account)
 			}
 		}

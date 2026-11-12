@@ -277,3 +277,11 @@ func TestTheFirstRealProfileBecomesTheDefault(t *testing.T) {
 		t.Errorf("register: %v, default %v", err, isDefault)
 	}
 }
+
+// An empty account_id reads as none, as the top-level account_id does.
+func TestAnEmptyProfileAccountIsNone(t *testing.T) {
+	profiles, err := parseProfiles("config.json", map[string]json.RawMessage{"work": json.RawMessage(`{"base_url":"https://app.hey.com","account_id":""}`)})
+	if err != nil || profiles["work"].AccountID != "" {
+		t.Errorf("profiles = %#v, %v", profiles, err)
+	}
+}

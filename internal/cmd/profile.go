@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -262,6 +263,9 @@ Examples:
 			isDefault, err := config.RegisterProfile(name, profile)
 			if err != nil {
 				// No profile names the credential just stored, so nothing would reach it.
+				if revokeErr := mgr.Revoke(ctx); revokeErr != nil {
+					fmt.Fprintln(cmd.ErrOrStderr(), terminal.SanitizeLine(fmt.Sprintf("Warning: could not revoke the sign-in for profile %q: %v", name, revokeErr)))
+				}
 				if logoutErr := mgr.Logout(); logoutErr != nil {
 					fmt.Fprintln(cmd.ErrOrStderr(), terminal.SanitizeLine(fmt.Sprintf("Warning: could not delete credentials for profile %q: %v", name, logoutErr)))
 				}
@@ -309,6 +313,10 @@ func newProfileDeleteCommand() *cobra.Command {
 					where = local.Path
 				}
 				return apierr.ErrUsage(fmt.Sprintf("Profile %q is set by %s, not the global config; remove it there", name, terminal.SanitizeLine(where)))
+			}
+			if local := cfg.LocalConfig(); local != nil && local.Trusted && slices.Contains(local.ProfileNames, name) {
+				// Its repository entry would bring the profile back, signed out, here.
+				return apierr.ErrUsage(fmt.Sprintf("Profile %q is also set by %s; remove it there first", name, terminal.SanitizeLine(local.Path)))
 			}
 
 			// The credential delete is irreversible, so prove the config file can take

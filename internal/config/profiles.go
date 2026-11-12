@@ -85,7 +85,7 @@ func parseProfiles(path string, raw map[string]json.RawMessage) (map[string]prof
 			continue
 		}
 		entry := profileEntry{BaseURL: baseURL}
-		if raw, present := fields["account_id"]; present && raw != nil {
+		if raw, present := fields["account_id"]; present && raw != nil && raw != "" {
 			account := stringOrNumber(raw)
 			if account == "" {
 				return nil, fmt.Errorf("could not parse config %s: profile %q: account_id must be a string or number", path, name)
