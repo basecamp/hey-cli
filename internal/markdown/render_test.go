@@ -275,7 +275,7 @@ func TestLinkedRenderKeepsVisibleURLFragmentsForSearch(t *testing.T) {
 	if visibleURL != linked.Links[0].Destination {
 		t.Errorf("visible URL fragments = %q, want %q", visibleURL, linked.Links[0].Destination)
 	}
-	if SameURL("https://example.org/a%2Fb", "https://example.org/a/b") {
+	if sameURL("https://example.org/a%2Fb", "https://example.org/a/b") {
 		t.Error("URL identity must preserve escaped ASCII delimiters")
 	}
 }

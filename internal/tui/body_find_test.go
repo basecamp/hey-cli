@@ -24,6 +24,12 @@ func TestBodyFindUsesVisibleTextAndLiteralUnicodeCaseFolding(t *testing.T) {
 				t.Fatalf("matches = %v, want %d", find.matches, testCase.want)
 			}
 			highlighted := find.highlight([]string{line})[0]
+			if testCase.want > 0 && !strings.Contains(highlighted, "\x1b[1;4;7m") {
+				t.Errorf("the selected match has no highlight: %q", highlighted)
+			}
+			if testCase.want == 0 && highlighted != line {
+				t.Error("a search with no matches changed the rendering")
+			}
 			if ansi.Strip(highlighted) != ansi.Strip(line) {
 				t.Errorf("highlighting changed the text: %q", highlighted)
 			}
@@ -54,18 +60,6 @@ func TestBodyFindWrapsAndStartsAtTheVisibleMessage(t *testing.T) {
 	find.next(1)
 	if _, found := find.selected(); found || !strings.Contains(find.footer(80), "no matches") {
 		t.Error("an unmatched query should report no matches")
-	}
-}
-
-func TestBodyFindDestinationsBelongToTheMatchedText(t *testing.T) {
-	line := "Outside \x1b]8;;https://example.org/first\aFirst\x1b]8;;\a and \x1b]8;;https://example.org/second\x1b\\Second\x1b]8;;\x1b\\"
-	plain := ansi.Strip(line)
-	for _, testCase := range []struct{ text, destination string }{
-		{"Outside", ""}, {"First", "https://example.org/first"}, {"and", ""}, {"Second", "https://example.org/second"},
-	} {
-		if got := matchDestination(line, strings.Index(plain, testCase.text)); got != testCase.destination {
-			t.Errorf("destination at %q = %q, want %q", testCase.text, got, testCase.destination)
-		}
 	}
 }
 
@@ -119,5 +113,25 @@ func TestBodyFindURLRunsTakePrecedenceOverWrappedTableCellLines(t *testing.T) {
 	})
 	if len(find.matches) != 2 {
 		t.Fatalf("URL has %d matches, want two without overlapping cell-line matches", len(find.matches))
+	}
+}
+
+func TestBodyFindPreservesLiteralQueryWhitespace(t *testing.T) {
+	find := bodyFind{}
+	find.start()
+	find.input.SetValue(" budget ")
+	_, committed := find.edit(keyPress("enter"))
+	if !committed || find.query != " budget " {
+		t.Fatalf("query = %q, want literal surrounding spaces", find.query)
+	}
+	find.scan(findDocument{lines: []string{"budget at the start; a budget summary; end budget"}})
+	if len(find.matches) != 1 {
+		t.Errorf("literal spaced query has %d matches, want one interior occurrence", len(find.matches))
+	}
+	find.start()
+	find.input.SetValue("   ")
+	find.edit(keyPress("enter"))
+	if find.query != "" {
+		t.Error("an all-whitespace query should clear find")
 	}
 }

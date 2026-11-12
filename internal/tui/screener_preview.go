@@ -104,7 +104,7 @@ func (v *screenerView) handlePreviewKey(msg tea.KeyPressMsg) tea.Cmd {
 	if preview.find.editing {
 		cmd, committed := preview.find.edit(msg)
 		if committed {
-			preview.find.scan(findDocument{lines: preview.lines, links: preview.linkRuns})
+			v.scanPreviewFind()
 			preview.find.firstFrom(preview.viewport.YOffset())
 			v.showPreviewMatch()
 		}
@@ -221,7 +221,7 @@ func (v *screenerView) layoutPreview() {
 	}
 	offset := preview.viewport.YOffset()
 	preview.lines = strings.Split(content, "\n")
-	preview.find.scan(findDocument{lines: preview.lines, links: preview.linkRuns})
+	v.scanPreviewFind()
 	preview.viewport.SetContentLines(preview.find.highlight(preview.lines))
 	preview.viewport.SetYOffset(offset)
 	v.revealPreviewMatch()
@@ -243,6 +243,15 @@ func (v *screenerView) previewView() string {
 		b.WriteString(v.preview.viewport.View())
 	}
 	return b.String()
+}
+
+func (v *screenerView) scanPreviewFind() {
+	preview := v.preview
+	if preview.body.IsEmpty() {
+		preview.find.scan()
+		return
+	}
+	preview.find.scan(findDocument{lines: preview.lines, links: preview.linkRuns})
 }
 
 func (v *screenerView) showPreviewMatch() {
