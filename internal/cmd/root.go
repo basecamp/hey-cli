@@ -321,6 +321,10 @@ func Execute() {
 	root := newRootCmd()
 
 	err := root.Execute()
+	if errors.Is(err, output.ErrPending) {
+		// The command already wrote its answer: waiting for the person is no failure.
+		os.Exit(output.ExitPending)
+	}
 	if err != nil {
 		err = addressLoginHint(normalizeCobraError(err))
 		if writer == nil {

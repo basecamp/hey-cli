@@ -100,6 +100,9 @@ naming the draft, which hey draft send sends later.`,
 }
 
 func (c *composeCommand) run(cmd *cobra.Command, args []string) error {
+	if appEndpoint() {
+		return c.runApp(cmd)
+	}
 	if cmd.Flags().Changed("from") && strings.TrimSpace(c.from) == "" {
 		return apierr.ErrUsage("--from requires a sender email or ID")
 	}

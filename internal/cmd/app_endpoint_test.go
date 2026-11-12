@@ -236,10 +236,10 @@ func TestAppRefusesWhatItDoesNotServe(t *testing.T) {
 		{"screener", "history", "--all"},
 		{"draft", "list", "--all"},
 		{"thread", "read", "801"},
-		{"compose", "--to", "marcus@example.com", "--subject", "Saturday", "--message", "On my way"},
-		{"draft", "send", "9001"},
-		{"screener", "approve", "51"},
 		{"search", "invoice"},
+		{"draft", "delete", "9001"},
+		{"screener", "clear"},
+		{"bulk-reply", "preview", "301"},
 		{"tui"},
 		{"doctor"},
 	} {
