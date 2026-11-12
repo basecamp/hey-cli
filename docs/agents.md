@@ -207,8 +207,9 @@ thread from the Thread column of `hey local imbox`) saves a draft and answers it
 id. Writing sends nothing, and
 each run writes one more draft: nothing here edits or deletes one, so a wrong draft is yours
 to delete in HEY. The message is plain text, above your name tag; Cc, Bcc, files and a
-schedule are yours to add in HEY. A reply goes to everyone the thread's last message went
-to, as HEY's Reply does, beside any draft you have on the thread, never over it.
+schedule are yours to add in HEY. A reply answers the thread's last message and is
+addressed as HEY's own Reply addresses one; it is saved beside any draft you have on the
+thread, never over it. `hey local drafts` shows whom a draft goes to before you send it.
 `hey local drafts` marks each draft HEY would send now as `sendable`; a scheduled one sends
 on its own at its time.
 

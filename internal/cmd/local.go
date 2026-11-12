@@ -184,9 +184,6 @@ func localRefusal(name string, arguments map[string]any, result *localapp.Result
 		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("HEY's session ended while it ran %s: it may have been done", name))
 		refusal.Hint = "Check in HEY whether it was done before running it again"
 	}
-	if detail, _ := reason["detail"].(string); detail != "" {
-		refusal.Message += terminal.SanitizeLine(" (" + detail + ")")
-	}
 	arg, _ := reason["arg"].(string)
 	switch {
 	case why == "not_an_address":
@@ -233,6 +230,10 @@ func localRefusal(name string, arguments map[string]any, result *localapp.Result
 	case why == "signed_out":
 		refusal.Code = apierr.CodeAuth
 		refusal.Hint = "Sign in to HEY in the app"
+	}
+	// The app's own words, after whichever plain ones lead.
+	if detail, _ := reason["detail"].(string); detail != "" {
+		refusal.Message += terminal.SanitizeLine(" (" + detail + ")")
 	}
 	return refusal
 }

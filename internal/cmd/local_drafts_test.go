@@ -271,3 +271,31 @@ func TestLocalADraftHEYWontSendSaysSoUnderIDsOnly(t *testing.T) {
 		t.Errorf("stdout = %q, stderr = %q (%v)", stdout, stderr, err)
 	}
 }
+
+// A draft saved as some other kind than asked is the app's to explain, as one on another thread.
+func TestLocalADraftOfAnotherKindIsTheAppsToExplain(t *testing.T) {
+	door := localapptest.Start(t)
+	onTheThread := localDraftAnswer(1731280000123, "new", true)
+	onTheThread["thread"] = 801
+	door.Answer("draft.reply", onTheThread)
+	asReply := localDraftAnswer(1731280000123, "reply", true)
+	door.Answer("draft.write", asReply)
+
+	for _, args := range [][]string{{"reply", "801", "-m", "b"}, {"write", "--to", "a@example.com", "--subject", "s", "-m", "b"}} {
+		_, _, err := runLocal(t, door.Path, args...)
+		if output.ExitCodeFor(err) != output.ExitAPI || apierr.AsError(err).Hint != "Check in the HEY app what it did" {
+			t.Errorf("%v: exit = %d (%v)", args, output.ExitCodeFor(err), err)
+		}
+	}
+}
+
+// The app's own words on a refusal stay in the message, whichever plain words lead it.
+func TestLocalARefusalKeepsTheAppsDetail(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Refuse("message.send", map[string]any{"error": "not_a_sender", "draft": 1731280000123, "from": "old@hey.example", "detail": "Address removed"})
+
+	_, _, err := runLocal(t, door.Path, "send", "1731280000123")
+	if message := apierr.AsError(err).Message; !strings.HasPrefix(message, "HEY won't send draft 1731280000123") || !strings.HasSuffix(message, "(Address removed)") {
+		t.Errorf("message = %q", message)
+	}
+}

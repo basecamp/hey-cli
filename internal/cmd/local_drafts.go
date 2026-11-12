@@ -130,9 +130,16 @@ func localDraftNoun(count int) string {
 // writeLocalDraft answers a draft an agent wrote: saved, nothing sent, and how to ask HEY
 // to send it, where HEY would.
 func writeLocalDraft(cmd *cobra.Command, name string, result *localapp.Result, thread int64) error {
+	kind := "new"
+	if thread != 0 {
+		kind = "reply"
+	}
 	draft, err := decodeLocalAnswerAs(name, result, func(draft localDraft) error {
 		if err := draft.complete(); err != nil {
 			return err
+		}
+		if draft.Kind != kind {
+			return &localOtherwiseError{fmt.Sprintf("it saved draft %d as %s, not %s", draft.ID, draft.Kind, kind)}
 		}
 		if thread != 0 && (draft.Thread == nil || *draft.Thread != thread) {
 			return &localOtherwiseError{fmt.Sprintf("it saved draft %d, not a reply on thread %d", draft.ID, thread)}
