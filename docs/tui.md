@@ -94,8 +94,12 @@ network requests.
 
 Escape cancels editing a find query and keeps the previous search. Outside the prompt,
 Escape clears the search; another Escape returns to the list. Enter on an empty query
-also clears the search. `/` edits the query again. These keys belong to the open thread:
-`/` and `s` still search email from the mail list, and `n` still manages collections there.
+also clears the search. `/` edits the query again.
+
+From the mail list, `/` or `s` searches email and `n` manages collections. In an open
+thread, `/` finds body text and `s` saves the selected attachment. Enter opens the
+selected link, or the selected attachment when no link is selected, even while a find
+query is active.
 
 Sending a reply or a forward from a thread closes the thread and returns you to the list you opened it from — the Imbox, a search, a bundle. A send that fails keeps the form open — except one HEY refused and kept as a draft (usually the account's sending limit): that closes the form, since sending again would only make another draft, and says "Not sent" with the draft it was saved as. An address HEY would not deliver to keeps the form open too: the form names it (`Not a valid email address: a`) rather than sending a message HEY would quietly keep as a draft, or send without that recipient.
 

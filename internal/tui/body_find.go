@@ -49,7 +49,10 @@ func (f *bodyFind) edit(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		f.input.Blur()
 		return nil, false
 	case tea.KeyEnter:
-		f.query = terminal.SanitizeLine(strings.TrimSpace(f.input.Value()))
+		f.query = terminal.SanitizeLine(f.input.Value())
+		if strings.TrimSpace(f.query) == "" {
+			f.query = ""
+		}
 		f.editing = false
 		f.input.Blur()
 		return nil, true
@@ -225,30 +228,4 @@ func highlightBodyLine(line string, matches []highlightSpan) string {
 		out.WriteString(original.String())
 	}
 	return out.String()
-}
-
-// matchDestination reads only the safe renderer's OSC 8 metadata. Searching never
-// matches escape payloads; this is used after a visible match to select its link.
-func matchDestination(line string, start int) string {
-	position := 0
-	destination := ""
-	var state byte
-	for line != "" {
-		seq, _, n, nextState := ansi.DecodeSequence(line, state, nil)
-		state = nextState
-		if n == 0 {
-			break
-		}
-		line = line[n:]
-		if strings.HasPrefix(seq, "\x1b]8;") {
-			body := strings.TrimSuffix(strings.TrimSuffix(seq[4:], "\a"), "\x1b\\")
-			_, destination, _ = strings.Cut(body, ";")
-		} else if !strings.HasPrefix(seq, "\x1b") {
-			if position <= start && start < position+len(seq) {
-				return destination
-			}
-			position += len(seq)
-		}
-	}
-	return ""
 }

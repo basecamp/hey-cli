@@ -191,12 +191,6 @@ func precededByUnderline(out string, position int) bool {
 	return false
 }
 
-// SameURL compares a displayed destination with its OSC 8 encoding, allowing
-// percent-escape hex case and encoded non-ASCII without decoding reserved ASCII.
-func SameURL(a, b string) bool {
-	return sameURL(a, b)
-}
-
 // sameURL reports whether a and b spell the same URL: a link's text and its destination
 // can differ in the case of an escape's hex (Hyperlink writes a URL's own escapes in
 // uppercase) and in whether non-ASCII is encoded at all.

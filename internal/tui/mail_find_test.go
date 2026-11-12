@@ -10,6 +10,7 @@ import (
 
 	"github.com/basecamp/hey-cli/internal/htmlutil"
 	"github.com/basecamp/hey-cli/internal/mail"
+	"github.com/basecamp/hey-cli/internal/markdown"
 	"github.com/basecamp/hey-cli/internal/threadload"
 )
 
@@ -154,12 +155,19 @@ func TestThreadFindPreservesTheViewportTextAndFitsItsFooter(t *testing.T) {
 	}
 }
 
-func TestThreadFindEnterOnPlainTextDoesNotOpenAnAttachment(t *testing.T) {
-	m := typeBodyFind(bodyFindModel(t), "budget")
-	v := m.mailView
-	v.attachments = []messageAttachment{{}}
-	if cmd := v.HandleContentKey(keyPress("enter")); cmd != nil {
-		t.Error("Enter on a text match should not open an unrelated attachment")
+func TestThreadFindKeepsAttachmentOpeningAvailable(t *testing.T) {
+	m, events := openAttachmentLinkThreadThroughModel(t)
+	m = typeBodyFind(m, "Padding")
+	if m.mailView.LinkSelectionActive() || !hasHelpBinding(m.mailView.HelpBindings(), "enter") {
+		t.Fatal("a plain-text result should retain the attachment Enter binding")
+	}
+	_, cmd := m.Update(keyPress("enter"))
+	if cmd == nil {
+		t.Fatal("Enter did not open the selected attachment during find")
+	}
+	runCmd(cmd)
+	if strings.Join(*events, ",") != "save,open attachment" {
+		t.Errorf("Enter actions = %v, want the selected attachment opened", *events)
 	}
 }
 
@@ -315,5 +323,128 @@ func TestThreadFindFollowsTheMostRecentNavigationAfterLayoutChanges(t *testing.T
 	match, found := v.bodyFind.selected()
 	if !found || match.line < v.topicViewport.YOffset() || match.line >= v.topicViewport.YOffset()+v.topicViewport.Height() {
 		t.Error("n did not reveal the selected find result")
+	}
+}
+
+func TestThreadFindPreservesManualLinkSelectionWithoutResults(t *testing.T) {
+	m := typeBodyFind(bodyFindModel(t), "No matching phrase")
+	updated, _ := m.Update(keyPress("tab"))
+	m = updated.(model)
+	v := m.mailView
+	key := v.selectedLinkKey
+	if key == "" || v.followFind {
+		t.Fatal("Tab should select a manual link")
+	}
+	for _, action := range []string{"n", "N"} {
+		updated, _ = m.Update(keyPress(action))
+		m = updated.(model)
+		if v.selectedLinkKey != key || v.followFind {
+			t.Errorf("%s with no matches changed the manual link selection", action)
+		}
+	}
+	m = typeBodyFind(m, "")
+	if v.selectedLinkKey != key || v.followFind || m.mailView.bodyFind.active() {
+		t.Error("submitting an empty query should retain the manual link and clear find")
+	}
+}
+
+func TestThreadFindClearsItsOwnLinkAfterAnUnmatchedQuery(t *testing.T) {
+	m := typeBodyFind(bodyFindModel(t), "unsubscribe")
+	v := m.mailView
+	if !v.LinkSelectionActive() || !v.followFind {
+		t.Fatal("find should select an unsubscribe link")
+	}
+	m = typeBodyFind(m, "No matching phrase")
+	if m.mailView.LinkSelectionActive() || v.selectedLinkKey != "" {
+		t.Error("an unmatched query kept a stale find-owned link")
+	}
+}
+
+func TestThreadFindResolvesLinksWhoseOpenerIsOnAnEarlierRow(t *testing.T) {
+	v := bodyFindModel(t).mailView
+	const destination = "https://example.org/preferences"
+	lines := []string{"\x1b]8;;" + destination + "\aRead", "Unsubscribe\x1b]8;;\a"}
+	run := markdown.LinkTextRun{Spans: []markdown.TextSpan{{Line: 0, Start: 0, End: 4}, {Line: 1, Start: 0, End: 11}}}
+	v.topicLines = lines
+	v.linkBodies = []mailLinkBody{{lines: lines, linkRuns: []markdown.LinkTextRun{run}}}
+	v.links = []mailLink{{destination: destination, body: 0, key: "preferences", textRuns: []markdown.LinkTextRun{run}}}
+	v.selectedLink = -1
+	v.selectedLinkKey = ""
+	v.bodyFind.query = "unsubscribe"
+	v.scanBodyFind()
+	v.showBodyMatch()
+	if v.selectedLink != 0 {
+		t.Fatal("find did not select the link continued from the previous row")
+	}
+	var opened string
+	v.vc.openURL = func(url string) error { opened = url; return nil }
+	cmd := v.HandleContentKey(keyPress("enter"))
+	if cmd == nil {
+		t.Fatal("Enter did not return an open command for the wrapped match")
+	}
+	runCmd(cmd)
+	if opened != destination {
+		t.Errorf("opened %q, want the wrapped link's destination", opened)
+	}
+}
+
+func TestThreadFindResynchronizesLinksWhenResizeChangesResults(t *testing.T) {
+	const phrase = "Monthly newsletter subscription preferences"
+	const table = `<table><tr><th>Action</th><th>Owner</th></tr><tr><td><a href="https://example.org/first">` + phrase + `</a></td><td>Maria Gonzalez</td></tr></table>`
+	const paragraph = `<p><a href="https://example.org/second">` + phrase + `[1]</a></p>`
+	for _, testCase := range []struct {
+		name               string
+		html               string
+		fromWidth, toWidth int
+		before, after      int
+		destination        string
+	}{
+		{"earlier result appears", table + paragraph, 44, 240, 1, 2, "https://example.org/first"},
+		{"earlier result disappears", table + paragraph, 240, 44, 2, 1, "https://example.org/second"},
+		{"all results disappear", table, 240, 44, 1, 0, ""},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			m := bodyFindModel(t)
+			v := m.mailView
+			v.entries[0].Body = htmlutil.ToMarkdown(testCase.html)
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: testCase.fromWidth, Height: 40})
+			// The table marker distinguishes the cell from the plain link note.
+			m = typeBodyFind(updated.(model), phrase+"[1]")
+			if len(v.bodyFind.matches) != testCase.before || !v.LinkSelectionActive() {
+				t.Fatalf("fixture before resize: %d matches, link %d, wanted %d:\n%s\n%+v", len(v.bodyFind.matches), v.selectedLink, testCase.before, ansi.Strip(v.topicContent), v.bodyFind.matches)
+			}
+			updated, _ = m.Update(tea.WindowSizeMsg{Width: testCase.toWidth, Height: 40})
+			m = updated.(model)
+			v.Restyle()
+			if len(v.bodyFind.matches) != testCase.after {
+				t.Fatalf("after resize: %d matches, want %d", len(v.bodyFind.matches), testCase.after)
+			}
+			if testCase.destination == "" {
+				if v.LinkSelectionActive() || v.selectedLinkKey != "" {
+					t.Error("resize kept a link despite there being no find results")
+				}
+				if _, cmd := m.Update(keyPress("enter")); cmd != nil {
+					t.Error("Enter should have no link to open after all results disappear")
+				}
+				return
+			}
+			if !v.LinkSelectionActive() || v.links[v.selectedLink].destination != testCase.destination {
+				t.Fatalf("selected link %d is out of sync with the find result", v.selectedLink)
+			}
+			footer, _ := v.LinkFooter()
+			if !strings.Contains(footer, testCase.destination) {
+				t.Error("the footer does not show the current result's destination")
+			}
+			var opened string
+			v.vc.openURL = func(url string) error { opened = url; return nil }
+			_, cmd := m.Update(keyPress("enter"))
+			if cmd == nil {
+				t.Fatal("Enter did not return a command for the current result")
+			}
+			runCmd(cmd)
+			if opened != testCase.destination {
+				t.Errorf("opened stale destination %q, want %q", opened, testCase.destination)
+			}
+		})
 	}
 }

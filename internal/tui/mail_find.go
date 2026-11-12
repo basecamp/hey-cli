@@ -3,8 +3,6 @@ package tui
 import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
-
-	"github.com/basecamp/hey-cli/internal/markdown"
 )
 
 func (v *mailView) handleFindKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -19,10 +17,6 @@ func (v *mailView) handleFindKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return cmd, true
 	}
 	switch msg.String() {
-	case "enter":
-		if find.query != "" && !v.LinkSelectionActive() {
-			return nil, true
-		}
 	case "/":
 		return find.start(), true
 	case "n", "N":
@@ -31,8 +25,10 @@ func (v *mailView) handleFindKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 			if msg.String() == "N" {
 				delta = -1
 			}
-			find.next(delta)
-			v.showBodyMatch()
+			if len(find.matches) > 0 {
+				find.next(delta)
+				v.showBodyMatch()
+			}
 			return nil, true
 		}
 	}
@@ -57,29 +53,46 @@ func (v *mailView) clearBodyFind() {
 }
 
 func (v *mailView) showBodyMatch() {
-	v.followFind = true
+	if _, found := v.bodyFind.selected(); found {
+		v.followFind = true
+	}
+	if v.followFind {
+		v.selectFindLink()
+		if v.bodyFind.query == "" {
+			v.followFind = false
+		}
+	}
+	v.topicViewport.SetContentLines(v.bodyFind.highlight(v.topicLines))
+	if v.followFind {
+		v.revealBodyMatch()
+	}
+}
+
+// A find-owned link always follows the current result, including after a rescan
+// changes the result set. Manual Tab selections belong to link navigation instead.
+func (v *mailView) selectFindLink() {
 	v.restoreLinkBody(v.selectedLink)
 	v.selectedLink = -1
 	v.selectedLinkKey = ""
 	match, found := v.bodyFind.selected()
-	if found {
-		// A visible match inside a hyperlink selects that exact destination.
-		// Enter still uses the existing full-URL review footer before opening it.
-		destination := matchDestination(v.topicLines[match.line], match.start)
-		selected := -1
-		for i, link := range v.links {
-			if destination != "" && match.line >= link.startLine && match.line <= link.endLine && markdown.SameURL(destination, link.destination) {
-				selected = i
-				break
+	if !found {
+		return
+	}
+	for i, link := range v.links {
+		if link.body < 0 || link.body >= len(v.linkBodies) {
+			continue
+		}
+		start := v.linkBodies[link.body].start
+		for _, run := range link.textRuns {
+			for _, span := range run.Spans {
+				if start+span.Line == match.line && span.Start <= match.start && match.start < span.End {
+					v.selectedLink = i
+					v.selectedLinkKey = link.key
+					return
+				}
 			}
 		}
-		if selected >= 0 {
-			v.selectedLink = selected
-			v.selectedLinkKey = v.links[selected].key
-		}
 	}
-	v.topicViewport.SetContentLines(v.bodyFind.highlight(v.topicLines))
-	v.revealBodyMatch()
 }
 
 func (v *mailView) revealBodyMatch() {

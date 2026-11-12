@@ -234,3 +234,27 @@ func TestScreenerFindKeepsItsSelectedMatchVisibleAfterResize(t *testing.T) {
 		t.Error("resize hid the selected preview match")
 	}
 }
+
+func TestScreenerFindDoesNotSearchTheEmptyBodyPlaceholder(t *testing.T) {
+	view, _ := openedPreview(t)
+	view.preview.body = htmlToMarkdown("<div></div>")
+	view.preview.width = 0
+	view.layoutPreview()
+	for _, key := range []string{"/", "email", "enter"} {
+		view.HandleContentKey(keyPress(key))
+	}
+	assertNoPlaceholderMatch := func() {
+		t.Helper()
+		if len(view.preview.find.matches) != 0 || !strings.Contains(view.preview.find.footer(80), "no matches") {
+			t.Error("the empty-body placeholder was indexed as message text")
+		}
+		if !strings.Contains(plainText(view.previewView()), "this email has no text") {
+			t.Error("the empty-body placeholder should remain visible")
+		}
+	}
+	assertNoPlaceholderMatch()
+	view.vc.width = 100
+	view.Restyle()
+	view.layoutPreview()
+	assertNoPlaceholderMatch()
+}

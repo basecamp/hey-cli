@@ -270,6 +270,7 @@ type mailLink struct {
 	body        int
 	occurrence  int
 	key         string
+	textRuns    []markdown.LinkTextRun
 }
 
 type mailLinkBody struct {
@@ -2445,13 +2446,15 @@ func (v *mailView) rebuildTopicContent() {
 			break
 		}
 	}
-	if v.selectedLink < 0 {
-		v.selectedLinkKey = ""
-	} else if !v.followFind {
-		v.selectLinkBody(v.selectedLink)
-	}
 	if v.bodyFind.query != "" {
 		v.scanBodyFind()
+	}
+	if v.followFind {
+		v.selectFindLink()
+	} else if v.selectedLink >= 0 {
+		v.selectLinkBody(v.selectedLink)
+	} else {
+		v.selectedLinkKey = ""
 	}
 	v.topicViewport.SetContentLines(v.bodyFind.highlight(v.topicLines))
 }
@@ -3801,6 +3804,7 @@ func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, 
 					endLine:     bodyStartLine + occurrence.EndLine,
 					body:        bodyIndex,
 					occurrence:  i,
+					textRuns:    occurrence.TextRuns,
 					key:         key,
 				})
 			}
