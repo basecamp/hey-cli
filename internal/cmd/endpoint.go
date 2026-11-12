@@ -269,6 +269,10 @@ func appRefusal(name string, arguments map[string]any, result *localapp.Result) 
 		Meta:    map[string]any{"refusal": reason},
 	}
 	arg, _ := reason["arg"].(string)
+	if arg == "" && name == "message.send" {
+		arg = "draft"
+	}
+	_, namesIDs := reason["available"]
 	switch {
 	case why == "signed_out":
 		refusal.Code = apierr.CodeAuth
@@ -278,6 +282,11 @@ func appRefusal(name string, arguments map[string]any, result *localapp.Result) 
 		// already be done, so it is never worded as refused.
 		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("The HEY app's session ended while it ran %s: it may have been done", name))
 		refusal.Hint = "Check in HEY whether it was done before running it again"
+		if name == "message.send" {
+			// A send never goes without the person, so "done" is at most a wait.
+			refusal.Message = "The HEY app's session ended while it took the send: it may be waiting in HEY for you to press Send, and nothing has been sent without you"
+			refusal.Hint = "Look in HEY before asking again"
+		}
 	case why == "saved_not_listed":
 		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("The HEY app saved draft %v but couldn't list it back: it may be gone or changed", reason["draft"]))
 		refusal.Hint = terminal.SanitizeLine(fmt.Sprintf("Look for a draft whose id or made_as is %v in hey draft list before writing it again", reason["draft"]))
@@ -303,6 +312,10 @@ func appRefusal(name string, arguments map[string]any, result *localapp.Result) 
 	case arg != "" && appOffersNothing(reason):
 		// Nothing would do, so nothing the caller sent was wrong: the app holds none now.
 		refusal.Hint = "The HEY app holds nothing this takes now"
+	case arg != "" && namesIDs:
+		// An id the app does not hold, as the server answers one it does not: not found.
+		refusal.Code = apierr.CodeNotFound
+		refusal.Hint = terminal.SanitizeLine(appArgumentHint(arg, reason))
 	case arg != "":
 		refusal.Code = apierr.CodeUsage
 		refusal.Hint = terminal.SanitizeLine(appArgumentHint(arg, reason))

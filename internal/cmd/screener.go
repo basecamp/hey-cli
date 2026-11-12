@@ -133,6 +133,15 @@ func clearancesByAddress[T any](ctx context.Context, read pageReader[T], key fun
 	if err != nil {
 		return nil, err
 	}
+	if collected.Cursor != "" {
+		// Stopped at the cap with pages left: an address missing from what was read was
+		// not searched for, which is no answer that nobody sends from it.
+		return nil, &apierr.Error{
+			Code:    apierr.CodeAPI,
+			Message: fmt.Sprintf("The Screener holds more than %d pages, so an address could not be looked up in all of it", maxScreenerPages),
+			Hint:    "Use the clearance ID from hey screener list instead",
+		}
+	}
 	index := make(map[string][]int64)
 	for _, item := range collected.Items {
 		address, id := key(item)

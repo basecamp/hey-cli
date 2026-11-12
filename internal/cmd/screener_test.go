@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/output"
@@ -531,5 +532,29 @@ func TestScreenerAddressNobodySentIsNotFound(t *testing.T) {
 		if request.Method != http.MethodGet {
 			t.Errorf("screened someone: %+v", request)
 		}
+	}
+}
+
+// A lookup that stopped at the page cap with pages left says so, never that nobody sends
+// from the address.
+func TestScreenerAddressPastThePageCapIsNotNotFound(t *testing.T) {
+	var screened atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if req.Method != http.MethodGet {
+			screened.Add(1)
+		}
+		w.Header().Set("Link", `<https://app.hey.com/clearances.json?page=more>; rel="next"`)
+		_, _ = w.Write([]byte(`{"pending_clearances_count":5000,"clearances":[
+			{"id":91,"status":"pending","petitioner":{"id":51,"name":"Hollis Heimboch","email_address":"hollis@example.com"}}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := runScreener(t, server, "approve", "nobody@example.com")
+	if output.ExitCodeFor(err) != output.ExitAPI || !strings.Contains(err.Error(), "more than 100 pages") {
+		t.Fatalf("err = %v", err)
+	}
+	if screened.Load() != 0 {
+		t.Error("screened someone")
 	}
 }
