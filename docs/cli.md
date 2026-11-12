@@ -151,7 +151,7 @@ A repository's `.hey/config.json` may set `profiles` and `default_profile` too, 
 where a credential is sent, so hey ignores them, with a warning, until you run
 `hey config trust-local` from that directory, and again after any change to them. A trusted
 repository may add profiles, but an entry that would move a global profile to another server is
-ignored, with a warning. `hey profile delete` revokes a sign-in only at the server that issued it, and refuses a profile a trusted repository config also sets, since that entry would bring it back; `hey auth logout --mcp -P <name>` revokes only there too.
+ignored, with a warning. `hey profile delete` revokes a sign-in only at the server that issued it, and refuses a profile whose entry in a trusted repository config has a `base_url`, alone or beside the global one, since that entry would keep the profile there; `hey auth logout --mcp -P <name>` revokes only there too.
 
 JSON answers carry `meta.profile` while a profile is active. `hey auth status`, `hey config show`
 and `hey doctor` name it as well.
