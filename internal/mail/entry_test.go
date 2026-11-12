@@ -86,7 +86,9 @@ func TestNewEntryKeepsTheEnvelopeApartFromTheResolvedContact(t *testing.T) {
 		}},
 	})
 
-	if got, want := entry.Recipients.To[0], (Contact{ID: 21, Name: "Elija Sorensen", EmailAddress: "eli@example.com"}); got != want {
+	if len(entry.Recipients.To) != 1 {
+		t.Errorf("to = %+v, want one recipient", entry.Recipients.To)
+	} else if got, want := entry.Recipients.To[0], (Contact{ID: 21, Name: "Elija Sorensen", EmailAddress: "eli@example.com"}); got != want {
 		t.Errorf("to = %+v, want %+v", got, want)
 	}
 	if len(entry.Recipients.Cc) != 1 || entry.Recipients.Cc[0].EmailAddress != "sam@example.com" {

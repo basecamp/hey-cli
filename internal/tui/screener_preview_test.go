@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 // openedPreview presses space on the first sender and lands the email it reads.
@@ -181,7 +184,7 @@ func TestScreenerPreviewHidesTheEnvelopeUntilTheMessageArrives(t *testing.T) {
 // A long email scrolls inside the preview; the header stays put.
 func TestScreenerPreviewScrolls(t *testing.T) {
 	view, _ := openedPreview(t)
-	view.vc.height = 6
+	view.vc.height = 10
 	view.preview.body = htmlToMarkdown(strings.Repeat("<p>Another paragraph about the quarterly budget.</p>", 30))
 	view.preview.width = 0
 
@@ -294,4 +297,63 @@ func TestScreenerFindDoesNotSearchTheEmptyBodyPlaceholder(t *testing.T) {
 	view.Restyle()
 	view.layoutPreview()
 	assertNoPlaceholderMatch()
+}
+
+func TestScreenerPreviewFitsShortTerminals(t *testing.T) {
+	view, _ := openedPreview(t)
+	view.preview.recipients.Bcc = []mail.Contact{{EmailAddress: "audit@example.org"}}
+	for _, height := range []int{1, 3, 6, 7, 8, 20, 6, 20} {
+		for _, notice := range []string{"", "Screening decision saved"} {
+			t.Run(fmt.Sprintf("height=%d/notice=%s", height, notice), func(t *testing.T) {
+				view.vc.height = height
+				view.notice = notice
+				view.preview.viewport.GotoTop()
+				screen := view.previewView()
+				if rows := strings.Count(screen, "\n") + 1; rows > height {
+					t.Fatalf("preview uses %d rows with %d available:\n%s", rows, height, plainText(screen))
+				}
+				seen := ansi.Strip(screen)
+				for !view.preview.viewport.AtBottom() {
+					view.HandleContentKey(keyPress("down"))
+					seen += ansi.Strip(view.previewView())
+				}
+				for _, want := range []string{"Via  eli+screen@example.com", "To   Elija Sorensen", "Cc   Sam Rivera", "Bcc  audit@example.org", "walk through the budget"} {
+					if !strings.Contains(seen, want) {
+						t.Errorf("preview lost %q while scrolling:\n%s", want, seen)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestScreenerFindWithScrollingEnvelopeHeaders(t *testing.T) {
+	view, _ := openedPreview(t)
+	view.preview.recipients.Bcc = []mail.Contact{{EmailAddress: "audit@example.org"}}
+	view.preview.body = htmlToMarkdown("<p>Monthly newsletter.</p>" + strings.Repeat("<p>News from the team.</p>", 10) +
+		`<p><a href="https://example.org/newsletter/unsubscribe">Unsubscribe preferences</a></p>`)
+	view.preview.width = 0
+	for _, height := range []int{6, 20, 6} {
+		view.vc.height = height
+		view.layoutPreview()
+		for _, key := range []string{"/", "unsubscribe", "enter"} {
+			view.HandleContentKey(keyPress(key))
+		}
+		match, found := view.preview.find.selected()
+		if !found || !strings.Contains(strings.ToLower(ansi.Strip(view.preview.lines[match.line])), "unsubscribe") {
+			t.Fatalf("height %d: find coordinates do not identify the body match", height)
+		}
+		if match.line < view.preview.viewport.YOffset() || match.line >= view.preview.viewport.YOffset()+view.preview.viewport.Height() {
+			t.Fatalf("height %d: selected match is outside the viewport", height)
+		}
+		view.HandleContentKey(keyPress("esc"))
+		view.preview.viewport.GotoTop()
+		for _, key := range []string{"/", "audit@example.org", "enter"} {
+			view.HandleContentKey(keyPress(key))
+		}
+		if len(view.preview.find.matches) != 0 {
+			t.Fatalf("height %d: find searched the envelope header", height)
+		}
+		view.HandleContentKey(keyPress("esc"))
+	}
 }

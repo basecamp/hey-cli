@@ -4950,3 +4950,19 @@ func TestMailViewTrashFailureKeepsSelection(t *testing.T) {
 		t.Errorf("postings = %d selected = %v, want both rows still selected", len(v.postingList.postings), v.postingList.selectedIDs())
 	}
 }
+
+func TestRenderEntriesFitsLongSenderBesideDate(t *testing.T) {
+	v := newMailView(testVC())
+	entry := mail.Entry{
+		Creator:   mail.Contact{Name: strings.Repeat("Maria Gonzalez ", 8), EmailAddress: "maria.gonzalez@example.org"},
+		BodyState: string(threadload.StateHydrated),
+	}
+	for _, width := range []int{20, 40, 80} {
+		v.vc.width = width
+		rendered := ansi.Strip(mustRender(t, v, []mail.Entry{entry}))
+		heading := strings.Split(strings.TrimLeft(rendered, "\n"), "\n")[0]
+		if got := displayWidth(heading); got > width {
+			t.Errorf("sender heading is %d columns with %d available: %q", got, width, heading)
+		}
+	}
+}
