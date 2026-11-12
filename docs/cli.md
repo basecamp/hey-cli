@@ -129,8 +129,9 @@ Each profile's credential is stored under its own key (`profile:<name>`), and `h
 `mcp:profile:<name>`, so no profile, and not the top-level configuration, reads another's.
 `hey auth login -P <name>` signs a profile in again. A profile's response cache is its own too.
 
-A profile's `base_url` and `account_id` replace the top-level ones; `HEY_BASE_URL`,
-`HEY_ACCOUNT_ID`, `--base-url` and `--account` still win over them for one invocation. A profile
+A profile's `base_url` and `account_id` replace the top-level ones. `HEY_ACCOUNT_ID` and
+`--account` still win over the account for one invocation, but a profile's credential goes only
+to its own server: `HEY_BASE_URL` or `--base-url` naming another one is refused. A profile
 that names no account uses All Accounts rather than the top-level account default, which belongs
 to the top-level sign-in; `hey account use` under a profile saves the account on the profile.
 
@@ -148,7 +149,9 @@ Profiles live in the global config:
 
 A repository's `.hey/config.json` may set `profiles` and `default_profile` too, but they choose
 where a credential is sent, so hey ignores them, with a warning, until you run
-`hey config trust-local` from that directory, and again after any change to them.
+`hey config trust-local` from that directory, and again after any change to them. A trusted
+repository may add profiles, but an entry that would move a global profile to another server is
+ignored, with a warning. `hey profile delete` revokes a sign-in only at the server that issued it.
 
 JSON answers carry `meta.profile` while a profile is active. `hey auth status`, `hey config show`
 and `hey doctor` name it as well.

@@ -103,14 +103,23 @@ func TestApplyProfileTakesItsServerAndAccount(t *testing.T) {
 	}
 
 	t.Setenv("HEY_BASE_URL", "https://beta.hey.com")
+	cfg, _ = Load()
+	if err := cfg.ApplyProfile("staging", SourceFlag); err == nil || cfg.ActiveProfile != "" {
+		t.Errorf("HEY_BASE_URL on another server took the profile's credential there: %v", err)
+	}
+	t.Setenv("HEY_BASE_URL", "https://STAGING.hey.com:443")
 	t.Setenv("HEY_ACCOUNT_ID", "5")
 	cfg, _ = Load()
 	if err := cfg.ApplyProfile("staging", SourceFlag); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.BaseURL != "https://beta.hey.com" || cfg.AccountID != "5" {
+	if cfg.AccountID != "5" || cfg.SourceOf("base_url") != SourceEnv {
 		t.Errorf("the environment lost to the profile: %q %q", cfg.BaseURL, cfg.AccountID)
 	}
+	if err := cfg.SetFromFlag("base_url", "https://beta.hey.com"); err == nil {
+		t.Error("--base-url on another server was taken under a profile")
+	}
+	t.Setenv("HEY_ACCOUNT_ID", "")
 
 	t.Setenv("HEY_BASE_URL", "")
 	cfg, _ = Load()

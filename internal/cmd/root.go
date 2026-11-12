@@ -605,7 +605,10 @@ func selectProfile(cmd *cobra.Command) error {
 		return nil
 	}
 	bareRoot := cmd.Parent() == nil
-	name, source, err := resolveProfile(cmd, cfg, bareRoot || commandMayRunWithoutProfile(cmd))
+	// Shell completion asks for -P's candidates in exactly the state where none is
+	// selected yet.
+	completing := cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd
+	name, source, err := resolveProfile(cmd, cfg, bareRoot || completing || commandMayRunWithoutProfile(cmd))
 	if err != nil {
 		if bareRoot {
 			return nil

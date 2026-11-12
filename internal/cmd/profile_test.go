@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -223,21 +224,49 @@ func TestProfileResolutionOrder(t *testing.T) {
 	}
 }
 
-// HEY_BASE_URL and --base-url still win over a profile's server, as basecamp-cli's
-// BASECAMP_BASE_URL and its flag do, and the credential stays the profile's.
-func TestEnvironmentAndFlagsOverrideTheProfile(t *testing.T) {
+// A profile's credential is keyed by its name, so an override naming another server is
+// refused before anything is sent there; the same server, spelled another way, and an
+// account override still apply.
+func TestAProfilesCredentialNeverGoesToAnOverridingServer(t *testing.T) {
 	home := profileTestHome(t)
-	server := noRequestServer(t)
-	writeProfileTestConfig(t, home, `{"profiles":{"staging":{"base_url":"https://staging.hey.com","account_id":"42"}}}`)
+	var elsewhere []string
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		elsewhere = append(elsewhere, r.Method+" "+r.URL.Path+" "+r.Header.Get("Authorization"))
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(other.Close)
+	own := noRequestServer(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"`+own.URL+`","account_id":"42"}}}`)
+	store := auth.NewStore(filepath.Join(home, "hey-cli"))
+	if err := store.Save("profile:work", &auth.Credentials{AccessToken: "work-access", RefreshToken: "work-refresh", OAuthType: "oauth"}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HEY_BASE_URL", other.URL)
+	_, _, err := runProfileJSON(t, "account", "list")
+	if got := errorMessage(err); got != fmt.Sprintf("HEY_BASE_URL %s is not profile \"work\"'s server (%s)", other.URL, own.URL) {
+		t.Errorf("env override: %q", got)
+	}
+	t.Setenv("HEY_BASE_URL", "")
+	_, _, err = runProfileJSON(t, "--base-url", other.URL, "account", "list")
+	if got := errorMessage(err); !strings.Contains(got, "--base-url "+other.URL+" is not profile \"work\"'s server") {
+		t.Errorf("flag override: %q", got)
+	}
+	_, _, err = runProfileJSON(t, "--base-url", other.URL, "auth", "login", "--token", "other-token")
+	if err == nil {
+		t.Error("a sign-in at another server replaced the profile's credential")
+	}
+	if len(elsewhere) != 0 {
+		t.Errorf("the overriding server was reached: %v", elsewhere)
+	}
 
 	t.Setenv("HEY_ACCOUNT_ID", "7")
-	response, _, err := runProfileJSON(t, "--base-url", server.URL, "auth", "status")
+	response, _, err := runProfileJSON(t, "--base-url", own.URL+"/", "auth", "status")
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := statusData(t, response)
-	if data["base_url"] != server.URL || data["mail_account"] != "7" || data["account_source"] != "env" {
-		t.Errorf("status = %#v, want the flag's server and the env's account", data)
+	if data := statusData(t, response); data["mail_account"] != "7" || data["account_source"] != "env" || data["profile"] != "work" {
+		t.Errorf("status = %#v, want the env's account on the profile", data)
 	}
 	t.Setenv("HEY_ACCOUNT_ID", "")
 	response, _, err = runProfileJSON(t, "auth", "status")
@@ -246,6 +275,86 @@ func TestEnvironmentAndFlagsOverrideTheProfile(t *testing.T) {
 	}
 	if data := statusData(t, response); data["mail_account"] != "42" || data["account_source"] != "profile" {
 		t.Errorf("status = %#v, want the profile's account", data)
+	}
+}
+
+// A trusted repository may add profiles, but not move a global one, whose credential
+// is keyed by its name, to another server.
+func TestARepositoryCannotMoveAGlobalProfile(t *testing.T) {
+	home := profileTestHome(t)
+	server := noRequestServer(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"work":{"base_url":"`+server.URL+`"}}}`)
+	workspace := filepath.Join(home, "workspace")
+	if err := os.MkdirAll(filepath.Join(workspace, ".hey"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	local := `{"profiles":{"work":{"base_url":"https://other.example.com"},"extra":{"base_url":"https://extra.example.com"}}}`
+	if err := os.WriteFile(filepath.Join(workspace, ".hey", "config.json"), []byte(local), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(workspace)
+	if _, _, err := runProfileJSON(t, "config", "trust-local"); err != nil {
+		t.Fatal(err)
+	}
+
+	response, stderr, err := runProfileJSON(t, "-P", "work", "auth", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data := statusData(t, response); data["base_url"] != server.URL {
+		t.Errorf("the repository moved work: %#v", data)
+	}
+	if !strings.Contains(stderr, `warning: ignoring profile "work" from local config at`) {
+		t.Errorf("stderr = %q", stderr)
+	}
+	response, _, err = runProfileJSON(t, "-P", "extra", "auth", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data := statusData(t, response); data["base_url"] != "https://extra.example.com" {
+		t.Errorf("a new repository profile was not added: %#v", data)
+	}
+}
+
+func TestProfileDeleteRevokesOnlyWhereTheSignInWasIssued(t *testing.T) {
+	home := profileTestHome(t)
+	server := noRequestServer(t)
+	writeProfileTestConfig(t, home, `{"profiles":{
+		"moved":{"base_url":"`+server.URL+`"},
+		"plain":{"base_url":"http://staging.example.com"}}}`)
+	store := auth.NewStore(filepath.Join(home, "hey-cli"))
+	if err := store.Save("profile:moved", &auth.Credentials{RefreshToken: "moved-refresh", TokenEndpoint: "https://app.hey.com/oauth/tokens", OAuthType: "oauth"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save("profile:plain", &auth.Credentials{RefreshToken: "plain-refresh", OAuthType: "oauth"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"moved", "plain"} {
+		response, stderr, err := runProfileJSON(t, "profile", "delete", name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if data := statusData(t, response); data["revoked"] != false {
+			t.Errorf("%s: %#v", name, data)
+		}
+		if !strings.Contains(stderr, "warning: not revoking profile") {
+			t.Errorf("%s stderr = %q", name, stderr)
+		}
+	}
+	if keys := storedCredentialKeys(t, home); len(keys) != 0 {
+		t.Errorf("stored keys = %v", keys)
+	}
+}
+
+func TestProfileCompletionRunsWithNoneSelected(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"profiles":{"beta":{"base_url":"https://beta.hey.com"},"work":{"base_url":"https://app.hey.com"}}}`)
+	stdout, _, err := runProfileCLI(t, "__complete", "-P", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "beta\thttps://beta.hey.com") || !strings.Contains(stdout, "work\thttps://app.hey.com") {
+		t.Errorf("completion = %q", stdout)
 	}
 }
 

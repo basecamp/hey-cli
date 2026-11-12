@@ -65,6 +65,7 @@ type fileConfig struct {
 	profiles       map[string]profileEntry
 	profilesRaw    map[string]json.RawMessage
 	hasProfiles    bool
+	path           string
 	defaultProfile string
 }
 
@@ -268,7 +269,7 @@ func readFileConfig(path string) (fileConfig, error) {
 	if unmarshalErr := json.Unmarshal(data, &keys); unmarshalErr != nil {
 		return fileConfig{}, fmt.Errorf("could not parse config %s: %w", path, unmarshalErr)
 	}
-	file.profilesRaw, file.hasProfiles, file.defaultProfile = keys.Profiles, len(keys.Profiles) > 0, keys.DefaultProfile
+	file.profilesRaw, file.hasProfiles, file.defaultProfile, file.path = keys.Profiles, len(keys.Profiles) > 0, keys.DefaultProfile, path
 	if file.profiles, err = parseProfiles(path, keys.Profiles); err != nil {
 		return fileConfig{}, err
 	}
@@ -337,6 +338,9 @@ func (c *Config) SetFromFlag(key, value string) error {
 	case "base_url":
 		if err := validateBaseURL(value); err != nil {
 			return err
+		}
+		if p := c.Profiles[c.ActiveProfile]; p != nil && originOrSelf(value) != originOrSelf(p.BaseURL) {
+			return errProfileServerOverride("--base-url", value, c.ActiveProfile, p.BaseURL)
 		}
 		accountSource := c.SourceOf("account_id")
 		c.BaseURL = value

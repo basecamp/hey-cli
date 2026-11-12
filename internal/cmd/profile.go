@@ -318,7 +318,7 @@ func newProfileDeleteCommand() *cobra.Command {
 				managers = append(managers, mcp)
 			}
 			for _, mgr := range managers {
-				revoked, err := revokeAndForget(cmd, mgr, name)
+				revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
 				if err != nil {
 					// Written straight to the terminal, so the store's error text is
 					// scrubbed here rather than at a sink.
@@ -342,7 +342,11 @@ func newProfileDeleteCommand() *cobra.Command {
 // revokeAndForget revokes a stored OAuth sign-in at HEY, then deletes the credential.
 // revoked is nil when there was no sign-in to revoke: none stored, or a pasted
 // --token, which hey did not issue and so does not revoke.
-func revokeAndForget(cmd *cobra.Command, mgr *auth.Manager, name string) (*bool, error) {
+//
+// The refresh token goes only to a server hey would send it to, and only to the one
+// that issued it: a base_url edited since the sign-in, or one on plain HTTP, gets
+// nothing, and the credential is removed unrevoked with a warning.
+func revokeAndForget(cmd *cobra.Command, mgr *auth.Manager, name, baseURL string) (*bool, error) {
 	creds, err := mgr.GetStore().Load(mgr.CredentialKey())
 	if errors.Is(err, auth.ErrCredentialsNotFound) {
 		return nil, nil
@@ -351,7 +355,11 @@ func revokeAndForget(cmd *cobra.Command, mgr *auth.Manager, name string) (*bool,
 		return nil, err
 	}
 	var revoked *bool
-	if creds.RefreshToken != "" {
+	if creds.RefreshToken != "" && !revocableAt(baseURL, creds.TokenEndpoint) {
+		no := false
+		revoked = &no
+		fmt.Fprintln(cmd.ErrOrStderr(), terminal.SanitizeLine(fmt.Sprintf("warning: not revoking profile %q's sign-in at %s, which did not issue it or takes no credential; remove it in HEY's Connected Apps", name, baseURL)))
+	} else if creds.RefreshToken != "" {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 		revokeErr := mgr.Revoke(ctx)
 		cancel()
@@ -362,6 +370,23 @@ func revokeAndForget(cmd *cobra.Command, mgr *auth.Manager, name string) (*bool,
 		}
 	}
 	return revoked, mgr.Logout()
+}
+
+// revocableAt reports whether a profile's server may take its refresh token back: a
+// server hey sends credentials to, and the one whose token endpoint issued it.
+func revocableAt(baseURL, tokenEndpoint string) bool {
+	if config.ValidateBaseURL(baseURL) != nil {
+		return false
+	}
+	if tokenEndpoint == "" {
+		return true
+	}
+	profileOrigin, err := config.Origin(baseURL)
+	if err != nil {
+		return false
+	}
+	issuer, err := config.Origin(tokenEndpoint)
+	return err == nil && issuer == profileOrigin
 }
 
 func newProfileSetDefaultCommand() *cobra.Command {

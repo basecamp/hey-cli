@@ -106,8 +106,18 @@ func promptForLocalConfigTrust(cmd *cobra.Command, local *config.LocalConfig) (l
 	fmt.Fprintf(w, "  Configuration:       %s\n", terminal.SanitizeLine(local.Path))
 	fmt.Fprintf(w, "  Local server:        %s\n", localTrustDisplayValue(local.BaseURL))
 	fmt.Fprintf(w, "  Local mail account:  %s\n", localTrustDisplayValue(local.AccountID))
-	if len(local.ProfileNames) > 0 {
-		fmt.Fprintf(w, "  Local profiles:      %s\n", terminal.SanitizeLine(strings.Join(local.ProfileNames, ", ")))
+	for i, name := range local.ProfileNames {
+		label := "  Local profiles:      "
+		if i > 0 {
+			label = "                       "
+		}
+		server := "(no base_url)"
+		if entry, ok := local.Profiles[name].(map[string]any); ok {
+			if baseURL, ok := entry["base_url"].(string); ok && baseURL != "" {
+				server = baseURL
+			}
+		}
+		fmt.Fprintf(w, "%s%s  %s\n", label, terminal.SanitizeLine(name), terminal.SanitizeLine(server))
 	}
 	if local.DefaultProfile != "" {
 		fmt.Fprintf(w, "  Local default:       %s\n", terminal.SanitizeLine(local.DefaultProfile))

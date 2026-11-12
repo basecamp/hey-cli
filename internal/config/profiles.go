@@ -139,6 +139,13 @@ func (c *Config) applyFileProfiles(file fileConfig, source Source) {
 		c.Profiles = make(map[string]*ProfileConfig, len(file.profiles))
 	}
 	for name, entry := range file.profiles {
+		// A credential is keyed by the profile's name, so a repository entry that
+		// moved a global profile to another server would take its sign-in there.
+		if existing := c.Profiles[name]; source == SourceLocal && existing != nil && originOrSelf(existing.BaseURL) != originOrSelf(entry.BaseURL) {
+			c.warnings = append(c.warnings, fmt.Sprintf("warning: ignoring profile %q from local config at %s: it names %s, and the global config's %q is for %s",
+				terminal.SanitizeLine(name), terminal.SanitizeLine(file.path), terminal.SanitizeLine(entry.BaseURL), terminal.SanitizeLine(name), terminal.SanitizeLine(existing.BaseURL)))
+			continue
+		}
 		mergeProfile(c.Profiles, name, entry)
 	}
 	if file.defaultProfile != "" {
@@ -195,6 +202,13 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	if c.sources == nil {
 		c.sources = map[string]Source{}
 	}
+	// The credential is keyed by the profile's name, not by a server, so nothing
+	// downstream would notice it going elsewhere: an override naming another server is
+	// refused rather than sent the profile's token.
+	if c.SourceOf("base_url") == SourceEnv && originOrSelf(c.BaseURL) != originOrSelf(p.BaseURL) {
+		return errProfileServerOverride("HEY_BASE_URL", c.BaseURL, name, p.BaseURL)
+	}
+	filesOrigin := originOrSelf(c.BaseURL)
 	c.ActiveProfile = name
 	c.sources["profile"] = source
 	if c.SourceOf("base_url") != SourceEnv {
@@ -206,7 +220,9 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	case p.AccountID != "":
 		c.AccountID = p.AccountID
 		c.sources["account_id"] = SourceProfile
-	case c.SourceOf("account_id") == SourceGlobal:
+	case c.SourceOf("account_id") == SourceGlobal,
+		// A repository's account was trusted for the files' server, not another one.
+		c.SourceOf("account_id") == SourceLocal && filesOrigin != originOrSelf(p.BaseURL):
 		c.AccountID = AllAccounts
 		c.sources["account_id"] = SourceDefault
 	}
@@ -215,6 +231,12 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	// by that record before any profile was chosen. Re-reading it against the
 	// profile's server would ignore the profiles it had just approved on the next run.
 	return nil
+}
+
+func errProfileServerOverride(by, override, name, profileURL string) error {
+	return apierr.ErrUsageHint(
+		fmt.Sprintf("%s %s is not profile %q's server (%s)", by, terminal.SanitizeLine(override), name, terminal.SanitizeLine(profileURL)),
+		"A profile's credential goes only to its own server. Drop the override, or use another profile: hey profile create")
 }
 
 // GlobalConfigTakesProfiles reports whether the global config file can take a profile
