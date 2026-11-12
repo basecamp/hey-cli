@@ -714,6 +714,9 @@ func TestLocalListingsRefuseAnswersMissingWhatTheirZeroWouldClaim(t *testing.T) 
 		{"no waiting_count", "screener.list", map[string]any{"waiting": []any{waiting}, "decided": []any{decided}}, []string{"screener", "list"}},
 		{"waiting sender null", "screener.list", map[string]any{"waiting": []any{nil}, "waiting_count": 1, "decided": []any{}}, []string{"screener", "list", "--ids-only"}},
 		{"decided without id", "screener.list", map[string]any{"waiting": []any{}, "waiting_count": 0, "decided": []any{without(decided, "id")}}, []string{"screener", "list", "--ids-only"}},
+		{"draft without id", "drafts.list", map[string]any{"drafts": []any{map[string]any{"kind": "new", "sendable": true}}}, []string{"drafts", "--ids-only"}},
+		{"draft without sendable", "drafts.list", map[string]any{"drafts": []any{map[string]any{"id": 7, "kind": "new"}}}, []string{"drafts", "--styled"}},
+		{"no drafts", "drafts.list", map[string]any{}, []string{"drafts"}},
 		{"decided without screened_in", "screener.list", map[string]any{"waiting": []any{}, "waiting_count": 0, "decided": []any{without(decided, "screened_in")}}, []string{"screener", "list", "--styled"}},
 	}
 	for _, tc := range cases {

@@ -177,7 +177,10 @@ hey local tools                        # what the app offers now, and what each 
 hey local imbox                        # the Imbox, marking nothing seen
 hey local screener list                # who waits in The Screener, and who was decided
 hey local screener deny 42             # screen sender 42 out; undo with approve
-hey local send 1731280000123           # ask to send a saved draft: you confirm it in HEY
+hey local drafts                       # the app's drafts, and which it would send now
+hey local write --to marcus@example.com --subject "Stint plan" -m "Saturday works"
+hey local reply 801 -m "Saturday works"  # a reply to Imbox thread 801, as a draft
+hey local send 1731280000123           # ask to send a draft: you confirm it in HEY
 hey local call screener.decide --arg sender=42 --arg decision=in
 ```
 
@@ -185,19 +188,38 @@ Each command the app offers names its effect, and the effect decides what happen
 
 | Effect | What happens | Commands |
 |--------|--------------|----------|
-| `read` | Runs, and changes nothing | `imbox.list`, `screener.list` |
-| `reversible` | Runs at once, and can be undone | `screener.decide` |
+| `read` | Runs, and changes nothing | `imbox.list`, `screener.list`, `drafts.list` |
+| `reversible` | Runs at once, and can be undone | `screener.decide`, `draft.write`, `draft.reply` |
 | `reaches_people` | Waits in the HEY window until you press Send there | `message.send` |
 
 Nothing that can't be undone, like emptying Trash or Spam, is offered at all. A send never
 goes from `hey local`: the app shows you the sending address, recipients, subject, body
 and files exactly as they would go, and sends only when you press Send in its window.
 `hey local send` then exits 9 and says "Waiting in HEY": neither done (0) nor failed.
-It takes the HEY app's own id for a draft already saved in the app, not the id `hey draft
-list` shows, and no command lists the app's drafts yet: a send refused for its draft names
-the ids the app would take, in `meta.refusal.available`. Its
-JSON envelope carries `meta.status: "pending"`, the confirmation's id and what you were
+It takes the HEY app's own id for a draft, not the id `hey draft list` shows: the id
+`hey local write` or `hey local reply` answered, or one `hey local drafts` lists (its `id`,
+or its `made_as`, the id it was written as before HEY named it). Its JSON envelope carries `meta.status: "pending"`, the confirmation's id and what you were
 shown. No command or flag here can confirm it.
+
+So an agent can carry a message end to end: `hey local write` (or `hey local reply` with a
+thread from the Thread column of `hey local imbox`) saves a draft and answers its id, and
+`hey local send <id>` asks HEY to send it, which waits for you. Writing sends nothing, and
+each run writes one more draft: nothing here edits or deletes one, so a wrong draft is yours
+to delete in HEY. The message is plain text, above your name tag; Cc, Bcc, files and a
+schedule are yours to add in HEY. A reply goes to everyone the thread's last message went
+to, as HEY's Reply does, beside any draft you have on the thread, never over it.
+`hey local drafts` marks each draft HEY would send now as `sendable`; a scheduled one sends
+on its own at its time.
+
+The draft commands' refusals say what happened, and nothing was saved or waits:
+
+| Refusal | Exit | Means |
+|---------|------|-------|
+| `not_an_address` | 1 | Pieces of `--to` read as no address; the message names them |
+| `not_saved` | 1 or 7 | Past what HEY takes of one message: too many people, too many files, or too large. 1 where the words or `--to` were yours to change; 7 where a reply's recipients or files come from the thread |
+| `not_a_sender` | 7 | The draft goes from an address this account no longer sends from; change From in HEY, or write a new draft |
+| `disabled` | 1 | `send` of a draft HEY won't send now (scheduled, to nobody, a file still uploading, or a forward); the hint lists those it would |
+| `unavailable` | 7 | `reply` of a thread the app couldn't read |
 
 `hey local call <command>` runs any command `hey local tools` lists. Arguments come as a
 JSON object, as `--arg name=value` pairs, or both, the pairs over the object; a value is

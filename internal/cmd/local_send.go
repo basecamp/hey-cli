@@ -33,7 +33,7 @@ window.
 hey local send never sends anything itself: it exits 9 and says "Waiting in HEY".
 Asking again while the same draft waits answers the same confirmation.`,
 		Annotations: map[string]string{
-			"agent_notes": "Always exits 9 (pending) when the app takes the draft: nothing is sent until the person presses Send in the HEY window, and no command or flag here can press it. Tell the person it waits for them in HEY; never say it was sent. The draft ID is the HEY app's own, not hey draft list's.",
+			"agent_notes": "Always exits 9 (pending) when the app takes the draft: nothing is sent until the person presses Send in the HEY window, and no command or flag here can press it. Tell the person it waits for them in HEY; never say it was sent. The draft ID is the HEY app's own, not hey draft list's: the id hey local write or reply answered, or a draft's id or made_as from hey local drafts.",
 		},
 		Example: `  hey local send 1731280000123
   hey local send 1731280000123 --json`,

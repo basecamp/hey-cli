@@ -285,13 +285,20 @@ hey local
 hey local --socket
 hey local call
 hey local call --arg
+hey local drafts
 hey local imbox
+hey local reply
+hey local reply --message
 hey local screener
 hey local screener approve
 hey local screener deny
 hey local screener list
 hey local send
 hey local tools
+hey local write
+hey local write --message
+hey local write --subject
+hey local write --to
 hey login
 hey login --cookie
 hey login --mcp

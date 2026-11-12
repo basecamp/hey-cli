@@ -55,7 +55,7 @@ The door is a Unix socket at $XDG_RUNTIME_DIR/hey/agent.sock. --socket or
 HEY_LOCAL_SOCKET points hey local at another one. The HEY app opens the door on
 Linux; on other systems there is nothing for hey local to talk to yet.`,
 		Annotations: map[string]string{
-			"agent_notes": "hey local talks to the person's own HEY app, not to HEY's servers, and works only while the app is running with \"Let agents use HEY\" on. `hey local tools` lists what the app offers now, with each command's effect. Reads change nothing and mark nothing seen. A screening decision runs at once and is undone with the opposite decision. A send never goes from here: it exits 9, pending, and waits for the person to press Send in the HEY window, so say it is waiting for them, never that it was sent. Exit 6 with a hint means the door is off or the app is closed: ask the person to turn on \"Let agents use HEY\" in the app's Settings.",
+			"agent_notes": "hey local talks to the person's own HEY app, not to HEY's servers, and works only while the app is running with \"Let agents use HEY\" on. `hey local tools` lists what the app offers now, with each command's effect. Reads change nothing and mark nothing seen. A screening decision runs at once and is undone with the opposite decision. hey local write and reply save a draft, send nothing, and answer the id hey local send takes. A send never goes from here: it exits 9, pending, and waits for the person to press Send in the HEY window, so say it is waiting for them, never that it was sent. Exit 6 with a hint means the door is off or the app is closed: ask the person to turn on \"Let agents use HEY\" in the app's Settings.",
 		},
 	}
 
@@ -65,6 +65,9 @@ Linux; on other systems there is nothing for hey local to talk to yet.`,
 	localCommand.cmd.AddCommand(newLocalCallCommand().cmd)
 	localCommand.cmd.AddCommand(newLocalImboxCommand().cmd)
 	localCommand.cmd.AddCommand(newLocalScreenerCommand().cmd)
+	localCommand.cmd.AddCommand(newLocalDraftsCommand().cmd)
+	localCommand.cmd.AddCommand(newLocalWriteCommand().cmd)
+	localCommand.cmd.AddCommand(newLocalReplyCommand().cmd)
 	localCommand.cmd.AddCommand(newLocalSendCommand().cmd)
 	return localCommand
 }
@@ -104,7 +107,7 @@ func callLocal(cmd *cobra.Command, name string, arguments map[string]any) (*loca
 		return nil, err
 	}
 	if result.IsError {
-		return nil, localRefusal(name, result)
+		return nil, localRefusal(name, arguments, result)
 	}
 	if pending, ok := result.Pending(); ok {
 		return nil, writeLocalPending(cmd, pending)
@@ -161,7 +164,7 @@ func localFailure(err error) error {
 // refusal that names an argument is a usage error, with what the argument would take; the
 // app signed out of HEY is an auth one, though not the CLI's sign-in; anything else, a list
 // the app could not load included, is the app's to explain.
-func localRefusal(name string, result *localapp.Result) error {
+func localRefusal(name string, arguments map[string]any, result *localapp.Result) error {
 	// Numbers kept as written, so an id past a million is hinted as an id, not 1.7e+12.
 	var reason map[string]any
 	_ = decodeJSONExactly(string(result.Answer()), &reason)
@@ -186,6 +189,29 @@ func localRefusal(name string, result *localapp.Result) error {
 	}
 	arg, _ := reason["arg"].(string)
 	switch {
+	case why == "not_an_address":
+		// The pieces of --to that read as no address; nothing was written.
+		refusal.Code = apierr.CodeUsage
+		refusal.Message = terminal.SanitizeLine("HEY can't read these as addresses: " + localJoined(reason["given"]))
+		refusal.Hint = "Give --to as addresses, or Name <address>, separated by commas"
+	case why == "not_saved":
+		localNotSaved(refusal, name, reason)
+	case why == "not_a_sender":
+		// No confirmation waits and no sheet shows: HEY would refuse it at Send.
+		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("HEY won't send draft %v: it goes from %v, which this account no longer sends from", reason["draft"], reason["from"]))
+		refusal.Hint = "Change From in HEY, or write a new draft with hey local write"
+	case why == "unavailable" && arg == "" && name == "draft.reply":
+		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("HEY couldn't read thread %v", arguments["thread"]))
+		refusal.Hint = "hey local imbox lists the threads a reply takes, in its Thread column"
+	case why == "disabled" && name == "message.send":
+		// The draft is there, but not one HEY would ask to send now; available lists those it would.
+		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("HEY won't send draft %v now: it is scheduled, goes to nobody, has a file still uploading, or is a forward", arguments["draft"]))
+		refusal.Code = apierr.CodeUsage
+		refusal.Hint = terminal.SanitizeLine(localArgumentHint(arg, reason))
+		if localOffersNothing(reason) {
+			refusal.Code = apierr.CodeAPI
+			refusal.Hint = "No draft can be sent from here now: hey local drafts shows which are sendable"
+		}
 	case arg != "" && localOffersNothing(reason):
 		// Nothing would do, so nothing the caller sent was wrong: the app holds none now,
 		// or could not load what it would choose from.
@@ -203,6 +229,42 @@ func localRefusal(name string, result *localapp.Result) error {
 		refusal.Hint = "Sign in to HEY in the app"
 	}
 	return refusal
+}
+
+// localNotSaved says why HEY saved no draft: past what one message takes. The words and
+// recipients of draft.write, and the words of a reply, are the caller's to change (1); a
+// reply's recipients and files are the thread's, for the person to deal with in HEY (7).
+func localNotSaved(refusal *apierr.Error, name string, reason map[string]any) {
+	why, _ := reason["refusal"].(string)
+	past := map[string]string{
+		"too_many_recipients": "it goes to more people than HEY sends one message to",
+		"too_many_files":      "it holds more files than HEY sends in one message",
+		"too_large":           "it is larger than HEY sends in one message",
+	}[why]
+	if past == "" {
+		past = "HEY says " + why
+	}
+	refusal.Message = terminal.SanitizeLine("HEY didn't save the draft: " + past)
+	switch {
+	case why == "too_large":
+		refusal.Code = apierr.CodeUsage
+		refusal.Hint = "Shorten the message"
+	case why == "too_many_recipients" && name == "draft.write":
+		refusal.Code = apierr.CodeUsage
+		refusal.Hint = "Write it to fewer people"
+	case name == "draft.reply":
+		refusal.Hint = "Reply to this thread in HEY"
+	}
+}
+
+// localJoined is a refusal's list as words.
+func localJoined(values any) string {
+	list, _ := values.([]any)
+	words := make([]string, 0, len(list))
+	for _, value := range list {
+		words = append(words, fmt.Sprint(value))
+	}
+	return strings.Join(words, ", ")
 }
 
 // localOffersNothing reports a refusal whose list of what the argument would take, its
