@@ -44,7 +44,7 @@ type appDecision struct {
 func screenInApp(cmd *cobra.Command, args []string, decision string) error {
 	if len(args) > 1 {
 		return apierr.ErrUsageHint("the HEY app on this computer screens one sender at a time",
-			"Run hey screener "+appScreenVerb(decision)+" once for each sender")
+			"Run "+appCommandLine("screener "+appScreenVerb(decision))+" once for each sender")
 	}
 	if err := appRefusesFlags(cmd, "box", "seen", "spam"); err != nil {
 		return err
@@ -108,7 +108,7 @@ func appSenderFor(cmd *cobra.Command, value string) (appSender, error) {
 		id, err := strconv.ParseInt(value, 10, 64)
 		if err != nil || id <= 0 {
 			return appSender{}, apierr.ErrUsageHint(fmt.Sprintf("invalid sender ID or address: %s", value),
-				"Sender IDs come from hey screener list; an email address works too")
+				"Sender IDs come from "+appCommandLine("screener list")+"; an email address works too")
 		}
 		return appSender{ID: id}, nil
 	}
@@ -134,7 +134,7 @@ func appSenderFor(cmd *cobra.Command, value string) (appSender, error) {
 		}
 	case len(found) == 0:
 		return appSender{}, apierr.ErrNotFoundHint("sender", value,
-			"Nobody the HEY app's Screener lists sends from that address: hey screener list, hey screener history")
+			"Nobody the HEY app's Screener lists sends from that address: "+appCommandLine("screener list")+", "+appCommandLine("screener history"))
 	case len(found) == 1:
 		return found[0], nil
 	}
@@ -159,13 +159,13 @@ func appHasSender(senders []appSender, id int64) bool {
 func (c *composeCommand) runApp(cmd *cobra.Command) error {
 	if cmd.Flags().Changed("thread-id") {
 		return apierr.ErrUsageHint("the HEY app on this computer takes no --thread-id",
-			"Reply with hey reply <thread-id> --draft")
+			"Reply with "+appCommandLine("reply <thread-id> --draft"))
 	}
 	if err := appRefusesFlags(cmd, "cc", "bcc", "attach", "message-html", "from", "no-name-tag"); err != nil {
 		return err
 	}
 	if c.subject == "" {
-		return apierr.ErrUsageHint("--subject is required", "hey compose --draft --to <email> --subject <subject> -m <message>")
+		return apierr.ErrUsageHint("--subject is required", appCommandLine("compose --draft --to <email> --subject <subject> -m <message>"))
 	}
 	body, err := appMessageBody(c.message)
 	if err != nil {
@@ -186,7 +186,7 @@ func (c *replyCommand) runApp(cmd *cobra.Command, args []string) error {
 	}
 	thread, err := strconv.ParseInt(args[0], 10, 64)
 	if err != nil || thread <= 0 {
-		return apierr.ErrUsageHint(fmt.Sprintf("invalid thread ID: %s", args[0]), "Thread IDs are topic_id in hey box view imbox")
+		return apierr.ErrUsageHint(fmt.Sprintf("invalid thread ID: %s", args[0]), "Thread IDs are topic_id in "+appCommandLine("box view imbox"))
 	}
 	body, err := appMessageBody(c.message)
 	if err != nil {

@@ -107,7 +107,7 @@ func appSendRefusal(cmd *cobra.Command) error {
 	path := cmd.CommandPath()
 	instead := "add --draft to save it in HEY instead"
 	if path == "hey bulk-reply send" || path == "hey forward" {
-		instead = "write a draft with hey compose --draft or hey reply <thread-id> --draft instead"
+		instead = "write a draft with " + appCommandLine("compose --draft") + " or " + appCommandLine("reply <thread-id> --draft") + " instead"
 	}
 	return apierr.ErrUsageHint(
 		fmt.Sprintf("%s would send now, and the HEY app on this computer sends nothing without you: %s", path, instead),
@@ -286,7 +286,7 @@ func appRefusal(name string, arguments map[string]any, result *localapp.Result) 
 		}
 	case why == "saved_not_listed":
 		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("The HEY app saved draft %v but couldn't list it back: it may be gone or changed", reason["draft"]))
-		refusal.Hint = terminal.SanitizeLine(fmt.Sprintf("Look for a draft whose id or made_as is %v in hey draft list before writing it again", reason["draft"]))
+		refusal.Hint = terminal.SanitizeLine(fmt.Sprintf("Look for a draft whose id or made_as is %v in %s before writing it again", reason["draft"], appCommandLine("draft list")))
 	case why == "not_an_address":
 		refusal.Code = apierr.CodeUsage
 		refusal.Message = terminal.SanitizeLine("The HEY app can't read these as addresses: " + appJoined(reason["given"]))
@@ -296,7 +296,7 @@ func appRefusal(name string, arguments map[string]any, result *localapp.Result) 
 	case why == "not_a_sender":
 		// No confirmation waits and no sheet shows: HEY would refuse it at Send.
 		refusal.Message = terminal.SanitizeLine(fmt.Sprintf("The HEY app won't send draft %v: it goes from %v, which this account no longer sends from", reason["draft"], reason["from"]))
-		refusal.Hint = "Change From in HEY, or write a new draft with hey compose --draft"
+		refusal.Hint = "Change From in HEY, or write a new draft with " + appCommandLine("compose --draft")
 	case why == "disabled" && name == "message.send":
 		// The draft is there, but not one HEY would ask to send now; available lists those it would.
 		refusal.Code = apierr.CodeUsage
@@ -305,7 +305,7 @@ func appRefusal(name string, arguments map[string]any, result *localapp.Result) 
 		refusal.Hint = terminal.SanitizeLine(appArgumentHint("draft", reason))
 		if appOffersNothing(reason) {
 			refusal.Code = apierr.CodeAPI
-			refusal.Hint = "No draft can be sent from here now: hey draft list shows which are sendable"
+			refusal.Hint = "No draft can be sent from here now: " + appCommandLine("draft list") + " shows which are sendable"
 		}
 	case arg != "" && appOffersNothing(reason):
 		// Nothing would do, so nothing the caller sent was wrong: the app holds none now.

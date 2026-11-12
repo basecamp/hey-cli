@@ -452,7 +452,7 @@ func TestAppWriteRefusalsSayWhatToDo(t *testing.T) {
 		{"too large", "draft.write", map[string]any{"error": "not_saved", "refusal": "too_large"},
 			[]string{"compose", "--draft", "--subject", "Stint plan", "-m", "Saturday works"}, output.ExitUsage, "larger"},
 		{"saved, not listed", "draft.reply", map[string]any{"error": "saved_not_listed", "draft": 1731280000456, "detail": "gone"},
-			[]string{"reply", "801", "--draft", "-m", "Works for me"}, output.ExitAPI, "hey draft list"},
+			[]string{"reply", "801", "--draft", "-m", "Works for me"}, output.ExitAPI, "hey -P this-computer draft list"},
 		{"session ended", "draft.write", map[string]any{"error": "session_ended", "detail": "signed out"},
 			[]string{"compose", "--draft", "--subject", "Stint plan", "-m", "Saturday works"}, output.ExitAPI, "may have been done"},
 	} {
@@ -552,5 +552,29 @@ func TestAppScreenerAddressInAPartialListIsNotNotFound(t *testing.T) {
 	}
 	if names := appCallNames(appCalls(t, door)); names != "screener.list" {
 		t.Errorf("calls = %s", names)
+	}
+}
+
+// Every hint on an app profile that names a command names it on this profile: run on a
+// server default profile, a listing shows the server's ids, and the next command acts
+// there.
+func TestAppHintsNameTheProfile(t *testing.T) {
+	door := appWritesDoor(t)
+	door.Answer("screener.list", map[string]any{"waiting": []any{}, "waiting_count": 0, "decided": []any{}})
+	appTestHome(t, door.Path, true)
+
+	for _, args := range [][]string{
+		{"screener", "approve", "nobody@example.com"},
+		{"screener", "approve", "51", "52"},
+		{"screener", "deny", "abc"},
+		{"compose", "--draft", "--to", "marcus@example.com", "-m", "Saturday works"},
+		{"compose", "--draft", "--to", "marcus@example.com", "--subject", "Stint plan", "-m", "Saturday works", "--thread-id", "801"},
+		{"reply", "abc", "--draft", "-m", "Works for me"},
+		{"forward", "801", "--to", "dana@example.com"},
+	} {
+		_, _, err := runProfileCLI(t, args...)
+		if err == nil || !strings.Contains(err.Error()+" "+apiErrorHint(err), "hey -P this-computer ") {
+			t.Errorf("%v: err = %v (hint %q)", args, err, apiErrorHint(err))
+		}
 	}
 }
