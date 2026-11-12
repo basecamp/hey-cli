@@ -150,6 +150,30 @@ func unavailableAccountNotice(accounts []accountListItem, selected string) strin
 }
 
 func accountOverrideNotice(source config.Source) string {
+	if cfg != nil && cfg.ActiveProfile != "" {
+		// Saved on the profile, which outranks a repository's account_id.
+		saved := fmt.Sprintf("Saved profile %q's default", cfg.ActiveProfile)
+		switch source {
+		case config.SourceEnv:
+			return saved + "; HEY_ACCOUNT_ID remains higher precedence."
+		case config.SourceFlag:
+			return saved + "; --account controls only this invocation."
+		default:
+			// A repository entry may still hold the account, below.
+		}
+		if local := cfg.LocalConfig(); local != nil && local.Trusted {
+			// An entry refines the profile only on its own server, as the loader merges it.
+			entry, _ := local.Profiles[cfg.ActiveProfile].(map[string]any)
+			baseURL, _ := entry["base_url"].(string)
+			entryOrigin, entryErr := config.Origin(baseURL)
+			profileOrigin, profileErr := config.Origin(cfg.Profiles[cfg.ActiveProfile].BaseURL)
+			sameServer := baseURL != "" && entryErr == nil && profileErr == nil && entryOrigin == profileOrigin
+			if account, ok := entry["account_id"]; sameServer && ok && account != nil && account != "" {
+				return saved + "; its entry in " + terminal.SanitizeLine(local.Path) + " remains higher precedence."
+			}
+		}
+		return ""
+	}
 	switch source {
 	case config.SourceLocal:
 		return "Saved the global default; local .hey/config.json remains higher precedence."

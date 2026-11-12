@@ -30,6 +30,9 @@ func initMCPAuth(httpClient *http.Client, configDir string) {
 	clientID, _, err := config.MCPClientID(cfg.BaseURL)
 	errMCPClientIDConfig = err
 	mcpAuthMgr = auth.NewMCPManager(cfg.BaseURL, httpClient, configDir, clientID)
+	if cfg.ActiveProfile != "" {
+		mcpAuthMgr.UseProfile(cfg.ActiveProfile)
+	}
 }
 
 const mcpLoginCommand = "hey auth login --mcp"

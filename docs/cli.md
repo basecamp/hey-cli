@@ -84,8 +84,9 @@ hey --account 12345 boxes         # override the default for one invocation
 HEY_ACCOUNT_ID=12345 hey search "quarterly planning"
 ```
 
-The default is `all`. Selection precedence is `--account`, `HEY_ACCOUNT_ID`, trusted local
-`.hey/config.json`, the global default for the active server, then All Accounts. Global
+The default is `all`. Selection precedence is `--account`, `HEY_ACCOUNT_ID`, the active
+profile's account (see [Profiles](#profiles)), trusted local `.hey/config.json`, the global
+default for the active server, then All Accounts. Global
 account defaults are stored separately for each server origin, so development and production
 selections cannot affect one another. Explicit and persisted IDs are validated against the
 signed-in identity before mail requests, so an unavailable account fails closed.
@@ -99,6 +100,61 @@ remove it with `hey config untrust-local`.
 Compose and contact creation use an individually selected account; replies and forwards use
 the thread's account. Calendars, todos, habits, time tracking, and journal entries remain
 identity-wide.
+
+### Profiles
+
+A profile is a name for a server, a mail account on it, and a sign-in of its own. Profiles let
+one computer keep a second HEY account, or staging or a beta, beside the one you use every day.
+With no profiles configured, nothing changes: hey uses the top-level configuration and the
+sign-in `hey auth login` made.
+
+```bash
+hey profile create personal                                      # sign in through the browser, then save it
+hey profile create staging --base-url https://staging.example.com
+hey profile create work --account 12345                           # with a linked mail account
+hey profile list                                                  # every profile, signed in or not
+hey profile show staging                                          # one profile's details
+hey profile set-default personal                                  # used when nothing else chooses
+hey profile delete staging                                        # revoke its sign-in where it can, then remove it
+hey -P staging box view imbox                                     # one command as a profile
+HEY_PROFILE=staging hey search "quarterly planning"
+```
+
+A command picks its profile from `--profile` (`-P`), then `HEY_PROFILE`, then `default_profile`,
+then the only profile when there is one. With several profiles and none of those, an interactive
+terminal asks which; anywhere else the command exits 1 with "multiple profiles configured but
+none selected" and the profiles' names. The first profile you create becomes the default.
+
+Each profile's credential is stored under its own key (`profile:<name>`), and `hey mcp`'s under
+`mcp:profile:<name>`, so no profile, and not the top-level configuration, reads another's.
+`hey auth login -P <name>` signs a profile in again. A profile's response cache is its own too.
+
+A profile's `base_url` and `account_id` replace the top-level ones. `HEY_ACCOUNT_ID` and
+`--account` still win over the account for one invocation, but a profile's credential goes only
+to its own server: `HEY_BASE_URL` or `--base-url` naming another one is refused. A profile
+that names no account uses All Accounts rather than the top-level account default, which belongs
+to the top-level sign-in; `hey account use` under a profile saves the account on the profile.
+
+Profiles live in the global config:
+
+```json
+{
+  "default_profile": "personal",
+  "profiles": {
+    "personal": { "base_url": "https://app.hey.com" },
+    "staging": { "base_url": "https://staging.example.com", "account_id": "12345" }
+  }
+}
+```
+
+A repository's `.hey/config.json` may set `profiles` and `default_profile` too, but they choose
+where a credential is sent, so hey ignores them, with a warning, until you run
+`hey config trust-local` from that directory, and again after any change to them. A trusted
+repository may add profiles, but an entry that would move a global profile to another server is
+ignored, with a warning. `hey profile delete` revokes a sign-in only at the server that issued it, and refuses a profile whose entry in a trusted repository config has a `base_url`, alone or beside the global one, since that entry would keep the profile there; `hey auth logout --mcp -P <name>` revokes only there too.
+
+JSON answers carry `meta.profile` while a profile is active. `hey auth status`, `hey config show`
+and `hey doctor` name it as well.
 
 ## Output formats
 

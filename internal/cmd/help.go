@@ -41,7 +41,7 @@ var curatedCategories = []struct {
 	},
 	{
 		heading: "ACCOUNT & SYSTEM",
-		names:   []string{"auth", "account", "config", "setup", "mcp", "shell-completion", "doctor", "upgrade", "version"},
+		names:   []string{"auth", "account", "profile", "config", "setup", "mcp", "shell-completion", "doctor", "upgrade", "version"},
 	},
 }
 
@@ -307,13 +307,14 @@ func renderCommandHelp(cmd *cobra.Command) {
 }
 
 // globalFlagReadingOrder is how the global flags read in root help: the
-// account first, then the output shaping, then verbosity. It orders the
+// account and the profile first, then the output shaping, then verbosity. It orders the
 // flags rather than choosing them, so a flag registered without a place
 // here still gets listed, at the end.
-var globalFlagReadingOrder = []string{"account", "json", "jq", "markdown", "quiet", "ids-only", "count", "styled", "html", "stats", "base-url", "verbose"}
+var globalFlagReadingOrder = []string{"account", "profile", "json", "jq", "markdown", "quiet", "ids-only", "count", "styled", "html", "stats", "base-url", "verbose"}
 
 var rootFlagDescriptions = map[string]string{
 	"account":  "Select a linked mail account",
+	"profile":  "Use a named profile",
 	"json":     "Output a JSON response envelope",
 	"jq":       "Filter JSON with a jq expression",
 	"markdown": "Output Markdown",

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bufio"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -106,11 +107,36 @@ func promptForLocalConfigTrust(cmd *cobra.Command, local *config.LocalConfig) (l
 	fmt.Fprintf(w, "  Configuration:       %s\n", terminal.SanitizeLine(local.Path))
 	fmt.Fprintf(w, "  Local server:        %s\n", localTrustDisplayValue(local.BaseURL))
 	fmt.Fprintf(w, "  Local mail account:  %s\n", localTrustDisplayValue(local.AccountID))
+	for i, name := range local.ProfileNames {
+		label := "  Local profiles:      "
+		if i > 0 {
+			label = "                       "
+		}
+		server := "(no base_url)"
+		if entry, ok := local.Profiles[name].(map[string]any); ok {
+			if baseURL, ok := entry["base_url"].(string); ok && baseURL != "" {
+				server = baseURL
+			}
+			if account, ok := entry["account_id"]; ok && account != nil && account != "" {
+				if n, isNumber := account.(float64); isNumber {
+					account = strconv.FormatFloat(n, 'f', -1, 64)
+				}
+				server += fmt.Sprintf(", mail account %v", account)
+			}
+		}
+		fmt.Fprintf(w, "%s%s  %s\n", label, terminal.SanitizeLine(name), terminal.SanitizeLine(server))
+	}
+	if local.DefaultProfile != "" {
+		fmt.Fprintf(w, "  Local default:       %s\n", terminal.SanitizeLine(local.DefaultProfile))
+	}
 	fmt.Fprintf(w, "  Effective server:    %s\n", terminal.SanitizeLine(cfg.BaseURL))
 	fmt.Fprintf(w, "  Effective account:   %s\n", terminal.SanitizeLine(cfg.AccountID))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Always trust approves the exact local values above for this effective server origin.")
 	fmt.Fprintln(w, "Commands run here may send credentials to that server and read or send mail using that account.")
+	if len(local.ProfileNames) > 0 {
+		fmt.Fprintln(w, "It also approves the local profiles, which choose the server a command here signs in to.")
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  [1] Use once")
 	fmt.Fprintln(w, "  [2] Always trust these settings")

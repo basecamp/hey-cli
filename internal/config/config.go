@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 const (
@@ -35,6 +36,15 @@ type Config struct {
 	AccountID string `json:"account_id,omitempty"`
 	Onboarded bool   `json:"onboarded,omitempty"`
 
+	// Profiles, DefaultProfile and ActiveProfile are profiles.go's: the profiles the
+	// global config and a trusted repository config name, the one chosen when nothing
+	// else chooses, and the one this invocation runs as ("" for none).
+	Profiles       map[string]*ProfileConfig `json:"-"`
+	DefaultProfile string                    `json:"-"`
+	ActiveProfile  string                    `json:"-"`
+
+	warnings            []string
+	globalProfiles      map[string]bool
 	sources             map[string]Source
 	globalConfig        fileConfig
 	localConfig         *LocalConfig
@@ -50,6 +60,21 @@ type fileConfig struct {
 	HelpHidden          bool                                `json:"help_hidden,omitempty"`
 	AccountDefaults     map[string]string                   `json:"account_defaults,omitempty"`
 	TrustedLocalConfigs map[string]trustedLocalConfigRecord `json:"trusted_local_configs,omitempty"`
+
+	// The profile keys are read here and written only by profiles.go's writers, which
+	// edit the file's own JSON: every other rewrite carries them through verbatim as
+	// keys this schema does not own, so an entry's fields survive a `hey config set`.
+	profiles       map[string]profileEntry
+	profilesRaw    map[string]json.RawMessage
+	hasProfiles    bool
+	path           string
+	defaultProfile string
+}
+
+// profileKeys are the profile half of a config file.
+type profileKeys struct {
+	Profiles       map[string]json.RawMessage `json:"profiles"`
+	DefaultProfile string                     `json:"default_profile"`
 }
 
 // OldConfig represents the legacy config format with embedded credentials.
@@ -215,6 +240,15 @@ func load(localPath string) (*Config, error) {
 		}
 	}
 
+	cfg.applyFileProfiles(global, SourceGlobal)
+	if local.hasProfiles || local.defaultProfile != "" {
+		if cfg.localConfig != nil && cfg.localConfig.Trusted {
+			cfg.applyFileProfiles(local, SourceLocal)
+		} else {
+			cfg.ignoreLocalProfiles(localPath, local)
+		}
+	}
+
 	return cfg, nil
 }
 
@@ -232,6 +266,14 @@ func readFileConfig(path string) (fileConfig, error) {
 	var file fileConfig
 	if unmarshalErr := json.Unmarshal(data, &file); unmarshalErr != nil {
 		return fileConfig{}, fmt.Errorf("could not parse config %s: %w", path, unmarshalErr)
+	}
+	var keys profileKeys
+	if unmarshalErr := json.Unmarshal(data, &keys); unmarshalErr != nil {
+		return fileConfig{}, fmt.Errorf("could not parse config %s: %w", path, unmarshalErr)
+	}
+	file.profilesRaw, file.hasProfiles, file.defaultProfile, file.path = keys.Profiles, len(keys.Profiles) > 0, keys.DefaultProfile, path
+	if file.profiles, err = parseProfiles(path, keys.Profiles); err != nil {
+		return fileConfig{}, err
 	}
 	if file.AccountID != "" {
 		file.AccountID, err = normalizeAccountID(file.AccountID)
@@ -308,7 +350,8 @@ func (c *Config) SetFromFlag(key, value string) error {
 		if accountSource == SourceDefault || accountSource == SourceGlobal {
 			c.AccountID = AllAccounts
 			c.sources["account_id"] = SourceDefault
-			if accountID, ok := accountDefaultFor(c.globalConfig, value); ok {
+			// The account defaults are the top-level sign-in's (ApplyProfile).
+			if accountID, ok := accountDefaultFor(c.globalConfig, value); ok && c.ActiveProfile == "" {
 				c.AccountID = accountID
 				c.sources["account_id"] = SourceGlobal
 			}
@@ -459,6 +502,17 @@ func (c *Config) SaveAccountID(accountID string) error {
 	if err != nil {
 		return err
 	}
+	if c.ActiveProfile != "" {
+		if !c.ProfileInGlobalConfig(c.ActiveProfile) {
+			where := "this repository's .hey/config.json"
+			if c.localConfig != nil {
+				where = c.localConfig.Path
+			}
+			return apierr.ErrUsage(fmt.Sprintf("Profile %q is set by %s, not the global config; set its account_id there", c.ActiveProfile, terminal.SanitizeLine(where)))
+		}
+		// A profile's account is the profile's own, as basecamp-cli binds one.
+		return bindProfileAccount(c.ActiveProfile, accountID)
+	}
 	origin, err := serverOrigin(c.BaseURL)
 	if err != nil {
 		return err
@@ -534,13 +588,6 @@ func saveGlobalConfigScrubbing(file fileConfig, scrub []string) error {
 	if path == "" {
 		return fmt.Errorf("could not determine config path")
 	}
-	directory := filepath.Dir(path)
-	if err := os.MkdirAll(directory, 0700); err != nil {
-		return fmt.Errorf("could not create config directory: %w", err)
-	}
-	if err := os.Chmod(directory, 0700); err != nil { // #nosec G302 -- this is a directory permission, not a file mode
-		return fmt.Errorf("could not secure config directory: %w", err)
-	}
 
 	merged := map[string]json.RawMessage{}
 	if existing, readErr := os.ReadFile(path); readErr == nil { // #nosec G304 -- the fixed global config path
@@ -568,8 +615,21 @@ func saveGlobalConfigScrubbing(file fileConfig, scrub []string) error {
 	for key, value := range knownMap {
 		merged[key] = value
 	}
+	return writeGlobalConfigMap(path, merged)
+}
 
-	data, err := json.MarshalIndent(merged, "", "  ")
+// writeGlobalConfigMap replaces the global config file with data, atomically and
+// readable by its owner alone.
+func writeGlobalConfigMap(path string, data map[string]json.RawMessage) error {
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		return fmt.Errorf("could not create config directory: %w", err)
+	}
+	if err := os.Chmod(directory, 0700); err != nil { // #nosec G302 -- this is a directory permission, not a file mode
+		return fmt.Errorf("could not secure config directory: %w", err)
+	}
+
+	encoded, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return fmt.Errorf("could not marshal config: %w", err)
 	}
@@ -583,7 +643,7 @@ func saveGlobalConfigScrubbing(file fileConfig, scrub []string) error {
 		_ = temporary.Close()
 		return fmt.Errorf("could not secure temporary config: %w", err)
 	}
-	if _, err := temporary.Write(data); err != nil {
+	if _, err := temporary.Write(encoded); err != nil {
 		_ = temporary.Close()
 		return fmt.Errorf("could not write temporary config: %w", err)
 	}

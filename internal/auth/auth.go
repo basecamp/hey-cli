@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
+	"github.com/basecamp/hey-cli/internal/config"
 )
 
 // Built-in OAuth client ID for the CLI app.
@@ -30,8 +31,13 @@ const callbackListenAddr = "127.0.0.1:0"
 type Manager struct {
 	baseURL string
 	// storeKey is where the credential lives in the store: the origin for the CLI's
-	// own, "mcp::" and the origin for hey mcp's (mcp.go).
+	// own, "mcp::" and the origin for hey mcp's (mcp.go), and under a profile
+	// "profile:<name>" and "mcp:profile:<name>" (UseProfile).
 	storeKey string
+	// mcp marks hey mcp's manager, whose credential is kept apart from the CLI's.
+	mcp bool
+	// profile is the profile this manager's credential belongs to, "" for none.
+	profile string
 	// clientID is the OAuth client this manager signs in and refreshes as.
 	clientID string
 	// scope is what a sign-in asks for. Empty asks for none, which HEY grants the
@@ -376,6 +382,10 @@ func (m *Manager) LoginWithToken(token string) error {
 		AccessToken: token,
 		OAuthType:   "token",
 	}
+	if m.profile != "" {
+		// Recorded so checkProfileIssuer knows which server a profile's token is for.
+		creds.TokenEndpoint = m.baseURL + "/oauth/tokens"
+	}
 	return m.saveCredentials(creds)
 }
 
@@ -425,12 +435,33 @@ func (m *Manager) reloadCredentialsLocked() (*Credentials, error) {
 	if err == nil {
 		err = m.checkPinnedGrant(creds)
 	}
+	if err == nil {
+		err = m.checkProfileIssuer(creds)
+	}
 	if err != nil {
 		m.cachedCredentials = nil
 		return nil, err
 	}
 	m.cachedCredentials = cloneCredentials(creds)
 	return cloneCredentials(creds), nil
+}
+
+// checkProfileIssuer refuses a profile's credential issued by another server than the
+// one this manager talks to. A profile's credential is keyed by its name, not by a
+// server, so an edited base_url would otherwise send it somewhere new; the key by
+// origin that the top-level credential uses makes this check needless there.
+func (m *Manager) checkProfileIssuer(creds *Credentials) error {
+	if m.profile == "" || creds.TokenEndpoint == "" {
+		return nil
+	}
+	issuer, issuerErr := config.Origin(creds.TokenEndpoint)
+	server, serverErr := config.Origin(m.baseURL)
+	if issuerErr == nil && serverErr == nil && issuer == server {
+		return nil
+	}
+	err := apierr.ErrAuth(fmt.Sprintf("profile %q's sign-in was issued by %s, not %s", m.profile, creds.TokenEndpoint, m.baseURL))
+	err.Hint = "Run: " + m.LoginCommand()
+	return err
 }
 
 func (m *Manager) saveCredentials(creds *Credentials) error {
@@ -469,6 +500,12 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 	if pinErr := m.checkPinnedGrant(stored); pinErr != nil {
 		m.cachedCredentials = nil
 		return pinErr
+	}
+	// Another process may have signed the profile in at another server since this one
+	// loaded it.
+	if issuerErr := m.checkProfileIssuer(stored); issuerErr != nil {
+		m.cachedCredentials = nil
+		return issuerErr
 	}
 	m.cachedCredentials = cloneCredentials(stored)
 	changed := stored.AccessToken != creds.AccessToken
@@ -742,9 +779,51 @@ func (m *Manager) GetStore() *Store {
 }
 
 // CredentialKey returns the credential's storage key: the base URL for the CLI's own
-// credential, prefixed for hey mcp's (mcp.go).
+// credential, prefixed for hey mcp's (mcp.go), or the profile's (UseProfile).
 func (m *Manager) CredentialKey() string {
 	return m.storeKey
+}
+
+// ProfileCredentialKey is the key a named profile's credential is stored under,
+// basecamp-cli's "profile:<name>" (internal/auth/auth.go at 48b01aaf).
+func ProfileCredentialKey(profile string) string { return "profile:" + profile }
+
+// MCPProfileCredentialKey is the key of hey mcp's credential under a profile, kept
+// apart from the profile's own as "mcp::<origin>" is from the origin's.
+func MCPProfileCredentialKey(profile string) string { return "mcp:" + ProfileCredentialKey(profile) }
+
+// UseProfile keys this manager's credential by profile rather than by origin, so two
+// profiles on one server hold two sign-ins and neither reads the other's.
+func (m *Manager) UseProfile(profile string) {
+	m.profile = profile
+	if m.mcp {
+		m.storeKey = MCPProfileCredentialKey(profile)
+	} else {
+		m.storeKey = ProfileCredentialKey(profile)
+	}
+}
+
+// LoginCommand is the command that signs this manager's credential in again:
+// addressed to its profile when there is one, since a bare login would store the new
+// credential under the top-level key instead. It is meant to be pasted, so the name is
+// shell-quoted.
+func (m *Manager) LoginCommand() string {
+	command := "hey auth login"
+	if m.mcp {
+		command += " --mcp"
+	}
+	if m.profile != "" {
+		command += " -P " + shellQuote(m.profile)
+	}
+	return command
+}
+
+// shellQuote quotes a word for a POSIX shell when it needs it.
+func shellQuote(word string) string {
+	if word != "" && strings.Trim(word, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.") == "" {
+		return word
+	}
+	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 }
 
 func (m *Manager) waitForCallback(ctx context.Context, expectedState, authURL string, listener net.Listener, opts LoginOptions) (string, error) {

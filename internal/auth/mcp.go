@@ -46,6 +46,7 @@ func NewMCPManager(baseURL string, httpClient *http.Client, configDir, clientID 
 		origin = canonical
 	}
 	m.storeKey = mcpStoreKeyPrefix + origin
+	m.mcp = true
 	m.clientID = clientID
 	m.scope = MCPScope
 	m.honorEnvToken = false
@@ -110,6 +111,14 @@ func (m *Manager) Revoke(ctx context.Context) error {
 	creds, err := m.store.Load(m.storeKey)
 	if err != nil {
 		return err
+	}
+	// A profile's grant is revoked only at the server that issued it: its base_url
+	// may have been edited since, and the DELETE carries the refresh token.
+	if m.profile != "" && creds.TokenEndpoint == "" {
+		return fmt.Errorf("profile %q's sign-in does not record its server; not revoking it at %s", m.profile, m.baseURL)
+	}
+	if issuerErr := m.checkProfileIssuer(creds); issuerErr != nil {
+		return issuerErr
 	}
 	token := creds.RefreshToken
 	if token == "" {

@@ -158,6 +158,7 @@ CALENDAR & TASKS
 ACCOUNT & SYSTEM
   auth              Sign in, sign out, and check login status
   account           List and select linked mail accounts
+  profile           Manage named profiles
   config            View and change settings
   setup             Set up HEY for first use
   mcp               Serve HEY to MCP clients over stdio
@@ -174,6 +175,7 @@ HELP TOPICS
 
 FLAGS
       --account    Select a linked mail account
+  -P, --profile    Use a named profile
       --json       Output a JSON response envelope
       --jq         Filter JSON with a jq expression
       --markdown   Output Markdown
