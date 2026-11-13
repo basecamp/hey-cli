@@ -21,6 +21,7 @@ type smokeContact struct {
 	EmailAddress string         `json:"email_address"`
 	Aliases      []smokeContact `json:"aliases"`
 	Note         string         `json:"note"`
+	AvatarURL    string         `json:"avatar_url"`
 }
 
 func TestContactsListAndShow(t *testing.T) {
@@ -44,10 +45,7 @@ func TestContactLifecycleAndPrivateNote(t *testing.T) {
 		t.Fatalf("created contact is incomplete: id=%d email_matches=%v", created.ID, created.EmailAddress == email)
 	}
 	id := intStr(created.ID)
-	t.Cleanup(func() {
-		_, _, _ = hey(t, "contact", "unbundle", id)
-		_, _, _ = hey(t, "contact", "hide", id)
-	})
+	registerContactCleanup(t, id, created.AvatarURL)
 
 	updated := dataAs[smokeContact](t, contactWriteJSON(t, "contact", "update", id, "--name", "Samuel Rivera", "--alias", alias))
 	if updated.ID == 0 || updated.Name != "Samuel Rivera" {
@@ -121,10 +119,7 @@ func TestContactPhoto(t *testing.T) {
 		AvatarURL string `json:"avatar_url"`
 	}](t, contactWriteJSON(t, "contact", "add", "--name", "Priya Shah", "--email", "priya.shah+"+unique+"@example.com"))
 	id := intStr(created.ID)
-	t.Cleanup(func() {
-		_, _, _ = hey(t, "contact", "photo", "remove", id)
-		_, _, _ = hey(t, "contact", "hide", id)
-	})
+	registerContactCleanup(t, id, created.AvatarURL)
 
 	portrait := image.NewRGBA(image.Rect(0, 0, 64, 64))
 	for x := 0; x < 64; x++ {
