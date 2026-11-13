@@ -128,7 +128,7 @@ func TestHarnessEventCleanupRefusesFailuresAndResiduals(t *testing.T) {
 		t.Run(fmt.Sprint(failDelete), func(t *testing.T) {
 			deleteAttempted := false
 			run := func(args ...string) (string, string, int) {
-				if args[1] == "day" {
+				if args[1] == "list" {
 					if failDelete && deleteAttempted {
 						return harnessJSON([]smokeEvent{})
 					}
@@ -147,6 +147,41 @@ func TestHarnessEventCleanupRefusesFailuresAndResiduals(t *testing.T) {
 				t.Fatal("cleanup failure or residual event accepted")
 			}
 		})
+	}
+}
+
+func TestHarnessEventCleanupIncludesSwitchedOffCalendarSplits(t *testing.T) {
+	remaining := map[string]bool{"42": true, "73": true}
+	run := func(args ...string) (string, string, int) {
+		if args[1] == "day" {
+			return harnessJSON([]smokeEvent{}) // A switched-off calendar is absent here.
+		}
+		if args[1] == "delete" {
+			if _, owned := remaining[args[2]]; !owned {
+				t.Fatalf("unrelated event targeted: %v", args)
+			}
+			remaining[args[2]] = false
+			return harnessJSON(nil)
+		}
+		want := []string{"event", "list", "--starts-on", "2099-04-15", "--ends-on", "2099-04-24", "--all", "--json"}
+		if !slices.Equal(args, want) {
+			t.Fatalf("cleanup must read all calendars across the owned window: %v", args)
+		}
+		var events []smokeEvent
+		for _, id := range []string{"42", "73"} {
+			if remaining[id] {
+				number := int64(42)
+				if id == "73" {
+					number = 73
+				}
+				events = append(events, smokeEvent{ID: number, Title: "Design review unique-42"})
+			}
+		}
+		return harnessJSON(events)
+	}
+	err := cleanupEventsWith(run, []string{"42"}, "Design review unique-42", []string{"2099-04-23", "2099-04-16"})
+	if err != nil || remaining["42"] || remaining["73"] {
+		t.Fatalf("hidden-calendar split escaped cleanup: %v, remaining=%v", err, remaining)
 	}
 }
 
@@ -293,15 +328,45 @@ func TestHarnessFailedDeliveryCleanupUsesOneLookup(t *testing.T) {
 }
 
 func TestHarnessCLIEnvDropsInheritedCredentialsProfilesAndDebug(t *testing.T) {
-	for _, name := range []string{"HEY_TOKEN", "HEY_PROFILE", "HEY_DEBUG"} {
+	names := []string{"HEY_TOKEN", "HEY_PROFILE", "HEY_DEBUG", "HEY_CABLE_URL"}
+	for _, name := range names {
 		t.Setenv(name, "synthetic-caller-setting")
 	}
 	for _, value := range cliEnv() {
-		for _, name := range []string{"HEY_TOKEN", "HEY_PROFILE", "HEY_DEBUG"} {
+		for _, name := range names {
 			if strings.HasPrefix(value, name+"=") {
 				t.Errorf("inherited %s reached the CLI environment", name)
 			}
 		}
+	}
+}
+
+func TestHarnessCLIEnvRequiresExplicitSmokeAccount(t *testing.T) {
+	t.Setenv("HEY_ACCOUNT_ID", "operator-default")
+	for _, requested := range []string{"", "88690000"} {
+		t.Setenv("HEY_SMOKE_ACCOUNT_ID", requested)
+		if !slices.Contains(cliEnv(), "HEY_ACCOUNT_ID="+requested) {
+			t.Errorf("explicit smoke account not selected: %q", requested)
+		}
+		if slices.Contains(cliEnv(), "HEY_ACCOUNT_ID=operator-default") {
+			t.Fatal("operator's account filter reached the suite")
+		}
+	}
+}
+
+func TestHarnessRelativeBinaryResolvedBeforeChangingDirectory(t *testing.T) {
+	previousBinary, previousURL, previousEmail := binaryPath, baseURL, smokeEmail
+	t.Cleanup(func() { binaryPath, baseURL, smokeEmail = previousBinary, previousURL, previousEmail })
+	t.Setenv("HEY_SMOKE_OFFLINE", "")
+	t.Setenv("HEY_BINARY", "../../bin/hey")
+	t.Setenv("HEY_SMOKE_BASE_URL", "invalid://binary-resolution-fixture")
+	want, err := filepath.Abs("../../bin/hey")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runSmoke(func() int { t.Fatal("invalid origin must not run live tests"); return 1 })
+	if binaryPath != want {
+		t.Fatalf("binary path = %q, want %q before any child changes cwd", binaryPath, want)
 	}
 }
 
@@ -321,8 +386,13 @@ func TestHarnessEvidenceRefusesExistingPublicPermissions(t *testing.T) {
 				if err := os.Chmod(directory, 0o755); err != nil {
 					t.Fatal(err)
 				}
-			} else if err := os.WriteFile(path, nil, 0o644); err != nil {
-				t.Fatal(err)
+			} else {
+				if err := os.WriteFile(path, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chmod(path, 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if err := recordSmokeCommand(t.Name(), []string{"draft", "list"}, "private fixture", "", 0); err == nil {
 				t.Fatal("public evidence permissions accepted")

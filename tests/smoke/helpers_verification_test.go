@@ -266,29 +266,46 @@ func cleanupEventsWith(run smokeCommand, ids []string, title string, days []stri
 	if title == "" || len(ids) == 0 || len(days) == 0 {
 		return fmt.Errorf("event cleanup needs owned ids, a unique title and touched dates")
 	}
+	var first, last time.Time
+	for _, day := range days {
+		date, err := time.Parse("2006-01-02", day)
+		if err != nil {
+			return fmt.Errorf("invalid owned event date %q: %w", day, err)
+		}
+		if first.IsZero() || date.Before(first) {
+			first = date
+		}
+		if last.IsZero() || date.After(last) {
+			last = date
+		}
+	}
+	read := func() ([]smokeEvent, error) {
+		// Period views omit switched-off calendars. List every calendar over
+		// the fixture's window, padded for timed events crossing UTC dates.
+		data, err := smokeJSON(run, "event", "list", "--starts-on", first.AddDate(0, 0, -1).Format("2006-01-02"),
+			"--ends-on", last.AddDate(0, 0, 1).Format("2006-01-02"), "--all")
+		if err != nil {
+			return nil, err
+		}
+		var events []smokeEvent
+		err = json.Unmarshal(data, &events)
+		return events, err
+	}
 	var problems []error
 	// Discover split series before deleting their parents. Only the run's unique
 	// title prefix is eligible; never delete somebody else's calendar or event.
-	for _, day := range days {
-		data, err := smokeJSON(run, "event", "day", day, "--all")
-		if err != nil {
-			problems = append(problems, err)
-			continue
-		}
-		var events []smokeEvent
-		if err := json.Unmarshal(data, &events); err != nil {
-			problems = append(problems, err)
-			continue
-		}
-		for _, event := range events {
-			if strings.HasPrefix(event.Title, title) {
-				id := event.ParentID
-				if id == 0 {
-					id = event.ID
-				}
-				if id > 0 {
-					ids = append(ids, strconv.FormatInt(id, 10))
-				}
+	events, err := read()
+	if err != nil {
+		problems = append(problems, err)
+	}
+	for _, event := range events {
+		if strings.HasPrefix(event.Title, title) {
+			id := event.ParentID
+			if id == 0 {
+				id = event.ID
+			}
+			if id > 0 {
+				ids = append(ids, strconv.FormatInt(id, 10))
 			}
 		}
 	}
@@ -301,21 +318,13 @@ func cleanupEventsWith(run smokeCommand, ids []string, title string, days []stri
 			problems = append(problems, err)
 		}
 	}
-	for _, day := range days {
-		data, err := smokeJSON(run, "event", "day", day, "--all")
-		if err != nil {
-			problems = append(problems, err)
-			continue
-		}
-		var events []smokeEvent
-		if err := json.Unmarshal(data, &events); err != nil {
-			problems = append(problems, err)
-			continue
-		}
-		for _, event := range events {
-			if strings.HasPrefix(event.Title, title) {
-				problems = append(problems, fmt.Errorf("owned event %q remains on %s after cleanup", event.Title, day))
-			}
+	events, err = read()
+	if err != nil {
+		problems = append(problems, err)
+	}
+	for _, event := range events {
+		if strings.HasPrefix(event.Title, title) {
+			problems = append(problems, fmt.Errorf("owned event %q remains after cleanup", event.Title))
 		}
 	}
 	return errors.Join(problems...)

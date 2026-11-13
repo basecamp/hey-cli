@@ -78,7 +78,7 @@ func longThread(t *testing.T, replies int) (topicID string, subject string) {
 		TopicID int64 `json:"topic_id"`
 	}](t, parseResponse(t, stdout))
 	if sent.TopicID <= 0 {
-		t.Fatal("compose did not identify its owned long-thread topic")
+		t.Fatalf("compose returned no topic ID for subject %q; inspect this fixture for manual cleanup", subject)
 	}
 	topicID = strconv.FormatInt(sent.TopicID, 10)
 	t.Logf("owned long-thread topic %d", sent.TopicID)
