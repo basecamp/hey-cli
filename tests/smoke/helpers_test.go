@@ -74,7 +74,12 @@ func runSmoke(run func() int) int {
 	baseURL = envOr("HEY_SMOKE_BASE_URL", "http://app.hey.localhost:3003")
 	smokeEmail = envOr("HEY_SMOKE_EMAIL", "david@basecamp.com")
 	password := envOr("HEY_SMOKE_PASSWORD", "secret123456")
-	binaryPath = envOr("HEY_BINARY", filepath.Join(findProjectRoot(), "bin", "hey"))
+	var err error
+	binaryPath, err = filepath.Abs(envOr("HEY_BINARY", filepath.Join(findProjectRoot(), "bin", "hey")))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to resolve CLI binary: %v\n", err)
+		return 1
+	}
 	if _, err := os.Stat(binaryPath); err != nil {
 		fmt.Fprintf(os.Stderr, "CLI binary not found at %s — run 'make build' first\n", binaryPath)
 		return 1
@@ -211,23 +216,22 @@ func dataAs[T any](t *testing.T, resp Response) T {
 	return v
 }
 
-// cliEnv returns the environment variables used for all CLI invocations. The
-// caller's HEY_TOKEN is dropped: the suite authenticates with the OAuth grant TestMain
-// obtained, and an inherited token would silently stand in for it on every command.
-// Profiles and debug logs from the caller must not change auth or JSON stderr.
-// The caller's HOME and OMARCHY_PATH are replaced too, so a suite run on a
-// developer's Omarchy desktop can never detect it — the sign-in hook and
-// `hey setup omarchy` would otherwise talk to the real shell.
+// Only the harness supplies HEY settings to child CLIs. Caller defaults must
+// not replace its OAuth grant, account, origin or cable endpoint. Harness
+// options stay in the parent; HEY_SMOKE_ACCOUNT_ID explicitly scopes the child.
+// HOME and OMARCHY_PATH also prevent desktop/agent setup from reaching the
+// developer's session.
 func cliEnv() []string {
 	env := make([]string, 0, len(os.Environ())+8)
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "HEY_TOKEN=") || strings.HasPrefix(kv, "HEY_PROFILE=") || strings.HasPrefix(kv, "HEY_DEBUG=") || strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "OMARCHY_PATH=") {
+		if strings.HasPrefix(kv, "HEY_") || strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "OMARCHY_PATH=") {
 			continue
 		}
 		env = append(env, kv)
 	}
 	env = append(env,
 		"HEY_BASE_URL="+baseURL,
+		"HEY_ACCOUNT_ID="+os.Getenv("HEY_SMOKE_ACCOUNT_ID"),
 		"HOME="+homeDir,
 		"OMARCHY_PATH=",
 		"XDG_CONFIG_HOME="+configDir,

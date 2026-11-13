@@ -409,7 +409,7 @@ func TestEventAllDay(t *testing.T) {
 	}
 	event := dataAs[smokeEvent](t, added)
 	if event.ID <= 0 {
-		t.Fatal("all-day create returned no cleanup ID")
+		t.Fatalf("all-day event %q on %s returned no cleanup ID; inspect this fixture for manual cleanup", title, day)
 	}
 	registerEventCleanup(t, fmt.Sprint(event.ID), title, day)
 

@@ -29,7 +29,9 @@ server. They check exact fixture identity, missing fixtures, failed/no-op cleanu
 incomplete readbacks, credential-evidence exclusion and setup-failure teardown.
 
 Draft, owned-thread, contact and event cleanup callbacks check command failures
-and read back the resulting state before credentials are removed. Thread setup
+and read back the resulting state before credentials are removed. Event cleanup
+reads all calendars, including switched-off ones, over the fixture's date window.
+Thread setup
 polls for the exact created topic and retries transient reads. If delivery never
 arrives, cleanup makes one final lookup instead of repeating the full wait.
 Contact fixtures and their aliases are retained hidden, with notes and uploaded
@@ -52,6 +54,12 @@ Do not run the full suite on a shared identity just to broaden coverage: journal
 tests overwrite fixed dates and some other tests still select existing mail/habits
 or lack complete cleanup. These changes do not repair every smoke test's cleanup.
 Confirm exclusive development ownership and local-only SMTP/capture before sending.
+
+Child CLIs ignore inherited `HEY_*` settings and receive only the harness's
+origin, account and keyring settings. Set `HEY_SMOKE_ACCOUNT_ID` to scope the
+suite to a particular linked development account; an ordinary `HEY_ACCOUNT_ID`
+from your shell does not select it. `HEY_BINARY` may be absolute or relative to
+`tests/smoke` (the Go test process's working directory).
 
 ## Development prerequisites
 

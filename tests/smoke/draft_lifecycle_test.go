@@ -110,7 +110,7 @@ func TestDraftLifecycle(t *testing.T) {
 		TopicID int64 `json:"topic_id"`
 	}](t, parseResponse(t, stdout))
 	if sent.TopicID <= 0 {
-		t.Fatal("sent draft did not identify its owned cleanup topic")
+		t.Fatalf("sent draft returned no topic ID for subject %q; inspect this fixture for manual cleanup", newSubject)
 	}
 	waitForOwnedTopic(t, sent.TopicID, newSubject)
 	if draftListedIDs(t)[id] {
@@ -153,7 +153,7 @@ func findSmokeThread(t *testing.T, subject string) string {
 		TopicID int64 `json:"topic_id"`
 	}](t, parseResponse(t, stdout))
 	if sent.TopicID <= 0 {
-		t.Fatal("compose did not identify its owned reply topic")
+		t.Fatalf("compose returned no topic ID for subject %q; inspect this fixture for manual cleanup", subject)
 	}
 	t.Logf("owned reply setup topic %d", sent.TopicID)
 	waitForOwnedTopic(t, sent.TopicID, subject)
