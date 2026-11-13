@@ -578,3 +578,54 @@ func TestAppHintsNameTheProfile(t *testing.T) {
 		}
 	}
 }
+
+// However the app profile is chosen, the Imbox comes from the door and the envelope says
+// so; without the gate the same run is refused. Neither reaches HEY's server.
+func TestAppImboxRoutesByEveryWayOfChoosingTheProfile(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		args    []string
+		env     string
+		def     string
+		gate    bool
+		refused bool
+	}{
+		{"default profile", nil, "", "this-computer", true, false},
+		{"-P over a server default", []string{"-P", "this-computer"}, "", "hey.com", true, false},
+		{"HEY_PROFILE over a server default", nil, "this-computer", "hey.com", true, false},
+		{"default profile, no gate", nil, "", "this-computer", false, true},
+		{"-P, no gate", []string{"-P", "this-computer"}, "", "hey.com", false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			door := appImboxDoor(t)
+			appTestHome(t, door.Path, test.gate)
+			server := noRequestServer(t)
+			writeProfileTestConfig(t, os.Getenv("XDG_CONFIG_HOME"), fmt.Sprintf(`{
+  "profiles": {
+    "this-computer": {"base_url": %q, "endpoint": "app"},
+    "hey.com": {"base_url": %q}
+  },
+  "default_profile": %q
+}`, server.URL, server.URL, test.def))
+			t.Setenv("HEY_PROFILE", test.env)
+			t.Setenv("HEY_TOKEN", "a-token-the-server-would-take")
+
+			stdout, _, err := runProfileCLI(t, append(test.args, "box", "view", "imbox", "--json")...)
+			if test.refused {
+				if output.ExitCodeFor(err) != output.ExitUsage || len(door.Calls()) != 0 {
+					t.Errorf("err = %v, calls %s", err, door.Calls())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response := appEnvelope(t, stdout); response.Meta["endpoint"] != "app" || response.Meta["profile"] != "this-computer" {
+				t.Errorf("meta = %v", response.Meta)
+			}
+			if len(door.Calls()) != 1 {
+				t.Errorf("calls = %s", door.Calls())
+			}
+		})
+	}
+}
