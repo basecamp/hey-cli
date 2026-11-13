@@ -45,6 +45,12 @@ jobs:
       - name: Check module tidiness
         run: make tidy-check
 
+      - name: Test smoke harness offline
+        working-directory: tests/smoke
+        env:
+          HEY_SMOKE_OFFLINE: "1"
+        run: go test -race -count=1 -timeout 1m -run '^TestHarness'
+
       - name: Run tests with coverage floor
         run: make coverage
 

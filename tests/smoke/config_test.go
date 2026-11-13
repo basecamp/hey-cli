@@ -50,7 +50,8 @@ func TestConfigSet(t *testing.T) {
 	runHey := func(args ...string) (string, int) {
 		t.Helper()
 		cmd := exec.Command(binaryPath, args...)
-		env := os.Environ()
+		cmd.Dir = workDir
+		env := cliEnv()
 		// Remove HEY_BASE_URL so config file takes precedence.
 		filtered := make([]string, 0, len(env))
 		for _, e := range env {
