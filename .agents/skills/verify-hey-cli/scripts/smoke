@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""Run named cases through the existing live smoke harness; retain private proof."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+from urllib.parse import urlparse
+
+ROOT = Path(__file__).resolve().parents[4]
+
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def audit(events, names, code):
+    passed, bad = set(), []
+    for event in events:
+        if event.get("Action") == "pass" and event.get("Test"):
+            passed.add(event["Test"])
+        if event.get("Action") in {"fail", "skip"}:
+            bad.append([event["Action"], event.get("Test", "package")])
+    return {"ok": code == 0 and not bad and set(names) <= passed,
+            "go_exit": code, "missing": sorted(set(names) - passed), "failed_or_skipped": bad}
+
+
+def group_running(pgid):
+    states = subprocess.run(["ps", "-axo", "pgid=,stat="], capture_output=True, text=True)
+    if states.returncode:
+        return True
+    return any(len(fields := line.split()) == 2 and fields[0] == str(pgid) and not fields[1].startswith("Z")
+               for line in states.stdout.splitlines())
+
+
+def stop_group(pgid):
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return True
+        for _ in range(15):
+            if not group_running(pgid):
+                return True
+            time.sleep(0.1)
+    return not group_running(pgid)
+
+
+def execute(binary, names, timeout, tags):
+    if not names or any(not re.fullmatch(r"Test[A-Za-z0-9_]+", name) for name in names):
+        raise ValueError("name exact top-level Go tests, not regexes or subtest selectors")
+    if any(name != "TestAuthStatus" and name.startswith(("TestAuth", "TestLogin", "TestLogout", "TestCookie")) for name in names):
+        raise ValueError("credential/auth mutation cases need a separate unlogged journey")
+    origin = os.environ.get("HEY_SMOKE_BASE_URL", "http://app.hey.localhost:3003")
+    url = urlparse(origin)
+    if (url.scheme not in {"http", "https"} or url.hostname not in {"localhost", "127.0.0.1", "::1", "app.hey.localhost"}
+            or url.username or url.password or url.path not in {"", "/"} or url.query or url.fragment):
+        raise ValueError("live proof requires a loopback development origin without credentials")
+    duration = re.fullmatch(r"([1-9][0-9]*)([sm])", timeout)
+    if not duration:
+        raise ValueError("timeout must be a positive integer followed by s or m")
+    seconds = int(duration[1]) * (60 if duration[2] == "m" else 1)
+    binary = binary.resolve(strict=True)
+    run = Path(tempfile.mkdtemp(prefix="hv-", dir="/tmp")).resolve()
+    temporary = run / "tmp"
+    temporary.mkdir(mode=0o700)
+    pinned = run / "hey"
+    shutil.copyfile(binary, pinned)
+    pinned.chmod(0o700)
+    selected = sorted(set(names))
+    args = ["go", "test", "-json", "-count=1", "-timeout", timeout]
+    if tags:
+        args += ["-tags", tags]
+    args += ["-run", "^(" + "|".join(map(re.escape, selected)) + ")$"]
+    git = lambda *a: subprocess.run(["git", *a], cwd=ROOT, capture_output=True).stdout
+    tests = sorted((ROOT / "tests/smoke").glob("*.go"))
+    metadata = {"started": datetime.now(timezone.utc).isoformat(), "root": str(ROOT), "origin": origin,
+                "revision": git("rev-parse", "HEAD").decode().strip(),
+                "tracked_diff_sha256": hashlib.sha256(git("diff", "HEAD", "--")).hexdigest(),
+                "test_sources_sha256": hashlib.sha256(b"".join(p.name.encode() + p.read_bytes() for p in tests)).hexdigest(),
+                "binary": str(binary), "binary_sha256": digest(pinned), "argv": args, "tests": selected,
+                "temporary_root": str(temporary)}
+    (run / "command.json").write_text(json.dumps(metadata, indent=2))
+    env = {k: v for k, v in os.environ.items() if not k.startswith("HEY_")}
+    for key in ("HEY_SMOKE_EMAIL", "HEY_SMOKE_PASSWORD", "HEY_SMOKE_ACCOUNT_ID", "HEY_SMOKE_FROM",
+                "HEY_SMOKE_SENDER_ACCOUNT", "HEY_SMOKE_MAILPIT_URL", "HEY_VERIFY_CLEARANCE_ID", "HEY_VERIFY_CONTACT_ID"):
+        if key in os.environ:
+            env[key] = os.environ[key]
+    env.update(HEY_BINARY=str(pinned), HEY_SMOKE_BASE_URL=origin, HEY_SMOKE_STRICT="1",
+               HEY_NO_KEYRING="1", HEY_SMOKE_EVIDENCE_DIR=str(run / "commands"), TMPDIR=str(temporary))
+    print(f"Evidence: {run}", flush=True)
+    code = 1
+    process = None
+    error = None
+    stopped = True
+    try:
+        with (run / "events.jsonl").open("wb") as output:
+            process = subprocess.Popen(args, cwd=ROOT / "tests/smoke", env=env, stdout=output,
+                                       stderr=subprocess.STDOUT, start_new_session=True)
+            metadata["process_group"] = process.pid
+            (run / "command.json").write_text(json.dumps(metadata, indent=2))
+            code = process.wait(timeout=seconds + 45)
+    except (OSError, subprocess.TimeoutExpired, KeyboardInterrupt) as exception:
+        error = type(exception).__name__
+    finally:
+        if process is not None:
+            stopped = stop_group(process.pid)
+            if process.poll() is None and stopped:
+                process.wait(timeout=5)
+    events, text = [], []
+    for line in (run / "events.jsonl").read_text(errors="replace").splitlines() if (run / "events.jsonl").exists() else []:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            text.append(line + "\n")
+            continue
+        events.append(event)
+        text.append(event.get("Output", ""))
+    (run / "output.log").write_text("".join(text))
+    result = audit(events, selected, code)
+    result.update(error=error, binary_unchanged=digest(pinned) == metadata["binary_sha256"], process_group_stopped=stopped)
+    remaining = [p.name for p in temporary.glob("hey-smoke-*")]
+    result["retained_client_state"] = remaining
+    if not remaining and stopped:
+        shutil.rmtree(temporary)
+    result["ok"] = result["ok"] and not error and result["binary_unchanged"] and not remaining and stopped
+    (run / "go.exit").write_text(str(code) + "\n")
+    (run / "result.json").write_text(json.dumps(result, indent=2))
+    print("PASS" if result["ok"] else "NOT VERIFIED", flush=True)
+    if not result["ok"]:
+        print("Inspect output/receipts; recover owned resources before discarding any retained client state.", file=sys.stderr)
+    return (0 if result["ok"] else code if code > 0 else 1), run
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--binary", type=Path, default=ROOT / "bin/hey")
+    parser.add_argument("--timeout", default="4m")
+    parser.add_argument("--tags", default="")
+    parser.add_argument("tests", nargs="+")
+    args = parser.parse_args()
+    return execute(args.binary, args.tests, args.timeout, args.tags)[0]
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except (ValueError, OSError) as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)
