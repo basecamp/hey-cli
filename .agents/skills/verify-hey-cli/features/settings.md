@@ -6,7 +6,7 @@ Read defaults, persist an allowed setting across processes, and refuse an invali
 
 - Empty-client defaults and configuration sources.
 - Set/read persistence and invalid/insecure URL refusal.
-- Profiles, trusted-local precedence and account selection require their own cases when changed.
+- The `onboarded` setting, profiles, trusted-local precedence and account selection require their own cases when changed.
 
 ## How to get to it (user POV)
 

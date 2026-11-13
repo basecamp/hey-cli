@@ -10,7 +10,7 @@ Verify what a person sees and does in the running TUI: loaded data, focus, keys,
 
 ## How to get to it (user POV)
 
-Start `hey tui` in a PTY with its own development login. Follow `docs/tui.md` for actual keys and the report's section/form entry point. The CLI entry points in the other recipes are not substitutes.
+Start `hey tui` in a PTY with its own development login. Destination routes include `--topic`, `--screener`, global `--account` and `--remote`; read their actual help and `docs/tui.md` when the report uses them. Follow `docs/tui.md` for actual keys and the report's section/form entry point. The CLI entry points in the other recipes are not substitutes.
 
 ## Driving it with an owned PTY
 

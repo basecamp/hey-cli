@@ -34,18 +34,21 @@ class RunnerTests(unittest.TestCase):
                 EXECUTE(Path("not-a-binary"), names, "1m", "")
 
     def test_stubborn_owned_process_group_is_stopped(self):
-        process = subprocess.Popen([sys.executable, "-c",
-            "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)"],
-            stdout=subprocess.PIPE, text=True, start_new_session=True)
+        child = "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)"
+        leader = "import subprocess,sys; p=subprocess.Popen([sys.executable,'-c'," + repr(child) + "],stdout=subprocess.PIPE,text=True); print(p.stdout.readline().strip(),flush=True)"
+        process = subprocess.Popen([sys.executable, "-c", leader], stdout=subprocess.PIPE, text=True, start_new_session=True)
         try:
             self.assertEqual(process.stdout.readline().strip(), "ready")
+            process.wait(timeout=5)  # The leader is gone, but its stubborn child still owns the group.
+            self.assertTrue(MODULE["group_running"](process.pid))
             self.assertTrue(MODULE["stop_group"](process.pid))
-            process.wait(timeout=5)
             self.assertFalse(MODULE["group_running"](process.pid))
         finally:
-            if process.poll() is None:
+            try:
                 os.killpg(process.pid, 9)
-                process.wait()
+            except ProcessLookupError:
+                pass
+            process.wait()
             process.stdout.close()
 
     def test_real_process_status_pin_private_evidence_and_retained_state(self):
