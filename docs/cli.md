@@ -147,6 +147,22 @@ Profiles live in the global config:
 }
 ```
 
+A profile may sign in somewhere other than its `base_url`: `oauth_issuer_url` is where the
+browser authorizes the sign-in, and `oauth_token_url` where the code is exchanged and the sign-in
+refreshed and revoked. Each defaults to the `base_url`. A staff profile that reads HEY's API host
+while signing in at app.hey.com, say:
+
+```json
+"api": {
+  "base_url": "https://api.hey.com",
+  "oauth_issuer_url": "https://app.hey.com"
+}
+```
+
+`HEY_OAUTH_ISSUER_URL` and `HEY_OAUTH_TOKEN_URL` set them for one invocation, with or without a
+profile. Only the global config and the environment set them: a repository's are ignored, with a
+warning, even once trusted.
+
 A repository's `.hey/config.json` may set `profiles` and `default_profile` too, but they choose
 where a credential is sent, so hey ignores them, with a warning, until you run
 `hey config trust-local` from that directory, and again after any change to them. A trusted

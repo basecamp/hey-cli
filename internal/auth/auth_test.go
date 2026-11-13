@@ -1593,3 +1593,101 @@ func TestRefreshRefusesAProfileTokenAnotherServerIssued(t *testing.T) {
 		t.Errorf("AccessToken after the refusal = %q, want an error", token)
 	}
 }
+
+func TestLoginAuthorizesAtTheIssuerAndExchangesAtTheTokenEndpoint(t *testing.T) {
+	resource := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the resource server was asked %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer resource.Close()
+	exchanged := 0
+	tokens := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		exchanged++
+		if r.URL.Path != "/oauth/tokens" || r.FormValue("code") != "callback-code" {
+			t.Errorf("token request = %s %q", r.URL.Path, r.FormValue("code"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"oauth-access","refresh_token":"oauth-refresh","expires_in":3600}`)
+	}))
+	defer tokens.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	mgr := NewManager(resource.URL, tokens.Client(), t.TempDir())
+	mgr.UseOAuthServer("https://issuer.example/", tokens.URL)
+	var authorizedAt string
+	mgr.callbackWait = func(_ context.Context, _, authURL string, _ net.Listener, _ LoginOptions) (string, error) {
+		authorizedAt = authURL
+		return "callback-code", nil
+	}
+
+	if err := mgr.Login(t.Context(), LoginOptions{NoBrowser: true}); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	creds, err := mgr.GetStore().Load(mgr.CredentialKey())
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if !strings.HasPrefix(authorizedAt, "https://issuer.example/oauth/authorizations/new?") {
+		t.Errorf("authorized at %q, want the issuer", authorizedAt)
+	}
+	if exchanged != 1 {
+		t.Errorf("token endpoint asked %d times, want once", exchanged)
+	}
+	if creds.TokenEndpoint != tokens.URL+"/oauth/tokens" || creds.AccessToken != "oauth-access" {
+		t.Errorf("credentials = %#v", creds)
+	}
+	if mgr.CredentialKey() != resource.URL {
+		t.Errorf("credential key = %q, want the resource server's", mgr.CredentialKey())
+	}
+}
+
+func TestAProfileRefreshesAtItsTokenEndpoint(t *testing.T) {
+	resource := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the resource server was asked %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	defer resource.Close()
+	tokens := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/oauth/tokens" || r.FormValue("refresh_token") != "old-refresh" {
+			t.Errorf("refresh request = %s %q", r.URL.Path, r.FormValue("refresh_token"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"access_token":"fresh-access","refresh_token":"rotated-refresh","expires_in":3600}`)
+	}))
+	defer tokens.Close()
+
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	for _, endpoint := range []string{tokens.URL + "/oauth/tokens", ""} {
+		mgr := NewManager(resource.URL, tokens.Client(), t.TempDir())
+		mgr.UseOAuthServer("", tokens.URL)
+		mgr.UseProfile("api")
+		creds := &Credentials{AccessToken: "old-access", RefreshToken: "old-refresh", TokenEndpoint: endpoint}
+		if err := mgr.GetStore().Save(mgr.CredentialKey(), creds); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		if err := mgr.Refresh(t.Context()); err != nil {
+			t.Fatalf("Refresh with endpoint %q: %v", endpoint, err)
+		}
+		stored, err := mgr.GetStore().Load(mgr.CredentialKey())
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if stored.AccessToken != "fresh-access" {
+			t.Errorf("with endpoint %q, stored = %#v", endpoint, stored)
+		}
+	}
+
+	mgr := NewManager(resource.URL, tokens.Client(), t.TempDir())
+	mgr.UseOAuthServer("", tokens.URL)
+	mgr.UseProfile("api")
+	creds := &Credentials{AccessToken: "old-access", RefreshToken: "old-refresh", TokenEndpoint: resource.URL + "/oauth/tokens"}
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), creds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := mgr.Refresh(t.Context()); err == nil || !strings.Contains(err.Error(), "was issued by") {
+		t.Errorf("a sign-in issued by the base URL refreshed at the token endpoint: %v", err)
+	}
+}

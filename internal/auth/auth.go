@@ -30,6 +30,11 @@ const callbackListenAddr = "127.0.0.1:0"
 // Manager handles OAuth authentication.
 type Manager struct {
 	baseURL string
+	// issuerURL is where a browser or device sign-in is authorized, and tokenURL where
+	// its code is exchanged and its grant refreshed and revoked. Both are baseURL unless
+	// UseOAuthServer moved them: HEY's API host takes the tokens app.hey.com issues.
+	issuerURL string
+	tokenURL  string
 	// storeKey is where the credential lives in the store: the origin for the CLI's
 	// own, "mcp::" and the origin for hey mcp's (mcp.go), and under a profile
 	// "profile:<name>" and "mcp:profile:<name>" (UseProfile).
@@ -93,6 +98,8 @@ func NewManager(baseURL string, httpClient *http.Client, configDir string) *Mana
 	origin := normalizeBaseURL(baseURL)
 	return &Manager{
 		baseURL:       origin,
+		issuerURL:     origin,
+		tokenURL:      origin,
 		storeKey:      origin,
 		clientID:      oauthClientID,
 		honorEnvToken: true,
@@ -100,6 +107,17 @@ func NewManager(baseURL string, httpClient *http.Client, configDir string) *Mana
 		store:         NewStore(configDir),
 		httpClient:    httpClient,
 		listen:        listenConfig.Listen,
+	}
+}
+
+// UseOAuthServer moves sign-in off the base URL: issuerURL authorizes it, tokenURL
+// exchanges, refreshes and revokes it. An empty one stays the base URL.
+func (m *Manager) UseOAuthServer(issuerURL, tokenURL string) {
+	if issuerURL != "" {
+		m.issuerURL = normalizeBaseURL(issuerURL)
+	}
+	if tokenURL != "" {
+		m.tokenURL = normalizeBaseURL(tokenURL)
 	}
 }
 
@@ -284,8 +302,8 @@ func (o LoginOptions) log(msg string) {
 
 // Login initiates the browser-based OAuth login flow with PKCE.
 func (m *Manager) Login(ctx context.Context, opts LoginOptions) error {
-	authEndpoint := m.baseURL + "/oauth/authorizations/new"
-	tokenEndpoint := m.baseURL + "/oauth/tokens"
+	authEndpoint := m.issuerURL + "/oauth/authorizations/new"
+	tokenEndpoint := m.tokenURL + "/oauth/tokens"
 
 	// Listen before building the authorization URL: the redirect_uri has to
 	// carry whichever port the kernel handed out.
@@ -384,7 +402,7 @@ func (m *Manager) LoginWithToken(token string) error {
 	}
 	if m.profile != "" {
 		// Recorded so checkProfileIssuer knows which server a profile's token is for.
-		creds.TokenEndpoint = m.baseURL + "/oauth/tokens"
+		creds.TokenEndpoint = m.tokenURL + "/oauth/tokens"
 	}
 	return m.saveCredentials(creds)
 }
@@ -447,19 +465,19 @@ func (m *Manager) reloadCredentialsLocked() (*Credentials, error) {
 }
 
 // checkProfileIssuer refuses a profile's credential issued by another server than the
-// one this manager talks to. A profile's credential is keyed by its name, not by a
-// server, so an edited base_url would otherwise send it somewhere new; the key by
-// origin that the top-level credential uses makes this check needless there.
+// one this manager signs in at, its tokenURL. A profile's credential is keyed by its
+// name, not by a server, so an edited base_url would otherwise send it somewhere new;
+// the key by origin that the top-level credential uses makes this check needless there.
 func (m *Manager) checkProfileIssuer(creds *Credentials) error {
 	if m.profile == "" || creds.TokenEndpoint == "" {
 		return nil
 	}
 	issuer, issuerErr := config.Origin(creds.TokenEndpoint)
-	server, serverErr := config.Origin(m.baseURL)
+	server, serverErr := config.Origin(m.tokenURL)
 	if issuerErr == nil && serverErr == nil && issuer == server {
 		return nil
 	}
-	err := apierr.ErrAuth(fmt.Sprintf("profile %q's sign-in was issued by %s, not %s", m.profile, creds.TokenEndpoint, m.baseURL))
+	err := apierr.ErrAuth(fmt.Sprintf("profile %q's sign-in was issued by %s, not %s", m.profile, creds.TokenEndpoint, m.tokenURL))
 	err.Hint = "Run: " + m.LoginCommand()
 	return err
 }
@@ -538,7 +556,7 @@ func (m *Manager) refreshLocked(ctx context.Context, creds *Credentials) error {
 
 	tokenEndpoint := creds.TokenEndpoint
 	if tokenEndpoint == "" {
-		tokenEndpoint = m.baseURL + "/oauth/tokens"
+		tokenEndpoint = m.tokenURL + "/oauth/tokens"
 	}
 
 	installID, err := m.credentialInstallID(creds)

@@ -126,6 +126,7 @@ func newRootCmd() *cobra.Command {
 			configDir := config.ConfigDir()
 			httpClient := &http.Client{Timeout: 30 * time.Second}
 			authMgr = auth.NewManager(cfg.BaseURL, httpClient, configDir)
+			authMgr.UseOAuthServer(cfg.OAuthIssuerURL, cfg.OAuthTokenURL)
 			if cfg.ActiveProfile != "" {
 				authMgr.UseProfile(cfg.ActiveProfile)
 			}

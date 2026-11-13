@@ -27,14 +27,18 @@ import (
 
 // ProfileConfig is one named profile.
 type ProfileConfig struct {
-	BaseURL   string `json:"base_url"`
-	AccountID string `json:"account_id,omitempty"`
+	BaseURL        string `json:"base_url"`
+	AccountID      string `json:"account_id,omitempty"`
+	OAuthIssuerURL string `json:"oauth_issuer_url,omitempty"`
+	OAuthTokenURL  string `json:"oauth_token_url,omitempty"`
 }
 
 // profileEntry is a profile as one config file writes it.
 type profileEntry struct {
-	BaseURL   string
-	AccountID string
+	BaseURL        string
+	AccountID      string
+	OAuthIssuerURL string
+	OAuthTokenURL  string
 }
 
 // SourcePrompt is a profile chosen at the terminal's picker.
@@ -85,6 +89,8 @@ func parseProfiles(path string, raw map[string]json.RawMessage) (map[string]prof
 			continue
 		}
 		entry := profileEntry{BaseURL: baseURL}
+		entry.OAuthIssuerURL, _ = fields["oauth_issuer_url"].(string)
+		entry.OAuthTokenURL, _ = fields["oauth_token_url"].(string)
 		if raw, present := fields["account_id"]; present && raw != nil && raw != "" {
 			account := stringOrNumber(raw)
 			if account == "" {
@@ -128,6 +134,12 @@ func mergeProfile(profiles map[string]*ProfileConfig, name string, entry profile
 	if entry.AccountID != "" {
 		p.AccountID = entry.AccountID
 	}
+	if entry.OAuthIssuerURL != "" {
+		p.OAuthIssuerURL = entry.OAuthIssuerURL
+	}
+	if entry.OAuthTokenURL != "" {
+		p.OAuthTokenURL = entry.OAuthTokenURL
+	}
 }
 
 func originOrSelf(baseURL string) string {
@@ -155,6 +167,13 @@ func (c *Config) applyFileProfiles(file fileConfig, source Source) {
 			c.warnings = append(c.warnings, fmt.Sprintf("warning: ignoring profile %q from local config at %s: it names %s, and the global config's %q is for %s",
 				terminal.SanitizeLine(name), terminal.SanitizeLine(file.path), terminal.SanitizeLine(entry.BaseURL), terminal.SanitizeLine(name), terminal.SanitizeLine(existing.BaseURL)))
 			continue
+		}
+		// The sign-in's server is the global config's or the environment's to move: a
+		// repository's entry may not send a profile's code or refresh token elsewhere.
+		if source == SourceLocal && (entry.OAuthIssuerURL != "" || entry.OAuthTokenURL != "") {
+			c.warnings = append(c.warnings, fmt.Sprintf("warning: ignoring oauth_issuer_url and oauth_token_url of profile %q from local config at %s: only the global config sets them",
+				terminal.SanitizeLine(name), terminal.SanitizeLine(file.path)))
+			entry.OAuthIssuerURL, entry.OAuthTokenURL = "", ""
 		}
 		mergeProfile(c.Profiles, name, entry)
 	}
@@ -209,6 +228,9 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	if err := validateBaseURL(p.BaseURL); err != nil {
 		return err
 	}
+	if err := validateOAuthServer(p.OAuthIssuerURL, p.OAuthTokenURL); err != nil {
+		return err
+	}
 	if c.sources == nil {
 		c.sources = map[string]Source{}
 	}
@@ -224,6 +246,14 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	if c.SourceOf("base_url") != SourceEnv {
 		c.BaseURL = p.BaseURL
 		c.sources["base_url"] = SourceProfile
+	}
+	if c.SourceOf("oauth_issuer_url") != SourceEnv && p.OAuthIssuerURL != "" {
+		c.OAuthIssuerURL = p.OAuthIssuerURL
+		c.sources["oauth_issuer_url"] = SourceProfile
+	}
+	if c.SourceOf("oauth_token_url") != SourceEnv && p.OAuthTokenURL != "" {
+		c.OAuthTokenURL = p.OAuthTokenURL
+		c.sources["oauth_token_url"] = SourceProfile
 	}
 	switch {
 	case c.SourceOf("account_id") == SourceEnv:

@@ -36,6 +36,13 @@ type Config struct {
 	AccountID string `json:"account_id,omitempty"`
 	Onboarded bool   `json:"onboarded,omitempty"`
 
+	// OAuthIssuerURL and OAuthTokenURL move sign-in off BaseURL: the issuer authorizes
+	// it in the browser, the token endpoint exchanges, refreshes and revokes it. Empty
+	// is BaseURL. Only a profile or the environment sets them, never a repository's
+	// top-level keys, since they decide where a code and a refresh token are sent.
+	OAuthIssuerURL string `json:"oauth_issuer_url,omitempty"`
+	OAuthTokenURL  string `json:"oauth_token_url,omitempty"`
+
 	// Profiles, DefaultProfile and ActiveProfile are profiles.go's: the profiles the
 	// global config and a trusted repository config name, the one chosen when nothing
 	// else chooses, and the one this invocation runs as ("" for none).
@@ -214,6 +221,14 @@ func load(localPath string) (*Config, error) {
 		cfg.BaseURL = env
 		cfg.sources["base_url"] = SourceEnv
 	}
+	if env := os.Getenv("HEY_OAUTH_ISSUER_URL"); env != "" {
+		cfg.OAuthIssuerURL = env
+		cfg.sources["oauth_issuer_url"] = SourceEnv
+	}
+	if env := os.Getenv("HEY_OAUTH_TOKEN_URL"); env != "" {
+		cfg.OAuthTokenURL = env
+		cfg.sources["oauth_token_url"] = SourceEnv
+	}
 	if env := os.Getenv("HEY_ACCOUNT_ID"); env != "" {
 		accountID, accountErr := normalizeAccountID(env)
 		if accountErr != nil {
@@ -224,6 +239,9 @@ func load(localPath string) (*Config, error) {
 	}
 
 	if validationErr := validateBaseURL(cfg.BaseURL); validationErr != nil {
+		return nil, validationErr
+	}
+	if validationErr := validateOAuthServer(cfg.OAuthIssuerURL, cfg.OAuthTokenURL); validationErr != nil {
 		return nil, validationErr
 	}
 	if cfg.SourceOf("account_id") == SourceDefault {
@@ -715,6 +733,20 @@ func serverOrigin(base string) (string, error) {
 		host = "[" + hostname + "]"
 	}
 	return (&url.URL{Scheme: scheme, Host: host}).String(), nil
+}
+
+// validateOAuthServer holds an issuer and a token endpoint, where set, to the rules a
+// base URL is held to.
+func validateOAuthServer(issuerURL, tokenURL string) error {
+	for _, set := range []string{issuerURL, tokenURL} {
+		if set == "" {
+			continue
+		}
+		if err := validateBaseURL(set); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func validateBaseURL(base string) error {

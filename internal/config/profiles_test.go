@@ -285,3 +285,95 @@ func TestAnEmptyProfileAccountIsNone(t *testing.T) {
 		t.Errorf("profiles = %#v, %v", profiles, err)
 	}
 }
+
+func TestAProfileSignsInWhereItsOAuthServerSays(t *testing.T) {
+	home := profileConfigHome(t)
+	t.Setenv("HEY_OAUTH_ISSUER_URL", "")
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "")
+	writeConfigFile(t, filepath.Join(home, configDirName, configFile), `{
+		"profiles":{
+			"api":{"base_url":"https://api.hey.com","oauth_issuer_url":"https://app.hey.com"},
+			"plain":{"base_url":"https://app.hey.com"},
+			"insecure":{"base_url":"https://api.hey.com","oauth_token_url":"http://app.hey.com"}}}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OAuthIssuerURL != "" || cfg.OAuthTokenURL != "" {
+		t.Errorf("the top level took a profile's OAuth server: %q %q", cfg.OAuthIssuerURL, cfg.OAuthTokenURL)
+	}
+	if err := cfg.ApplyProfile("api", SourceFlag); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BaseURL != "https://api.hey.com" || cfg.OAuthIssuerURL != "https://app.hey.com" || cfg.OAuthTokenURL != "" || cfg.SourceOf("oauth_issuer_url") != SourceProfile {
+		t.Errorf("api = %q, issuer %q, token %q", cfg.BaseURL, cfg.OAuthIssuerURL, cfg.OAuthTokenURL)
+	}
+
+	cfg, _ = Load()
+	if err := cfg.ApplyProfile("plain", SourceFlag); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OAuthIssuerURL != "" || cfg.OAuthTokenURL != "" {
+		t.Errorf("plain signs in off its base_url: %q %q", cfg.OAuthIssuerURL, cfg.OAuthTokenURL)
+	}
+
+	cfg, _ = Load()
+	if err := cfg.ApplyProfile("insecure", SourceFlag); err == nil || !strings.Contains(err.Error(), "HTTPS") || cfg.ActiveProfile != "" {
+		t.Errorf("a plain-HTTP token endpoint was applied: %v", err)
+	}
+
+	t.Setenv("HEY_OAUTH_ISSUER_URL", "https://beta.hey.com")
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "https://api.hey.com")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyProfile("api", SourceFlag); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OAuthIssuerURL != "https://beta.hey.com" || cfg.OAuthTokenURL != "https://api.hey.com" || cfg.SourceOf("oauth_issuer_url") != SourceEnv {
+		t.Errorf("the environment lost to the profile: %q %q", cfg.OAuthIssuerURL, cfg.OAuthTokenURL)
+	}
+
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "http://api.hey.com")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Errorf("a plain-HTTP HEY_OAUTH_TOKEN_URL was taken: %v", err)
+	}
+}
+
+func TestARepositoryNeverMovesAProfilesOAuthServer(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "config"))
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HEY_ACCOUNT_ID", "")
+	t.Setenv("HEY_OAUTH_ISSUER_URL", "")
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "")
+	workspace := filepath.Join(tmp, "workspace")
+	writeConfigFile(t, filepath.Join(tmp, "config", configDirName, configFile), `{"profiles":{"api":{"base_url":"https://api.hey.com"}}}`)
+	writeConfigFile(t, filepath.Join(workspace, ".hey", configFile), `{"profiles":{
+		"api":{"base_url":"https://api.hey.com","oauth_token_url":"https://elsewhere.example"},
+		"theirs":{"base_url":"https://app.hey.com","oauth_issuer_url":"https://elsewhere.example"}}}`)
+	t.Chdir(workspace)
+
+	untrusted, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := untrusted.TrustLocalConfig(); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"api", "theirs"} {
+		if p := cfg.Profiles[name]; p == nil || p.OAuthIssuerURL != "" || p.OAuthTokenURL != "" {
+			t.Errorf("profile %q took a repository's OAuth server: %#v", name, p)
+		}
+	}
+	if warnings := strings.Join(cfg.Warnings(), "\n"); !strings.Contains(warnings, `ignoring oauth_issuer_url and oauth_token_url of profile "api"`) || !strings.Contains(warnings, `of profile "theirs"`) {
+		t.Errorf("warnings = %q", warnings)
+	}
+}
