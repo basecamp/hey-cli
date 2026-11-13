@@ -11,13 +11,13 @@ Save unfinished mail without delivering it, resume/edit it, and preserve a reply
 
 ## How to get to it (user POV)
 
-CLI entry points are `hey compose --draft`, `hey reply <topic-id> --draft`, and `hey draft list/show/edit/send/delete`. Explicit reply recipient overrides use `--to`, `--cc`, `--bcc` and `--replace-recipients`; do not confuse replacement with merging HEY's prefill. TUI compose/reply forms are a separate entry point under [TUI](tui.md).
+CLI entry points are `hey compose --draft`, `hey compose --thread-id <topic-id> --draft`, `hey reply <topic-id> --draft`, and `hey draft list/show/edit/send/delete`. Explicit reply recipient overrides use `--to`, `--cc`, `--bcc` and `--replace-recipients`; do not confuse replacement with merging HEY's prefill. TUI compose/reply forms are a separate entry point under [TUI](tui.md).
 
 ## Driving it with the smoke harness
 
 Preconditions: skill doctor passed; self-thread/send cases have local-only routing and capture. Read `tests/smoke/draft_lifecycle_test.go` and the command's `--help`.
 
-- **Lifecycle.** Run `"$VERIFY" TestDraftLifecycle TestDraftDelete TestDraftSendRefusesWithoutRecipients`. The assertions check persisted subject/body/recipients and list membership, refusal, removal after send/delete, and owned-thread cleanup. Read them before claiming a particular field was exercised.
+- **Lifecycle.** Run `"$VERIFY" TestDraftLifecycle TestDraftDelete TestDraftSendRefusesWithoutRecipients`. The assertions check persisted subject/body/recipients and list membership, refusal, removal after send/delete, and owned-thread cleanup. Read them before claiming a particular field was exercised. The refusal test checks the error, not the retained draft before cleanup; add that readback for a draft-loss report.
 - **Reply baseline.** Run `"$VERIFY" TestReplyDraft`. It creates its own topic, saves a reply draft and checks `is_reply`, body and listing. It does **not** prove which thread owns the draft, or Cc/Bcc/subject preservation. `draft show` has no thread/entry identifier; a linkage report needs an independent observed association, not `is_reply`.
 - **Specific bug.** Add a focused case following [bug reproduction](../references/bug-reproduction.md). Use `findSmokeThread`, `heyJSON`, `draftData`, `draftState` and `registerDraftCleanup` from the existing package. Drive the reported reply command; read `hey draft show <draft-id>` and assert the exact missing/changed fields. For an explicit-Cc report, assert the saved `cc` array, not a preview's array or only `is_reply`.
 - **Side effects.** Confirm the owned draft appears and is removed; check local capture when asserting delivery/non-delivery. A reply setup self-send is separate from the draft action and must not be counted as draft delivery.
