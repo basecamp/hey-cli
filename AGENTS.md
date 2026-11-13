@@ -224,6 +224,13 @@ For names, use common names or fictional characters. For calendar events, use pl
 The goal is to make the examples feel authentic without risking privacy or confusion.
 Never use abbreviations or placeholders like "Test Event", "User1", "a@ex.com". Instead, use full names and descriptive titles that reflect real-world usage.
 
+### Runtime verification
+
+For before/after bug proof or PR runtime checks, read
+`.agents/skills/verify-hey-cli/SKILL.md` and its user-facing feature recipe.
+The existing smoke harness is the driver; unit tests or a neighboring green smoke
+case do not prove the reported behavior. CLI and live TUI evidence stay separate.
+
 ### Unit Testing
 
 Whenever you add, remove or change any functionality add/remove/change tests as well. Tests are located in the same package as the code they test, with filenames ending in `_test.go`. Run `make test` to run all tests.

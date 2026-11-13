@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Offline contracts for the thin runner, not live HEY verification."""
+import contextlib
+import io
+import json
+import os
+from pathlib import Path
+import runpy
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+MODULE = runpy.run_path(str(Path(__file__).with_name("smoke")))
+EXECUTE = MODULE["execute"]
+
+
+class RunnerTests(unittest.TestCase):
+    def test_missing_skipped_failed_or_nonzero_is_not_pass(self):
+        audit = MODULE["audit"]
+        passed = {"Action": "pass", "Test": "TestChosen"}
+        for events, code in [([], 0), ([passed], 7), ([passed, {"Action": "skip", "Test": "TestChosen/subcase"}], 0),
+                             ([passed, {"Action": "fail"}], 0)]:
+            self.assertFalse(audit(events, ["TestChosen"], code)["ok"])
+        self.assertTrue(audit([passed], ["TestChosen"], 0)["ok"])
+
+    def test_refuses_nonlocal_and_auth_or_regex_before_launch(self):
+        for origin, names in [("https://app.hey.com", ["TestChosen"]),
+                              ("http://app.hey.localhost:3003", ["TestAuthToken"]),
+                              ("http://app.hey.localhost:3003", ["TestChosen|TestOther"])]:
+            with patch.dict(os.environ, {"HEY_SMOKE_BASE_URL": origin}), self.assertRaises(ValueError):
+                EXECUTE(Path("not-a-binary"), names, "1m", "")
+
+    def test_stubborn_owned_process_group_is_stopped(self):
+        process = subprocess.Popen([sys.executable, "-c",
+            "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)"],
+            stdout=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            self.assertEqual(process.stdout.readline().strip(), "ready")
+            self.assertTrue(MODULE["stop_group"](process.pid))
+            process.wait(timeout=5)
+            self.assertFalse(MODULE["group_running"](process.pid))
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, 9)
+                process.wait()
+            process.stdout.close()
+
+    def test_real_process_status_pin_private_evidence_and_retained_state(self):
+        for code, name, leftover in [(0, "TestChosen", False), (7, "TestChosen", False),
+                                     (0, "TestOther", False), (0, "TestChosen", True)]:
+            with self.subTest(code=code, name=name, leftover=leftover), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / "tests/smoke").mkdir(parents=True)
+                binary = root / "hey"
+                binary.write_text("synthetic binary")
+                fake = root / "go"
+                fake.write_text("#!/usr/bin/env python3\nimport json,os\nfrom pathlib import Path\n"
+                                + ("Path(os.environ['TMPDIR'],'hey-smoke-interrupted').mkdir()\n" if leftover else "")
+                                + "print(json.dumps({'Action':'pass','Test':" + repr(name) + "}))\n"
+                                + "raise SystemExit(" + str(code) + ")\n")
+                fake.chmod(0o700)
+                with patch.dict(EXECUTE.__globals__, ROOT=root), \
+                     patch.dict(os.environ, {"PATH": str(root) + os.pathsep + os.environ["PATH"],
+                                             "HEY_SMOKE_BASE_URL": "http://app.hey.localhost:3003", "HEY_TOKEN": "SYNTHETIC"}), \
+                     contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    status, run = EXECUTE(binary, ["TestChosen"], "1m", "")
+                try:
+                    result = json.loads((run / "result.json").read_text())
+                    self.assertEqual(result["ok"], code == 0 and name == "TestChosen" and not leftover)
+                    self.assertEqual(status, 7 if code == 7 else 0 if result["ok"] else 1)
+                    self.assertTrue((run / "events.jsonl").exists())
+                    self.assertTrue((run / "hey").exists())
+                    self.assertEqual(run.stat().st_mode & 0o777, 0o700)
+                    self.assertEqual((run / "tmp").exists(), leftover)
+                    self.assertNotIn("SYNTHETIC", (run / "command.json").read_text())
+                finally:
+                    shutil.rmtree(run)
+
+
+if __name__ == "__main__":
+    unittest.main()
