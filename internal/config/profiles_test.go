@@ -377,3 +377,46 @@ func TestARepositoryNeverMovesAProfilesOAuthServer(t *testing.T) {
 		t.Errorf("warnings = %q", warnings)
 	}
 }
+
+func TestAProfilesOAuthServerIsReadStrictly(t *testing.T) {
+	home := profileConfigHome(t)
+	t.Setenv("HEY_OAUTH_ISSUER_URL", "")
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "https://api.hey.com")
+	path := filepath.Join(home, configDirName, configFile)
+
+	writeConfigFile(t, path, `{"profiles":{"api":{"base_url":"https://api.hey.com","oauth_issuer_url":null}}}`)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "oauth_issuer_url must be a string") {
+		t.Errorf("a null oauth_issuer_url was taken: %v", err)
+	}
+
+	writeConfigFile(t, path, `{"profiles":{"api":{"base_url":"https://api.hey.com","oauth_token_url":"http://api.hey.com"}}}`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyProfile("api", SourceFlag); err != nil || cfg.OAuthTokenURL != "https://api.hey.com" {
+		t.Errorf("the environment did not stand in for a profile's bad token server: %v, %q", err, cfg.OAuthTokenURL)
+	}
+
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyProfile("api", SourceFlag); err == nil || !strings.Contains(err.Error(), "oauth_token_url must use HTTPS") {
+		t.Errorf("a plain-HTTP oauth_token_url was applied: %v", err)
+	}
+}
+
+func TestAnotherAccountKeepsAProfilesOAuthServer(t *testing.T) {
+	profiles := map[string]*ProfileConfig{}
+	mergeProfile(profiles, "api", profileEntry{BaseURL: "https://api.hey.com", AccountID: "1", OAuthIssuerURL: "https://app.hey.com"})
+	mergeProfile(profiles, "api", profileEntry{BaseURL: "https://api.hey.com", AccountID: "2"})
+	if p := profiles["api"]; p.AccountID != "2" || p.OAuthIssuerURL != "https://app.hey.com" {
+		t.Errorf("another account on the same server = %#v", p)
+	}
+	mergeProfile(profiles, "api", profileEntry{BaseURL: "https://staging.example.com"})
+	if p := profiles["api"]; p.OAuthIssuerURL != "" {
+		t.Errorf("another server kept the OAuth server: %#v", p)
+	}
+}

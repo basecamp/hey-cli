@@ -132,8 +132,14 @@ func (m *Manager) Revoke(ctx context.Context) error {
 		clientID = m.clientID
 	}
 
+	// Revoked where it was issued, as it is refreshed: the token endpoint configured now
+	// may have moved since the sign-in.
+	endpoint := creds.TokenEndpoint
+	if endpoint == "" {
+		endpoint = m.tokenURL + "/oauth/tokens"
+	}
 	form := url.Values{"client_id": {clientID}, "token": {token}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, m.tokenURL+"/oauth/tokens", strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return fmt.Errorf("creating revocation request: %w", err)
 	}

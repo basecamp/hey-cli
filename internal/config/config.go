@@ -738,29 +738,33 @@ func serverOrigin(base string) (string, error) {
 // validateOAuthServer holds an issuer and a token endpoint, where set, to the rules a
 // base URL is held to.
 func validateOAuthServer(issuerURL, tokenURL string) error {
-	for _, set := range []string{issuerURL, tokenURL} {
-		if set == "" {
-			continue
-		}
-		if err := validateBaseURL(set); err != nil {
+	if issuerURL != "" {
+		if err := validateServerURL("oauth_issuer_url", issuerURL); err != nil {
 			return err
 		}
+	}
+	if tokenURL != "" {
+		return validateServerURL("oauth_token_url", tokenURL)
 	}
 	return nil
 }
 
 func validateBaseURL(base string) error {
-	u, err := url.Parse(base)
+	return validateServerURL("base URL", base)
+}
+
+func validateServerURL(name, value string) error {
+	u, err := url.Parse(value)
 	if err != nil {
-		return apierr.ErrUsage(fmt.Sprintf("invalid base URL %q: %v", base, err))
+		return apierr.ErrUsage(fmt.Sprintf("invalid %s %q: %v", name, value, err))
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return apierr.ErrUsage(fmt.Sprintf("base URL must be an absolute URL with scheme and host (got %q)", base))
+		return apierr.ErrUsage(fmt.Sprintf("%s must be an absolute URL with scheme and host (got %q)", name, value))
 	}
 	// Enforce HTTPS for non-localhost
 	host := u.Hostname()
 	if u.Scheme != "https" && host != "localhost" && host != "127.0.0.1" && host != "::1" && !strings.HasSuffix(host, ".localhost") {
-		return apierr.ErrUsage(fmt.Sprintf("base URL must use HTTPS (got %q)", base))
+		return apierr.ErrUsage(fmt.Sprintf("%s must use HTTPS (got %q)", name, value))
 	}
 	return nil
 }

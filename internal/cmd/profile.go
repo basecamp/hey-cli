@@ -243,6 +243,14 @@ Examples:
 				}
 				profile.AccountID = normalized
 			}
+			// HEY_OAUTH_ISSUER_URL and HEY_OAUTH_TOKEN_URL are the profile's to keep, so
+			// it signs in where it was created to; an active profile's never are.
+			if cfg.SourceOf("oauth_issuer_url") == config.SourceEnv {
+				profile.OAuthIssuerURL = cfg.OAuthIssuerURL
+			}
+			if cfg.SourceOf("oauth_token_url") == config.SourceEnv {
+				profile.OAuthTokenURL = cfg.OAuthTokenURL
+			}
 
 			// The entry is written only after the login succeeds, so prove the config
 			// file can take it before a credential exists to orphan.
@@ -251,6 +259,7 @@ Examples:
 			}
 
 			mgr := auth.NewManager(profile.BaseURL, &http.Client{Timeout: 30 * time.Second}, config.ConfigDir())
+			mgr.UseOAuthServer(profile.OAuthIssuerURL, profile.OAuthTokenURL)
 			mgr.UseProfile(name)
 			ctx, cancel := context.WithTimeout(cmd.Context(), 6*time.Minute)
 			defer cancel()
@@ -329,14 +338,16 @@ func newProfileDeleteCommand() *cobra.Command {
 			// the active configuration's, which may belong to another profile.
 			httpClient := &http.Client{Timeout: 15 * time.Second}
 			cli := auth.NewManager(p.BaseURL, httpClient, config.ConfigDir())
+			cli.UseOAuthServer(p.OAuthIssuerURL, p.OAuthTokenURL)
 			cli.UseProfile(name)
 			// An unreadable client id still leaves a credential to remove; its own
 			// record names the client it was issued to.
 			clientID, _, _ := config.MCPClientID(p.BaseURL)
 			mcp := auth.NewMCPManager(p.BaseURL, httpClient, config.ConfigDir(), clientID)
+			mcp.UseOAuthServer(p.OAuthIssuerURL, p.OAuthTokenURL)
 			mcp.UseProfile(name)
 			for _, mgr := range []*auth.Manager{cli, mcp} {
-				revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
+				revoked, err := revokeAndForget(cmd, mgr, name, p.TokenServer())
 				if err != nil {
 					// The profile stays, so its credential can still be reached to retry.
 					arg := name
@@ -374,9 +385,10 @@ func newProfileDeleteCommand() *cobra.Command {
 // rotated grant unrevoked, listed in HEY's Connected Apps, and nothing else.
 //
 // The refresh token goes only to a server hey would send it to, and only to the one
-// that issued it: a base_url edited since the sign-in, or one on plain HTTP, gets
-// nothing, and the credential is removed unrevoked with a warning.
-func revokeAndForget(cmd *cobra.Command, mgr *auth.Manager, name, baseURL string) (*bool, error) {
+// that issued it: a token server (oauth_token_url, else base_url) edited since the
+// sign-in, or one on plain HTTP, gets nothing, and the credential is removed unrevoked
+// with a warning.
+func revokeAndForget(cmd *cobra.Command, mgr *auth.Manager, name, tokenServer string) (*bool, error) {
 	creds, err := mgr.GetStore().Load(mgr.CredentialKey())
 	if errors.Is(err, auth.ErrCredentialsNotFound) {
 		return nil, nil
@@ -386,10 +398,10 @@ func revokeAndForget(cmd *cobra.Command, mgr *auth.Manager, name, baseURL string
 	}
 	var revoked *bool
 	issued := creds.OAuthType != "token" && (creds.RefreshToken != "" || creds.AccessToken != "")
-	if issued && !revocableAt(baseURL, creds.TokenEndpoint) {
+	if issued && !revocableAt(tokenServer, creds.TokenEndpoint) {
 		no := false
 		revoked = &no
-		fmt.Fprintln(cmd.ErrOrStderr(), terminal.SanitizeLine(fmt.Sprintf("warning: not revoking profile %q's sign-in at %s, which did not issue it or takes no credential; remove it in HEY's Connected Apps", name, baseURL)))
+		fmt.Fprintln(cmd.ErrOrStderr(), terminal.SanitizeLine(fmt.Sprintf("warning: not revoking profile %q's sign-in at %s, which did not issue it or takes no credential; remove it in HEY's Connected Apps", name, tokenServer)))
 	} else if issued {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 15*time.Second)
 		revokeErr := mgr.Revoke(ctx)
@@ -403,17 +415,17 @@ func revokeAndForget(cmd *cobra.Command, mgr *auth.Manager, name, baseURL string
 	return revoked, mgr.Logout()
 }
 
-// revocableAt reports whether a profile's server may take its refresh token back: a
-// server hey sends credentials to, and the one whose token endpoint issued it.
-func revocableAt(baseURL, tokenEndpoint string) bool {
-	if config.ValidateBaseURL(baseURL) != nil {
+// revocableAt reports whether a profile's token server may take its refresh token back:
+// a server hey sends credentials to, and the one whose token endpoint issued it.
+func revocableAt(tokenServer, tokenEndpoint string) bool {
+	if config.ValidateBaseURL(tokenServer) != nil {
 		return false
 	}
 	if tokenEndpoint == "" {
 		// Nothing says which server issued it.
 		return false
 	}
-	profileOrigin, err := config.Origin(baseURL)
+	profileOrigin, err := config.Origin(tokenServer)
 	if err != nil {
 		return false
 	}

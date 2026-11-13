@@ -153,15 +153,18 @@ refreshed and revoked. Each defaults to the `base_url`. A staff profile that rea
 while signing in at app.hey.com, say:
 
 ```json
-"api": {
-  "base_url": "https://api.hey.com",
-  "oauth_issuer_url": "https://app.hey.com"
+{
+  "profiles": {
+    "api": { "base_url": "https://api.hey.com", "oauth_issuer_url": "https://app.hey.com" }
+  }
 }
 ```
 
 `HEY_OAUTH_ISSUER_URL` and `HEY_OAUTH_TOKEN_URL` set them for one invocation, with or without a
-profile. Only the global config and the environment set them: a repository's are ignored, with a
-warning, even once trusted.
+profile, and `hey profile create` keeps them in the profile it creates. Only a global profile and
+the environment set them: a repository's profile entry has them ignored, with a warning, even once
+trusted. A profile's sign-in is refused once its `base_url` or token server is edited away from
+the one it was made at.
 
 A repository's `.hey/config.json` may set `profiles` and `default_profile` too, but they choose
 where a credential is sent, so hey ignores them, with a warning, until you run

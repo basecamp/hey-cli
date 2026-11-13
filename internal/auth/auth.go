@@ -374,6 +374,7 @@ func (m *Manager) signedInCredentials(token *OAuthToken, tokenEndpoint, installI
 		RefreshToken:  token.RefreshToken,
 		OAuthType:     "oauth",
 		TokenEndpoint: tokenEndpoint,
+		ResourceURL:   m.baseURL,
 		InstallID:     installID,
 	}
 	if !token.ExpiresAt.IsZero() {
@@ -403,6 +404,7 @@ func (m *Manager) LoginWithToken(token string) error {
 	if m.profile != "" {
 		// Recorded so checkProfileIssuer knows which server a profile's token is for.
 		creds.TokenEndpoint = m.tokenURL + "/oauth/tokens"
+		creds.ResourceURL = m.baseURL
 	}
 	return m.saveCredentials(creds)
 }
@@ -465,21 +467,32 @@ func (m *Manager) reloadCredentialsLocked() (*Credentials, error) {
 }
 
 // checkProfileIssuer refuses a profile's credential issued by another server than the
-// one this manager signs in at, its tokenURL. A profile's credential is keyed by its
-// name, not by a server, so an edited base_url would otherwise send it somewhere new;
-// the key by origin that the top-level credential uses makes this check needless there.
+// one this manager signs in at, its tokenURL, or made for another base URL than its
+// own. A profile's credential is keyed by its name, not by a server, so an edited
+// base_url or oauth_token_url would otherwise send it somewhere new; the key by origin
+// that the top-level credential uses makes this check needless there.
 func (m *Manager) checkProfileIssuer(creds *Credentials) error {
 	if m.profile == "" || creds.TokenEndpoint == "" {
 		return nil
 	}
-	issuer, issuerErr := config.Origin(creds.TokenEndpoint)
-	server, serverErr := config.Origin(m.tokenURL)
-	if issuerErr == nil && serverErr == nil && issuer == server {
+	var refusal string
+	if !sameOrigin(creds.TokenEndpoint, m.tokenURL) {
+		refusal = fmt.Sprintf("profile %q's sign-in was issued by %s, not %s", m.profile, creds.TokenEndpoint, m.tokenURL)
+	} else if creds.ResourceURL != "" && !sameOrigin(creds.ResourceURL, m.baseURL) {
+		refusal = fmt.Sprintf("profile %q's sign-in was made for %s, not %s", m.profile, creds.ResourceURL, m.baseURL)
+	}
+	if refusal == "" {
 		return nil
 	}
-	err := apierr.ErrAuth(fmt.Sprintf("profile %q's sign-in was issued by %s, not %s", m.profile, creds.TokenEndpoint, m.tokenURL))
+	err := apierr.ErrAuth(refusal)
 	err.Hint = "Run: " + m.LoginCommand()
 	return err
+}
+
+func sameOrigin(a, b string) bool {
+	originA, errA := config.Origin(a)
+	originB, errB := config.Origin(b)
+	return errA == nil && errB == nil && originA == originB
 }
 
 func (m *Manager) saveCredentials(creds *Credentials) error {

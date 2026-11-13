@@ -512,3 +512,40 @@ func TestMCPCredentialKeyIsTheCanonicalOrigin(t *testing.T) {
 		t.Errorf("keys %q and %q, want both mcp::https://app.hey.com", a.CredentialKey(), b.CredentialKey())
 	}
 }
+
+func TestADeviceSignInAuthorizesAtTheIssuerAndIsRevokedWhereItWasIssued(t *testing.T) {
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "")
+	issuer, tokens := &fakeHEYOAuth{t: t}, &fakeHEYOAuth{t: t}
+	issuerServer, tokenServer := httptest.NewServer(issuer), httptest.NewServer(tokens)
+	t.Cleanup(issuerServer.Close)
+	t.Cleanup(tokenServer.Close)
+	resource := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the resource server was asked %s %s", r.Method, r.URL.Path)
+	}))
+	t.Cleanup(resource.Close)
+	keyring := newFakeKeyring()
+	configDir := t.TempDir()
+	manager := func(tokenURL string) *Manager {
+		m := NewMCPManager(resource.URL, http.DefaultClient, configDir, testMCPClientID)
+		m.store.keyring = credentialKeyring{set: keyring.Set, get: keyring.Get, delete: keyring.Delete}
+		m.wait = func(context.Context, time.Duration) error { return nil }
+		m.UseOAuthServer(issuerServer.URL, tokenURL)
+		return m
+	}
+
+	if _, err := manager(tokenServer.URL).LoginMCP(context.Background(), quiet); err != nil {
+		t.Fatal(err)
+	}
+	if issuer.deviceRequests == nil || len(issuer.polls) != 0 || tokens.deviceRequests != nil || len(tokens.polls) == 0 {
+		t.Errorf("issuer asked %v and polled %d times; token endpoint asked %v and polled %d times",
+			issuer.deviceRequests, len(issuer.polls), tokens.deviceRequests, len(tokens.polls))
+	}
+
+	if err := manager(issuerServer.URL).Revoke(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(tokens.revocations) != 1 || len(issuer.revocations) != 0 {
+		t.Errorf("revoked %d times where it was issued and %d where the token endpoint moved", len(tokens.revocations), len(issuer.revocations))
+	}
+}

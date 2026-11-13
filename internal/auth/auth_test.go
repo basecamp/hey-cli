@@ -1691,3 +1691,22 @@ func TestAProfileRefreshesAtItsTokenEndpoint(t *testing.T) {
 		t.Errorf("a sign-in issued by the base URL refreshed at the token endpoint: %v", err)
 	}
 }
+
+func TestAProfilesSignInGoesOnlyToTheBaseURLItWasMadeFor(t *testing.T) {
+	tokens := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the token endpoint was asked %s %s", r.Method, r.URL.Path)
+	}))
+	defer tokens.Close()
+	t.Setenv("HEY_TOKEN", "")
+	t.Setenv("HEY_NO_KEYRING", "1")
+	mgr := NewManager("https://staging.example.com", tokens.Client(), t.TempDir())
+	mgr.UseOAuthServer("", tokens.URL)
+	mgr.UseProfile("api")
+	creds := &Credentials{AccessToken: "api-access", RefreshToken: "api-refresh", TokenEndpoint: tokens.URL + "/oauth/tokens", ResourceURL: "https://api.hey.com"}
+	if err := mgr.GetStore().Save(mgr.CredentialKey(), creds); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	if err := mgr.Refresh(t.Context()); err == nil || !strings.Contains(err.Error(), "was made for https://api.hey.com") {
+		t.Errorf("a sign-in made for the API host went to another base URL: %v", err)
+	}
+}

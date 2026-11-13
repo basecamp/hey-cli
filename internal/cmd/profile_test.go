@@ -37,6 +37,8 @@ func profileTestHome(t *testing.T) string {
 	t.Setenv("HEY_BASE_URL", "")
 	t.Setenv("HEY_ACCOUNT_ID", "")
 	t.Setenv("HEY_PROFILE", "")
+	t.Setenv("HEY_OAUTH_ISSUER_URL", "")
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "")
 	t.Setenv("HEY_NONINTERACTIVE", "1")
 	t.Setenv("OMARCHY_PATH", "")
 	t.Chdir(home)
@@ -1276,5 +1278,62 @@ func TestAccountUseUnderARepositoryProfile(t *testing.T) {
 	}
 	if err := loaded.SaveAccountID("all"); !strings.Contains(errorMessage(err), `Profile "local" is set by `) || !strings.Contains(errorMessage(err), "set its account_id there") {
 		t.Errorf("save = %v", err)
+	}
+}
+
+func TestProfileCreateKeepsTheEnvironmentsOAuthServer(t *testing.T) {
+	home := profileTestHome(t)
+	writeProfileTestConfig(t, home, `{"default_profile":"staff","profiles":{
+		"staff":{"base_url":"https://api.hey.com","oauth_issuer_url":"https://app.hey.com"}}}`)
+	previous := signInProfile
+	signInProfile = func(_ context.Context, mgr *auth.Manager, _ auth.LoginOptions) error {
+		return mgr.LoginWithToken("pasted")
+	}
+	t.Cleanup(func() { signInProfile = previous })
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "https://tokens.hey.com")
+
+	if _, _, err := runProfileJSON(t, "profile", "create", "api", "--base-url", "https://api.hey.com"); err != nil {
+		t.Fatal(err)
+	}
+	profiles, _ := readProfileTestConfig(t, home)["profiles"].(map[string]any)
+	entry, _ := profiles["api"].(map[string]any)
+	if entry["oauth_token_url"] != "https://tokens.hey.com" || entry["oauth_issuer_url"] != nil {
+		t.Errorf("api = %#v, want the environment's token server and not the active profile's issuer", entry)
+	}
+	creds, err := auth.NewStore(filepath.Join(home, "hey-cli")).Load("profile:api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creds.TokenEndpoint != "https://tokens.hey.com/oauth/tokens" {
+		t.Errorf("signed in at %q", creds.TokenEndpoint)
+	}
+}
+
+func TestProfileDeleteRevokesAtItsTokenServer(t *testing.T) {
+	home := profileTestHome(t)
+	resource := noRequestServer(t)
+	var revoked []string
+	tokens := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/oauth/tokens" {
+			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+		}
+		body, _ := io.ReadAll(r.Body)
+		form, _ := url.ParseQuery(string(body))
+		revoked = append(revoked, form.Get("token"))
+	}))
+	t.Cleanup(tokens.Close)
+	writeProfileTestConfig(t, home, `{"profiles":{
+		"api":{"base_url":"`+resource.URL+`","oauth_token_url":"`+tokens.URL+`"}}}`)
+	store := auth.NewStore(filepath.Join(home, "hey-cli"))
+	if err := store.Save("profile:api", &auth.Credentials{AccessToken: "api-access", RefreshToken: "api-refresh", OAuthType: "oauth", TokenEndpoint: tokens.URL + "/oauth/tokens", ResourceURL: resource.URL}); err != nil {
+		t.Fatal(err)
+	}
+
+	response, stderr, err := runProfileJSON(t, "profile", "delete", "api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data := statusData(t, response); data["revoked"] != true || strings.Join(revoked, ",") != "api-refresh" {
+		t.Errorf("delete = %#v, revoked %v, stderr %q", data, revoked, stderr)
 	}
 }
