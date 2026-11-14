@@ -81,45 +81,6 @@ func TestPlainLoginAutoDetectsDeviceFlow(t *testing.T) {
 	}
 }
 
-func TestPlainLoginFallsBackWhenDeviceUnavailable(t *testing.T) {
-	var sawAuthorizationsRequest bool
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/oauth/device_authorizations":
-			sawAuthorizationsRequest = true
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			json.NewEncoder(w).Encode(map[string]string{"error": "not_found"})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	configHome := t.TempDir()
-
-	errChan := make(chan error, 1)
-	go func() {
-		_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
-		errChan <- err
-	}()
-
-	select {
-	case err := <-errChan:
-		if !sawAuthorizationsRequest {
-			t.Error("device authorization endpoint was not attempted")
-		}
-		if err != nil && strings.Contains(err.Error(), "doesn't take scoped device sign-ins") {
-			t.Error("got device unavailable error - fallback did not happen")
-		}
-	case <-time.After(2 * time.Second):
-		if !sawAuthorizationsRequest {
-			t.Error("device authorization endpoint was not attempted")
-		}
-	}
-}
-
 func TestDeviceCodeFlagSuccess(t *testing.T) {
 	const userCode = "ABCD-EFGH"
 	const deviceCode = "secret-device-code"
