@@ -420,13 +420,14 @@ func TestDeviceLoginSlowDown(t *testing.T) {
 			lastPollTime = now
 			pollCount++
 			w.Header().Set("Content-Type", "application/json")
-			if pollCount == 1 {
+			switch pollCount {
+			case 1:
 				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]string{"error": "slow_down"})
-			} else if pollCount == 2 {
+			case 2:
 				w.WriteHeader(http.StatusBadRequest)
 				json.NewEncoder(w).Encode(map[string]string{"error": "authorization_pending"})
-			} else {
+			default:
 				w.WriteHeader(http.StatusOK)
 				json.NewEncoder(w).Encode(map[string]any{
 					"access_token": "token",

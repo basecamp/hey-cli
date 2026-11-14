@@ -8,8 +8,8 @@ import (
 	"net/http"
 )
 
-// oauthMetadata represents RFC 8414 OAuth Authorization Server Metadata.
-type oauthMetadata struct {
+// OAuthMetadata represents RFC 8414 OAuth Authorization Server Metadata.
+type OAuthMetadata struct {
 	Issuer                        string   `json:"issuer"`
 	AuthorizationEndpoint         string   `json:"authorization_endpoint,omitempty"`
 	TokenEndpoint                 string   `json:"token_endpoint"`
@@ -22,7 +22,7 @@ type oauthMetadata struct {
 // from the well-known path for the given base URL. Returns nil metadata with
 // no error when the metadata document is not found (404), allowing fallback
 // to legacy auth. Other errors are returned as-is.
-func (m *Manager) DiscoverOAuthMetadata(ctx context.Context) (*oauthMetadata, error) {
+func (m *Manager) DiscoverOAuthMetadata(ctx context.Context) (*OAuthMetadata, error) {
 	// Construct the well-known URL from the base URL
 	metadataURL := m.baseURL + "/.well-known/oauth-authorization-server"
 
@@ -51,7 +51,7 @@ func (m *Manager) DiscoverOAuthMetadata(ctx context.Context) (*oauthMetadata, er
 		return nil, fmt.Errorf("reading OAuth metadata: %w", err)
 	}
 
-	var metadata oauthMetadata
+	var metadata OAuthMetadata
 	if err := json.Unmarshal(body, &metadata); err != nil {
 		return nil, fmt.Errorf("parsing OAuth metadata: %w", err)
 	}
