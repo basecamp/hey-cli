@@ -17,6 +17,19 @@ type LinkOccurrence struct {
 	Destination string
 	StartLine   int
 	EndLine     int
+	TextRuns    []LinkTextRun
+}
+
+// TextSpan addresses visible UTF-8 bytes on one rendered line, excluding ANSI.
+type TextSpan struct {
+	Line, Start, End int
+}
+
+// LinkTextRun keeps a link's label separate from its displayed URL. URL fragments
+// split by wrapping belong to one run, in document order.
+type LinkTextRun struct {
+	Destination bool
+	Spans       []TextSpan
 }
 
 // LinkedRender is the contained terminal rendering of one Markdown body and
@@ -38,7 +51,7 @@ func linkedRender(out string, selected int) LinkedRender {
 	var b strings.Builder
 	b.Grow(len(out))
 	links := make([]LinkOccurrence, 0)
-	line := 0
+	line, lineStart := 0, 0
 	currentDestination := ""
 	currentShownDestination := false
 	currentShownText := ""
@@ -75,6 +88,7 @@ func linkedRender(out string, selected int) LinkedRender {
 								// its label and one or more underlined spans for the shown
 								// destination. Only those destination spans complete the
 								// occurrence. A plain fallback URL has no style prefix.
+								wasDestination := currentShownDestination
 								if !currentShownDestination && (precededByUnderline(out, i) || (!strings.Contains(content, "\x1b") && sameURL(content, destination))) {
 									currentShownDestination = true
 								}
@@ -83,6 +97,20 @@ func linkedRender(out string, selected int) LinkedRender {
 									currentComplete = sameURL(currentShownText, withoutWhitespace(destination))
 								} else {
 									currentComplete = false
+								}
+
+								link := &links[len(links)-1]
+								if len(link.TextRuns) == 0 || currentShownDestination != wasDestination {
+									link.TextRuns = append(link.TextRuns, LinkTextRun{Destination: currentShownDestination})
+								}
+								run := &link.TextRuns[len(link.TextRuns)-1]
+								column := len(ansi.Strip(out[lineStart:i]))
+								for part, text := range strings.Split(content, "\n") {
+									plain := ansi.Strip(text)
+									if len(plain) > 0 {
+										run.Spans = append(run.Spans, TextSpan{Line: line + part, Start: column, End: column + len(plain)})
+									}
+									column = 0
 								}
 
 								b.WriteString(openEnd)
@@ -95,7 +123,11 @@ func linkedRender(out string, selected int) LinkedRender {
 								}
 								b.WriteString(closeEnd)
 								line = endLine
-								i = closeStart + len(closeEnd)
+								next := closeStart + len(closeEnd)
+								if last := strings.LastIndex(out[i:next], "\n"); last >= 0 {
+									lineStart = i + last + 1
+								}
+								i = next
 								continue
 							}
 						}
@@ -105,6 +137,7 @@ func linkedRender(out string, selected int) LinkedRender {
 		}
 		if out[i] == '\n' {
 			line++
+			lineStart = i + 1
 		}
 		b.WriteByte(out[i])
 		i++

@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
@@ -34,6 +35,9 @@ type screenerPreview struct {
 	body     htmlutil.Markdown
 	width    int // the width body was last rendered at, 0 when it needs rendering again
 	viewport viewport.Model
+	find     bodyFind
+	lines    []string
+	linkRuns []markdown.LinkTextRun
 }
 
 // openPreview reads the most recent email of the sender under the cursor. HEY serves its
@@ -96,7 +100,35 @@ func (v *screenerView) closePreview() {
 // sender being previewed — not whoever a live re-read has since put under the cursor —
 // and put the preview away with the decision.
 func (v *screenerView) handlePreviewKey(msg tea.KeyPressMsg) tea.Cmd {
+	preview := v.preview
+	if preview.find.editing {
+		cmd, committed := preview.find.edit(msg)
+		if committed {
+			v.scanPreviewFind()
+			preview.find.firstFrom(preview.viewport.YOffset())
+			v.showPreviewMatch()
+		}
+		return cmd
+	}
 	key := msg.String()
+	if !preview.loading && preview.failure == "" {
+		switch {
+		case key == "/":
+			return preview.find.start()
+		case preview.find.query != "" && (key == "n" || key == "N"):
+			delta := 1
+			if key == "N" {
+				delta = -1
+			}
+			preview.find.next(delta)
+			v.showPreviewMatch()
+			return nil
+		case preview.find.active() && msg.Key().Code == tea.KeyEscape:
+			preview.find = bodyFind{}
+			preview.viewport.SetContentLines(preview.lines)
+			return nil
+		}
+	}
 	switch {
 	case key == "space" || key == " " || key == "q" || msg.Key().Code == tea.KeyEscape:
 		v.closePreview()
@@ -165,19 +197,34 @@ func (v *screenerView) layoutPreview() {
 		headerLines++
 	}
 	preview.viewport.SetWidth(max(v.vc.width, 1))
+	oldHeight := preview.viewport.Height()
 	preview.viewport.SetHeight(max(v.vc.height-headerLines, 1))
 	width := max(v.vc.width-4, 40)
-	if preview.loading || preview.failure != "" || preview.width == width {
+	if preview.loading || preview.failure != "" {
+		return
+	}
+	if preview.width == width {
+		if oldHeight != preview.viewport.Height() {
+			v.revealPreviewMatch()
+		}
 		return
 	}
 	preview.width = width
-	content := markdown.Render(preview.body, width)
+	linked := markdown.RenderLinked(preview.body, width, -1)
+	content := linked.Text
+	preview.linkRuns = nil
+	for _, link := range linked.Links {
+		preview.linkRuns = append(preview.linkRuns, link.TextRuns...)
+	}
 	if preview.body.IsEmpty() {
 		content = styleMuted.Render("(this email has no text)")
 	}
 	offset := preview.viewport.YOffset()
-	preview.viewport.SetContent(content)
+	preview.lines = strings.Split(content, "\n")
+	v.scanPreviewFind()
+	preview.viewport.SetContentLines(preview.find.highlight(preview.lines))
 	preview.viewport.SetYOffset(offset)
+	v.revealPreviewMatch()
 }
 
 func (v *screenerView) previewView() string {
@@ -196,4 +243,36 @@ func (v *screenerView) previewView() string {
 		b.WriteString(v.preview.viewport.View())
 	}
 	return b.String()
+}
+
+func (v *screenerView) scanPreviewFind() {
+	preview := v.preview
+	if preview.body.IsEmpty() {
+		preview.find.scan()
+		return
+	}
+	preview.find.scan(findDocument{lines: preview.lines, links: preview.linkRuns})
+}
+
+func (v *screenerView) showPreviewMatch() {
+	preview := v.preview
+	preview.viewport.SetContentLines(preview.find.highlight(preview.lines))
+	v.revealPreviewMatch()
+}
+
+func (v *screenerView) revealPreviewMatch() {
+	preview := v.preview
+	if match, found := preview.find.selected(); found {
+		plain := ansi.Strip(preview.lines[match.line])
+		preview.viewport.EnsureVisible(match.line, ansi.StringWidth(plain[:match.start]), ansi.StringWidth(plain[:match.end]))
+	}
+}
+
+// The find prompt shares the app's footer allocation rather than making the
+// preview's fixed header taller.
+func (v *screenerView) LinkFooter() (string, bool) {
+	if v.preview == nil || !v.preview.find.active() {
+		return "", false
+	}
+	return v.preview.find.footer(v.vc.width), true
 }

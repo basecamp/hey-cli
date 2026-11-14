@@ -3731,8 +3731,8 @@ func TestMailViewHelpBindingsInThread(t *testing.T) {
 	v := mailWithPostings()
 	v.inThread = true
 	bindings := v.HelpBindings()
-	if len(bindings) != 2 || bindings[0].key != "r" || bindings[1].key != "f" {
-		t.Errorf("thread mode should offer reply and forward, got %v", bindings)
+	if !hasHelpBinding(bindings, "/") || !hasHelpBinding(bindings, "r") || !hasHelpBinding(bindings, "f") {
+		t.Errorf("thread mode should offer find, reply and forward, got %v", bindings)
 	}
 }
 
