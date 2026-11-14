@@ -220,14 +220,14 @@ func TestAppImboxInEveryFormat(t *testing.T) {
 	}
 }
 
-// The app holds the Imbox alone: another box, and a cursor it never gave, are refused
-// before the door is asked.
+// The app holds the Imbox, the Feed, Sent and Spam: another box, and a cursor it never
+// gave, are refused before the door is asked.
 func TestAppRefusesWhatItDoesNotServe(t *testing.T) {
 	door := appImboxDoor(t)
 	appTestHome(t, door.Path, true)
 
 	for _, args := range [][]string{
-		{"box", "view", "feed"},
+		{"box", "view", "papertrail"},
 		{"box", "view", "1234"},
 		{"box", "imbox", "--page", "abc"},
 		{"screener", "list", "--page", "abc"},

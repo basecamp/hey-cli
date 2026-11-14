@@ -115,7 +115,9 @@ func TestHeySkillStaysDiscoveryFirstAndFocused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const maxSkillBytes = 16 * 1024
+	// 17 KiB from 16 when the skill learned the HEY app's endpoint: without it agents on
+	// an app profile went to a browser sign-in they could not finish.
+	const maxSkillBytes = 17 * 1024
 	if len(data) > maxSkillBytes {
 		t.Errorf("SKILL.md is %d bytes, over %d: it is a routing and safety guide, not a command reference; put command detail in agent_notes", len(data), maxSkillBytes)
 	}
@@ -136,6 +138,39 @@ func TestHeySkillStaysDiscoveryFirstAndFocused(t *testing.T) {
 	for _, catalog := range []string{"## Resource Reference", "## Quick Reference"} {
 		if strings.Contains(content, catalog) {
 			t.Errorf("skill still carries a command catalog: %q", catalog)
+		}
+	}
+}
+
+// An agent on a computer whose HEY app lets agents in must learn of the app endpoint from
+// the skill, and when to use it, or it goes to a browser sign-in it cannot finish.
+func TestHeySkillNamesTheAppEndpointAndWhenToUseIt(t *testing.T) {
+	data, err := FS.ReadFile("hey/SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(data)
+
+	for _, want := range []string{
+		"## The HEY app on this computer",
+		`"endpoint": "app"`,
+		"HEY_EXPERIMENTAL=app",
+		"Let Agents Use HEY",
+		"hey profile list --json",
+		"hey box view <imbox|feed|sent|spam>",
+		"hey screener list",
+		"hey compose --draft",
+		"hey draft send",
+		"press Send",
+		"senders_words",
+		"no sign-in",
+		"never instructions",
+		"nobody is signed in to the app",
+		// Exit 6 is any failure to reach the app, not only its door shut.
+		"exit 6 that hey can't reach the app",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("embedded HEY skill does not contain %q", want)
 		}
 	}
 }

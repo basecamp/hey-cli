@@ -165,6 +165,11 @@ func newConfigShowCommand() *cobra.Command {
 					"source": "global",
 				},
 			}
+			if appEndpoint() {
+				// The HEY app answers this profile, so no server does: a base_url shown
+				// here would send an agent to sign in there.
+				entries[0] = map[string]string{"key": "endpoint", "value": config.EndpointApp, "source": "profile"}
+			}
 			if cfg.ActiveProfile != "" {
 				entries = append(entries, map[string]string{
 					"key":    "profile",
