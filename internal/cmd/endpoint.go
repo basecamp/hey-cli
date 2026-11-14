@@ -51,17 +51,49 @@ func chooseEndpoint(cmd *cobra.Command) error {
 		answeringEndpoint = config.EndpointApp
 	}
 	if !appEndpoint() {
-		return nil
+		return noAppProfile(cmd)
 	}
 	if accountFlag != "" {
 		return apierr.ErrUsageHint(
 			"the HEY app on this computer takes no --account",
-			"The app answers for the account its window shows: drop --account, or use a server profile")
+			"The app answers for the account its window shows: drop --account, or switch accounts in the HEY app")
 	}
 	if isAppCommand(cmd) {
 		return nil
 	}
 	return appOffers(cmd)
+}
+
+// noAppProfile refuses a command that would read HEY's server where the gate is on and no
+// profile is answered by the app: the gate says the app was meant, and a profile missing
+// (a config in another place than hey reads, say) would otherwise answer from the server
+// without a word. A profile command, which would add one, and what reads no server run.
+func noAppProfile(cmd *cobra.Command) error {
+	for _, p := range cfg.Profiles {
+		if p.Endpoint == config.EndpointApp {
+			return nil
+		}
+	}
+	if readsNoServer(cmd) {
+		return nil
+	}
+	return apierr.ErrUsageHint(
+		terminal.SanitizeLine(fmt.Sprintf("%s=app is set, but no profile in %s is answered by the HEY app, so %s would be answered by HEY's server",
+			config.ExperimentalEnv, config.GlobalConfigPath(), cmd.CommandPath())),
+		`Add one there, {"profiles":{"this-computer":{"endpoint":"app"}},"default_profile":"this-computer"}, or unset `+config.ExperimentalEnv+` to use HEY's server`)
+}
+
+// readsNoServer reports a command that reads no server: config, profile, version and the
+// like, completion, and bare hey.
+func readsNoServer(cmd *cobra.Command) bool {
+	return len(strings.Fields(cmd.CommandPath())) < 2 || isProfileCommand(cmd) || !commandUsesRuntimeConfig(cmd) ||
+		cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd
+}
+
+// appOffered names what the app answers, for a hint on a command it does not.
+func appOffered() string {
+	return "On this computer the HEY app answers " + appCommandLine("box view imbox|feed|sent|spam") +
+		", screener list|history|approve|deny, draft list|send, and compose|reply --draft; do the rest in the HEY app"
 }
 
 // appRoutes are the commands the app answers: the reads its door serves. Each one's RunE
@@ -122,30 +154,31 @@ func appOffers(cmd *cobra.Command) error {
 	switch {
 	case appSendsNow(cmd):
 		return appSendRefusal(cmd)
-	case appRoutes[path], len(parts) < 2, isProfileCommand(cmd), !commandUsesRuntimeConfig(cmd),
-		// Completion lists commands and profile names, and reads no server.
-		cmd.Name() == cobra.ShellCompRequestCmd, cmd.Name() == cobra.ShellCompNoDescRequestCmd:
+	case appRoutes[path], readsNoServer(cmd):
 		return nil
 	case parts[1] == "mcp":
+		// An agent on this computer uses hey's commands instead, which the app answers.
 		return apierr.ErrUsageHint(
 			fmt.Sprintf("hey mcp speaks to HEY's server, and profile %q is answered by the HEY app on this computer", terminal.SanitizeLine(cfg.ActiveProfile)),
-			"Run hey mcp with a server profile: hey mcp -P <profile>")
+			appOffered())
 	case parts[1] == "auth" || parts[1] == "login" || parts[1] == "logout":
 		return apierr.ErrUsageHint(
 			fmt.Sprintf("profile %q is answered by the HEY app on this computer, which needs no sign-in", terminal.SanitizeLine(cfg.ActiveProfile)),
-			"Sign in to HEY in the app; hey auth is for a server profile: hey auth login -P <profile>")
+			"If the HEY app offers nothing, sign in to HEY in the app itself")
 	}
 	return apierr.ErrUsageHint(
 		fmt.Sprintf("%s is not offered by the HEY app on this computer (profile %q)", path, terminal.SanitizeLine(cfg.ActiveProfile)),
-		"Use a server profile for it: hey profile list")
+		appOffered())
 }
 
+// appNoPageHint is the hint for --page, which the app has no next page for.
+const appNoPageHint = "The HEY app answers with the rows it has loaded, which the notice says when more follow: run it again without --page"
+
 // appNotOffered refuses what a routed command was asked that the app does not serve, such
-// as a box other than the Imbox.
-func appNotOffered(what string) error {
-	return apierr.ErrUsageHint(
-		terminal.SanitizeLine(what)+" is not offered by the HEY app on this computer",
-		"Use a server profile for it: hey profile list")
+// as a box it does not hold, with hint saying what it does instead. A profile on this
+// computer never points elsewhere: the app is the way in here.
+func appNotOffered(what, hint string) error {
+	return apierr.ErrUsageHint(terminal.SanitizeLine(what)+" is not offered by the HEY app on this computer", hint)
 }
 
 // endpointOption names the endpoint in the response meta, in an experimental build only.
@@ -319,7 +352,7 @@ func appRefusal(name string, arguments map[string]any, result *localapp.Result) 
 		refusal.Hint = terminal.SanitizeLine(appArgumentHint(arg, reason))
 	case why == "not_offered":
 		refusal.Code = apierr.CodeUsage
-		refusal.Hint = "This HEY app does not offer it now: update HEY, or use a server profile"
+		refusal.Hint = "This HEY app does not offer it now: update HEY"
 	case why == "bad_request" || why == "no_such_case" || why == "not_text":
 		refusal.Code = apierr.CodeUsage
 		refusal.Hint = "This hey may be newer or older than the HEY app: update both"

@@ -79,12 +79,11 @@ func newProfileListCommand() *cobra.Command {
 			profiles := make([]map[string]any, 0, len(names))
 			for _, name := range names {
 				p := cfg.Profiles[name]
-				entry := map[string]any{
-					"name":     name,
-					"base_url": p.BaseURL,
-				}
-				// The app's profile has no credential of its own to look for.
+				entry := map[string]any{"name": name}
+				// The app's profile has no server and no credential of its own: a base_url
+				// shown for it would send an agent to sign in there.
 				if !appProfile(p) {
+					entry["base_url"] = p.BaseURL
 					entry["authenticated"] = profileAuthenticated(name)
 				}
 				if cfg.DefaultProfile == name {
@@ -118,10 +117,11 @@ func newProfileListCommand() *cobra.Command {
 					if cfg.DefaultProfile == name {
 						marks = append(marks, "default")
 					}
+					server := terminal.SanitizeLine(p.BaseURL)
 					if appProfile(p) {
-						signedIn = "the HEY app"
+						server, signedIn = "the HEY app on this computer", "the HEY app"
 					}
-					table.addRow([]string{terminal.SanitizeLine(name), terminal.SanitizeLine(p.BaseURL), p.AccountID, signedIn, strings.Join(marks, ", ")})
+					table.addRow([]string{terminal.SanitizeLine(name), server, p.AccountID, signedIn, strings.Join(marks, ", ")})
 				}
 				table.print()
 				return nil
@@ -155,9 +155,9 @@ func newProfileShowCommand() *cobra.Command {
 				return apierr.ErrUsage(fmt.Sprintf("Profile %q not found", name))
 			}
 
-			result := map[string]any{
-				"name":     name,
-				"base_url": p.BaseURL,
+			result := map[string]any{"name": name}
+			if !appProfile(p) {
+				result["base_url"] = p.BaseURL
 			}
 			if p.AccountID != "" {
 				result["account_id"] = p.AccountID
@@ -190,7 +190,9 @@ func newProfileShowCommand() *cobra.Command {
 			if writer.IsStyled() {
 				w := cmd.OutOrStdout()
 				fmt.Fprintf(w, "Profile:   %s\n", terminal.SanitizeLine(name))
-				fmt.Fprintf(w, "Base URL:  %s\n", terminal.SanitizeLine(p.BaseURL))
+				if !appProfile(p) {
+					fmt.Fprintf(w, "Base URL:  %s\n", terminal.SanitizeLine(p.BaseURL))
+				}
 				if p.AccountID != "" {
 					fmt.Fprintf(w, "Mail:      %s\n", p.AccountID)
 				}

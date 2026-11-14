@@ -120,6 +120,9 @@ func CacheDir() string {
 	return filepath.Join(home, ".cache", configDirName)
 }
 
+// GlobalConfigPath is the global config file hey reads, for a message naming it.
+func GlobalConfigPath() string { return globalConfigPath() }
+
 func globalConfigPath() string {
 	dir := ConfigDir()
 	if dir == "" {

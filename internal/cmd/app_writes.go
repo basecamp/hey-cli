@@ -26,7 +26,7 @@ import (
 func appRefusesFlags(cmd *cobra.Command, names ...string) error {
 	for _, name := range names {
 		if cmd.Flags().Changed(name) {
-			return appNotOffered("--" + name)
+			return appNotOffered("--"+name, "Run it again without --"+name+", or do it in the HEY app")
 		}
 	}
 	return nil

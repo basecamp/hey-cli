@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/basecamp/hey-cli/internal/config"
 	"github.com/basecamp/hey-cli/skills"
 )
 
@@ -29,6 +30,9 @@ func TestSkillNamesRealCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The skill names hey app for a run with the HEY app's endpoint gated on, the one run
+	// it tells an agent to use it in.
+	t.Setenv(config.ExperimentalEnv, config.EndpointApp)
 	root := newRootCmd()
 	invocations := skillInvocations(string(data))
 	if len(invocations) == 0 {

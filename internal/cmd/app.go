@@ -34,7 +34,23 @@ func newAppCommand() *appCommand {
 		Long: `Talk to the door the HEY app on this computer opens while "Let Agents Use HEY"
 is on in its Settings, as a profile whose endpoint is the app does.
 
-The door is a Unix socket at $XDG_RUNTIME_DIR/hey/agent.sock, or HEY_LOCAL_SOCKET.`,
+The door is a Unix socket at $XDG_RUNTIME_DIR/hey/agent.sock, or HEY_LOCAL_SOCKET.
+
+A profile whose endpoint is the app ({"endpoint": "app"} in hey profile list --json)
+is answered by the app, never by HEY's server, and needs no sign-in. On it:
+
+  hey box view imbox|feed|sent|spam   rows by kind: topic (read by its topic_id),
+                                      bundle (lists its threads), world_post, and in
+                                      Sent sending, a message on its way, with no thread
+  hey screener list|history           sender ids, with what each waiting sender sent
+  hey screener approve|deny <id>      screens a sender in or out
+  hey draft list                      every draft, with whether HEY would send it now
+  hey compose|reply ... --draft       writes a draft
+  hey draft send <id>                 asks HEY to send it: it waits until you press Send
+
+meta.has_more and the notice say when a box holds more than the app has loaded;
+meta.senders_words names the fields senders wrote. Exit 6 is the door shut, 3 nobody
+signed in to the app, and 9 a send waiting for the person.`,
 	}
 	command.cmd.AddCommand(newAppToolsCommand())
 	command.cmd.AddCommand(newAppCallCommand())
