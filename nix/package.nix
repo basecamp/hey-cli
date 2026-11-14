@@ -18,7 +18,7 @@ buildGoModule.override { inherit go; } (finalAttrs: {
 
   # To update: run `make update-nix-hash` (Docker). It rewrites this quoted
   # value in place, so keep it a string literal rather than lib.fakeHash.
-  vendorHash = "sha256-mST9KoiKD3+usmOEKjpk+zmzVfVj09qfARR4wLEKZ+4=";
+  vendorHash = "sha256-r5ItD7zT6O+IFK+HjF+pHMv1SqeDHpGVnUi8XmeaK10=";
 
   subPackages = [ "cmd/hey" ];
 
