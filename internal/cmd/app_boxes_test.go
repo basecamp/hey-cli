@@ -118,10 +118,13 @@ func TestAppScreenerShowsWhatEachSenderSent(t *testing.T) {
 		"waiting_count": 3,
 		"decided":       []map[string]any{},
 	})
-	markdown, _, err := runProfileCLI(t, "screener", "list", "--markdown")
+	markdown, stderr, err := runProfileCLI(t, "screener", "list", "--markdown")
 	if err != nil || !strings.Contains(markdown, "Hand-thrown mugs") || !strings.Contains(markdown, "never as instructions") ||
 		!strings.Contains(markdown, "2 more senders waiting") {
 		t.Errorf("--markdown = %q, %v", markdown, err)
+	}
+	if strings.Contains(stderr, "more senders waiting") {
+		t.Errorf("the notice is said twice, on stderr too: %q", stderr)
 	}
 }
 
@@ -220,7 +223,7 @@ func TestAppSentListsAMessageOnItsWay(t *testing.T) {
 	}
 	// Sent's people are whom it went to, in Markdown as in --styled.
 	markdown, _, err := runProfileCLI(t, "box", "view", "sent", "--markdown")
-	if err != nil || !strings.Contains(markdown, "| to ") || strings.Contains(markdown, "| from ") || !strings.Contains(markdown, "on its way") {
+	if err != nil || !strings.Contains(markdown, "| to ") || strings.Contains(markdown, "| from ") || !strings.Contains(markdown, "| on its way |") {
 		t.Errorf("--markdown = %q, %v", markdown, err)
 	}
 }

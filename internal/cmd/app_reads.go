@@ -548,7 +548,8 @@ func (c *screenerListCommand) runApp(cmd *cobra.Command) error {
 		}
 		return nil
 	}
-	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
+	// Markdown says the notice after its table, below, so it is not said on stderr too.
+	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" && writer.EffectiveFormat() != output.FormatMarkdown {
 		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
 	}
 	words := appSendersWords("Each sender's name, subject and summary")
