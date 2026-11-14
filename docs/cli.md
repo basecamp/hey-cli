@@ -40,8 +40,11 @@ scripts and agents can handle it.
 ## Authentication
 
 ```bash
-# Browser-based OAuth against HEY's own OAuth server (primary method)
+# OAuth authentication (automatically uses device flow when server supports it)
 hey auth login
+
+# Force device code flow for headless environments (SSH, servers, CI, Docker)
+hey auth login --device-code
 
 # Or use a pre-generated token
 hey auth login --token TOKEN
@@ -50,6 +53,10 @@ hey auth login --token TOKEN
 Browser session cookies are no longer supported. Existing cookie-only logins must sign in again with `hey auth login`.
 
 OAuth tokens refresh automatically on expiry. Credentials are stored in the system keyring (with file fallback at `~/.config/hey-cli/credentials.json`).
+
+Login uses RFC 8414 metadata discovery (`/.well-known/oauth-authorization-server`) to determine whether the server supports device authorization (RFC 8628). When a device endpoint is advertised in metadata, `hey auth login` uses it automatically: you approve a short code in the browser instead of a redirect. Login falls back to the browser callback flow only when metadata is missing or doesn't advertise a device endpoint. Once device flow is selected through discovery, all errors surface as real failures (no silent fallback for 404, `invalid_request`, `unauthorized_client`, or other device flow errors).
+
+The `--device-code` flag forces device code flow: it performs metadata discovery, prints a link and a one-time code if the endpoint is advertised, waits for you to approve the code in HEY from any device (your phone, another computer), and never opens a browser. If metadata doesn't advertise a device endpoint, the command fails with a clear error. It's designed for headless environments where a browser cannot open or a callback server cannot listen.
 
 ```bash
 hey auth status   # check auth status
