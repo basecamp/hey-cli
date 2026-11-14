@@ -77,7 +77,7 @@ func TestEventCRUD(t *testing.T) {
 		t.Fatal("add response carries no event ID")
 	}
 	id := fmt.Sprint(event.ID)
-	t.Cleanup(func() { _, _, _ = hey(t, "event", "delete", id) })
+	registerEventCleanup(t, id, title, day)
 
 	if event.Title != title {
 		t.Errorf("created title = %q, want %q", event.Title, title)
@@ -144,10 +144,13 @@ func TestEventOccurrenceEditScopes(t *testing.T) {
 	}
 	seriesID := fmt.Sprint(series.ID)
 	cleanupIDs := []string{seriesID}
+	t.Logf("owned repeating series %s %q", seriesID, title)
 	t.Cleanup(func() {
-		cleanupIDs = append(cleanupIDs, smokeEventSeriesIDsOnDay(t, futureDay, title)...)
-		for _, id := range uniqueStrings(cleanupIDs) {
-			_, _, _ = hey(t, "event", "delete", id)
+		days := []string{firstDay, currentDay, futureDay, first.AddDate(0, 0, 21).Format("2006-01-02"), first.AddDate(0, 0, 28).Format("2006-01-02"), beyondLastDay}
+		if err := cleanupEventsWith(commandFor(t), cleanupIDs, title, days); err != nil {
+			t.Error(err)
+		} else {
+			t.Logf("series %s and its splits independently confirmed absent", seriesID)
 		}
 	})
 
@@ -257,12 +260,8 @@ func TestEventOccurrenceFutureSplitAllowsAnEarlierTime(t *testing.T) {
 		t.Fatal("repeating event response carries no event ID")
 	}
 	seriesID := fmt.Sprint(series.ID)
-	t.Cleanup(func() {
-		ids := append([]string{seriesID}, smokeEventSeriesIDsOnDay(t, selectedDay, title)...)
-		for _, id := range uniqueStrings(ids) {
-			_, _, _ = hey(t, "event", "delete", id)
-		}
-	})
+	registerEventCleanup(t, seriesID, title, firstDay, selectedDay,
+		first.AddDate(0, 0, 2).Format("2006-01-02"), first.AddDate(0, 0, 3).Format("2006-01-02"))
 
 	occurrence := fmt.Sprintf("%d_%s", series.ID, selectedDay)
 	// The selected 23:00 occurrence itself is removed, and HEY accepts the replacement's
@@ -315,13 +314,8 @@ func TestEventOccurrenceFutureSplitRefusesARealizedDayMovedEarlier(t *testing.T)
 		t.Fatal("repeating event response carries no event ID")
 	}
 	seriesID := fmt.Sprint(series.ID)
-	t.Cleanup(func() {
-		ids := append([]string{seriesID}, smokeEventSeriesIDsOnDay(t, firstDay, title)...)
-		ids = append(ids, smokeEventSeriesIDsOnDay(t, selectedDay, title)...)
-		for _, id := range uniqueStrings(ids) {
-			_, _, _ = hey(t, "event", "delete", id)
-		}
-	})
+	registerEventCleanup(t, seriesID, title, firstDay, selectedDay,
+		first.AddDate(0, 0, 2).Format("2006-01-02"), first.AddDate(0, 0, 3).Format("2006-01-02"))
 
 	occurrence := fmt.Sprintf("%d_%s", series.ID, selectedDay)
 	if _, stderr, code = hey(t, "event", "edit", seriesID,
@@ -354,36 +348,6 @@ func TestEventOccurrenceFutureSplitRefusesARealizedDayMovedEarlier(t *testing.T)
 		"--repeat", "every_day", "--repeat-times", "3", "--json"); code != 0 {
 		skipf(t, "future split after restoring occurrence failed (exit %d): %s", code, stderr)
 	}
-}
-
-func smokeEventSeriesIDsOnDay(t *testing.T, day, title string) []string {
-	t.Helper()
-	stdout, _, code := hey(t, "event", "day", day, "--json")
-	if code != 0 {
-		return nil
-	}
-	var response Response
-	if json.Unmarshal([]byte(stdout), &response) != nil {
-		return nil
-	}
-	var events []smokeEvent
-	if json.Unmarshal(response.Data, &events) != nil {
-		return nil
-	}
-	var ids []string
-	for _, event := range events {
-		if event.Title != title {
-			continue
-		}
-		id := event.ParentID
-		if id == 0 {
-			id = event.ID
-		}
-		if id != 0 {
-			ids = append(ids, fmt.Sprint(id))
-		}
-	}
-	return ids
 }
 
 func uniqueStrings(values []string) []string {
@@ -444,7 +408,10 @@ func TestEventAllDay(t *testing.T) {
 		t.Fatalf("failed to parse add response: %v", err)
 	}
 	event := dataAs[smokeEvent](t, added)
-	t.Cleanup(func() { _, _, _ = hey(t, "event", "delete", fmt.Sprint(event.ID), day) })
+	if event.ID <= 0 {
+		t.Fatalf("all-day event %q on %s returned no cleanup ID; inspect this fixture for manual cleanup", title, day)
+	}
+	registerEventCleanup(t, fmt.Sprint(event.ID), title, day)
 
 	if !event.AllDay {
 		t.Errorf("--all-day event is not all-day: %#v", event)

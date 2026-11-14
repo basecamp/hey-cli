@@ -63,7 +63,7 @@ func longThread(t *testing.T, replies int) (topicID string, subject string) {
 	const bccAddress = "beth.smith@example.org"
 	uid := uniqueID()
 	subject = fmt.Sprintf("Long thread %s", uid)
-	_, stderr, code := hey(t, "compose",
+	stdout, stderr, code := hey(t, "compose",
 		"--to", smokeEmail,
 		"--cc", ccAddress,
 		"--bcc", bccAddress,
@@ -74,31 +74,15 @@ func longThread(t *testing.T, replies int) (topicID string, subject string) {
 	if code != 0 {
 		skipf(t, "could not compose the thread's first message (exit %d): %s", code, stderr)
 	}
-	// Delivery to the Imbox is asynchronous; wait for the posting the way the other
-	// mutation tests do. The cleanup is registered once the posting is known to exist,
-	// so a thread that never arrived does not turn a skip into a cleanup failure.
-	if _, err := waitForPostingIDBySubject(t, subject); err != nil {
-		skipf(t, "the composed thread %q did not appear in the Imbox: %v", subject, err)
+	sent := dataAs[struct {
+		TopicID int64 `json:"topic_id"`
+	}](t, parseResponse(t, stdout))
+	if sent.TopicID <= 0 {
+		t.Fatalf("compose returned no topic ID for subject %q; inspect this fixture for manual cleanup", subject)
 	}
-	t.Cleanup(func() { cleanupThreadBySubject(t, subject) })
-	resp := heyJSON(t, "box", "imbox", "--all")
-	type posting struct {
-		AppURL  string `json:"app_url"`
-		Summary string `json:"summary"`
-		Name    string `json:"name"`
-	}
-	type boxResp struct {
-		Postings []posting `json:"postings"`
-	}
-	for _, p := range dataAs[boxResp](t, resp).Postings {
-		if strings.Contains(p.Name, uid) || strings.Contains(p.Summary, uid) {
-			topicID = extractTopicID(p.AppURL)
-			break
-		}
-	}
-	if topicID == "" {
-		skipf(t, "the composed thread %q has no topic in the Imbox", subject)
-	}
+	topicID = strconv.FormatInt(sent.TopicID, 10)
+	t.Logf("owned long-thread topic %d", sent.TopicID)
+	waitForOwnedTopic(t, sent.TopicID, subject)
 
 	for i := range replies {
 		_, stderr, code := hey(t, "reply", topicID, "-m", fmt.Sprintf("Reply %d of %d in %s", i+1, replies, uid), "--json")

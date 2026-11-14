@@ -383,6 +383,9 @@ would make a second draft.`,
 }
 
 func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
+	if appEndpoint() {
+		return c.runApp(cmd, args)
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

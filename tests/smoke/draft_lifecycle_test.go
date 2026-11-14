@@ -46,9 +46,7 @@ func composeDraft(t *testing.T, subject string, extra ...string) int64 {
 	if draft.ID <= 0 {
 		t.Fatalf("draft id = %d, want positive", draft.ID)
 	}
-	t.Cleanup(func() {
-		_, _, _ = hey(t, "draft", "delete", fmt.Sprintf("%d", draft.ID), "--json")
-	})
+	registerDraftCleanup(t, draft.ID)
 	return draft.ID
 }
 
@@ -108,7 +106,13 @@ func TestDraftLifecycle(t *testing.T) {
 	if code != 0 {
 		skipf(t, "draft send not accepted by server (exit %d): %s", code, stderr)
 	}
-	_ = stdout
+	sent := dataAs[struct {
+		TopicID int64 `json:"topic_id"`
+	}](t, parseResponse(t, stdout))
+	if sent.TopicID <= 0 {
+		t.Fatalf("sent draft returned no topic ID for subject %q; inspect this fixture for manual cleanup", newSubject)
+	}
+	waitForOwnedTopic(t, sent.TopicID, newSubject)
 	if draftListedIDs(t)[id] {
 		t.Errorf("draft %d still listed after sending", id)
 	}
@@ -136,43 +140,28 @@ func TestDraftSendRefusesWithoutRecipients(t *testing.T) {
 	}
 }
 
-// findSmokeThread composes a message to self and finds its topic in the imbox, falling
-// back to any thread there.
+// findSmokeThread waits for the exact topic compose created. Another Imbox row
+// is never a substitute for a fixture that failed to arrive.
 func findSmokeThread(t *testing.T, subject string) string {
 	t.Helper()
-	_, _, composeCode := hey(t, "compose", "--to", smokeEmail, "--subject", subject,
+	stdout, stderr, code := hey(t, "compose", "--to", smokeEmail, "--subject", subject,
 		"-m", "Original message for the reply draft test", "--json")
-
-	resp := heyJSON(t, "box", "imbox")
-	type posting struct {
-		AppURL  string `json:"app_url"`
-		Summary string `json:"summary"`
+	if code != 0 {
+		skipf(t, "could not create reply fixture (exit %d): %s", code, stderr)
 	}
-	type boxResp struct {
-		Postings []posting `json:"postings"`
+	sent := dataAs[struct {
+		TopicID int64 `json:"topic_id"`
+	}](t, parseResponse(t, stdout))
+	if sent.TopicID <= 0 {
+		t.Fatalf("compose returned no topic ID for subject %q; inspect this fixture for manual cleanup", subject)
 	}
-	data := dataAs[boxResp](t, resp)
-
-	if composeCode == 0 {
-		for _, p := range data.Postings {
-			if p.Summary == subject {
-				return extractTopicID(p.AppURL)
-			}
-		}
-	}
-	for _, p := range data.Postings {
-		if p.AppURL != "" {
-			return extractTopicID(p.AppURL)
-		}
-	}
-	return ""
+	t.Logf("owned reply setup topic %d", sent.TopicID)
+	waitForOwnedTopic(t, sent.TopicID, subject)
+	return fmt.Sprint(sent.TopicID)
 }
 
 func TestReplyDraft(t *testing.T) {
 	topicID := findSmokeThread(t, "Reply draft smoke "+uniqueID())
-	if topicID == "" {
-		skipf(t, "no thread available to draft a reply on")
-	}
 
 	stdout, stderr, code := hey(t, "reply", topicID, "-m", "Drafting this reply.", "--draft", "--json")
 	if code != 0 {
@@ -182,9 +171,7 @@ func TestReplyDraft(t *testing.T) {
 	if draft.ID <= 0 {
 		t.Fatalf("draft id = %d, want positive", draft.ID)
 	}
-	t.Cleanup(func() {
-		_, _, _ = hey(t, "draft", "delete", fmt.Sprintf("%d", draft.ID), "--json")
-	})
+	registerDraftCleanup(t, draft.ID)
 
 	resp := heyJSON(t, "draft", "show", fmt.Sprintf("%d", draft.ID))
 	state := dataAs[draftState](t, resp)

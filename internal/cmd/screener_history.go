@@ -47,6 +47,9 @@ func newScreenerHistoryCommand() *screenerHistoryCommand {
 }
 
 func (c *screenerHistoryCommand) run(cmd *cobra.Command, _ []string) error {
+	if appEndpoint() {
+		return c.runApp(cmd)
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

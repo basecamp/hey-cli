@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +28,8 @@ var (
 	configDir     string
 	stateDir      string
 	homeDir       string
+	cacheDir      string
+	workDir       string
 	sessionCookie string
 	smokeEmail    string
 )
@@ -55,63 +58,82 @@ type Breadcrumb struct {
 }
 
 func TestMain(m *testing.M) {
+	os.Exit(runSmoke(m.Run))
+}
+
+func runSmoke(run func() int) int {
+	if os.Getenv("HEY_SMOKE_OFFLINE") == "1" {
+		flag.Parse()
+		if flag.Lookup("test.run").Value.String() != "^TestHarness" {
+			fmt.Fprintln(os.Stderr, "offline mode only permits -run '^TestHarness'; it is not live verification")
+			return 1
+		}
+		fmt.Println("Offline smoke-harness regressions only; no live HEY verification")
+		return run()
+	}
 	baseURL = envOr("HEY_SMOKE_BASE_URL", "http://app.hey.localhost:3003")
 	smokeEmail = envOr("HEY_SMOKE_EMAIL", "david@basecamp.com")
 	password := envOr("HEY_SMOKE_PASSWORD", "secret123456")
-
-	// Locate the pre-built binary.
-	root := findProjectRoot()
-	binaryPath = envOr("HEY_BINARY", filepath.Join(root, "bin", "hey"))
+	var err error
+	binaryPath, err = filepath.Abs(envOr("HEY_BINARY", filepath.Join(findProjectRoot(), "bin", "hey")))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to resolve CLI binary: %v\n", err)
+		return 1
+	}
 	if _, err := os.Stat(binaryPath); err != nil {
 		fmt.Fprintf(os.Stderr, "CLI binary not found at %s — run 'make build' first\n", binaryPath)
-		os.Exit(1)
+		return 1
 	}
-
-	// Check that the server is reachable.
 	if !serverReachable(baseURL) {
 		fmt.Fprintf(os.Stderr, "Server not reachable at %s — start the dev server first\n", baseURL)
-		os.Exit(1)
+		return 1
 	}
+	return withSmokeState(func() int {
+		// Cookies stay in the browser; the CLI gets an actual OAuth grant.
+		var err error
+		sessionCookie, err = browserLogin(baseURL, smokeEmail, password)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Browser login failed: %v\n", err)
+			return 1
+		}
+		if err := setupCLI("auth", "login"); err != nil {
+			fmt.Fprintf(os.Stderr, "CLI setup failed: %v\n", err)
+			return 1
+		}
+		// All cleanup callbacks/readbacks finish before m.Run returns.
+		return run()
+	})
+}
 
-	// Create an isolated config directory so tests don't touch the real config.
-	var err error
-	configDir, err = os.MkdirTemp("", "hey-smoke-*")
+// withSmokeState also cleans partial setup failures. No CLI state goes under
+// the developer's HOME, cache or working directory. Smoke tests share these
+// package globals and a backend identity; they must not use t.Parallel.
+func withSmokeState(run func() int) (code int) {
+	previous := []string{configDir, stateDir, homeDir, cacheDir, workDir}
+	defer func() {
+		configDir, stateDir, homeDir, cacheDir, workDir = previous[0], previous[1], previous[2], previous[3], previous[4]
+	}()
+	code = 1
+	scratch, err := os.MkdirTemp("", "hey-smoke-*")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create temp config dir: %v\n", err)
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "Failed to create smoke state: %v\n", err)
+		return 1
 	}
-	// And an isolated state directory, so nothing a command keeps under
-	// XDG_STATE_HOME leaks into or out of the developer's own.
-	stateDir, err = os.MkdirTemp("", "hey-smoke-state-*")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create temp state dir: %v\n", err)
-		os.Exit(1)
+	defer func() {
+		if err := os.RemoveAll(scratch); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to remove owned smoke state %s: %v\n", scratch, err)
+			code = 1
+		}
+	}()
+	configDir, stateDir, homeDir = filepath.Join(scratch, "config"), filepath.Join(scratch, "state"), filepath.Join(scratch, "home")
+	cacheDir, workDir = filepath.Join(scratch, "cache"), filepath.Join(scratch, "work")
+	for _, path := range []string{configDir, stateDir, homeDir, cacheDir, workDir} {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to create smoke state directory: %v\n", err)
+			return 1
+		}
 	}
-	// And an isolated home, so the CLI can never detect the developer's
-	// Omarchy desktop (or write agent skills into their real ~).
-	homeDir, err = os.MkdirTemp("", "hey-smoke-home-*")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create temp home dir: %v\n", err)
-		os.Exit(1)
-	}
-	// Launch headless Chrome browser and log in to obtain a session cookie.
-	sessionCookie, err = browserLogin(baseURL, smokeEmail, password)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Browser login failed: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Authenticate the CLI through its real browser OAuth/PKCE flow.
-	if err := setupCLI("auth", "login"); err != nil {
-		fmt.Fprintf(os.Stderr, "CLI setup failed: %v\n", err)
-		os.Exit(1)
-	}
-
-	code := m.Run()
-	os.RemoveAll(configDir)
-	os.RemoveAll(stateDir)
-	os.RemoveAll(homeDir)
-	os.Exit(code)
+	return run()
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +146,7 @@ func hey(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
 	cmd := exec.Command(binaryPath, args...)
 	cmd.Env = cliEnv()
+	cmd.Dir = workDir
 	var outBuf, errBuf strings.Builder
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -135,6 +158,9 @@ func hey(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
 		} else {
 			t.Fatalf("failed to run hey: %v", err)
 		}
+	}
+	if err := recordSmokeCommand(t.Name(), args, outBuf.String(), errBuf.String(), exitCode); err != nil {
+		t.Errorf("record command evidence: %v", err)
 	}
 	return outBuf.String(), errBuf.String(), exitCode
 }
@@ -190,26 +216,27 @@ func dataAs[T any](t *testing.T, resp Response) T {
 	return v
 }
 
-// cliEnv returns the environment variables used for all CLI invocations. The
-// caller's HEY_TOKEN is dropped: the suite authenticates with the OAuth grant TestMain
-// obtained, and an inherited token would silently stand in for it on every command.
-// The caller's HOME and OMARCHY_PATH are replaced too, so a suite run on a
-// developer's Omarchy desktop can never detect it — the sign-in hook and
-// `hey setup omarchy` would otherwise talk to the real shell.
+// Only the harness supplies HEY settings to child CLIs. Caller defaults must
+// not replace its OAuth grant, account, origin or cable endpoint. Harness
+// options stay in the parent; HEY_SMOKE_ACCOUNT_ID explicitly scopes the child.
+// HOME and OMARCHY_PATH also prevent desktop/agent setup from reaching the
+// developer's session.
 func cliEnv() []string {
 	env := make([]string, 0, len(os.Environ())+8)
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "HEY_TOKEN=") || strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "OMARCHY_PATH=") {
+		if strings.HasPrefix(kv, "HEY_") || strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "OMARCHY_PATH=") {
 			continue
 		}
 		env = append(env, kv)
 	}
 	env = append(env,
 		"HEY_BASE_URL="+baseURL,
+		"HEY_ACCOUNT_ID="+os.Getenv("HEY_SMOKE_ACCOUNT_ID"),
 		"HOME="+homeDir,
 		"OMARCHY_PATH=",
 		"XDG_CONFIG_HOME="+configDir,
 		"XDG_STATE_HOME="+stateDir,
+		"XDG_CACHE_HOME="+cacheDir,
 		"HEY_NO_KEYRING=1",
 		"NO_COLOR=1",
 		"TERM=dumb",
@@ -286,6 +313,7 @@ func setupCLI(loginPath ...string) error {
 	args := append(append([]string{}, loginPath...), "--no-browser")
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	cmd.Env = cliEnv()
+	cmd.Dir = workDir
 	cmd.Stdout = io.Discard
 	progress, err := cmd.StderrPipe()
 	if err != nil {

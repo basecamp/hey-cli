@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -44,16 +47,111 @@ func parseClearanceID(value string) (int64, error) {
 	return id, nil
 }
 
-func parseClearanceIDs(values []string) ([]int64, error) {
-	ids := make([]int64, 0, len(values))
+// isScreenerAddress reports a screening argument that names a sender by email address
+// rather than by id.
+func isScreenerAddress(value string) bool {
+	return strings.Contains(value, "@")
+}
+
+// checkClearanceArgs refuses an argument that is neither a clearance id nor an address,
+// before anything is asked of HEY.
+func checkClearanceArgs(values []string) error {
 	for _, value := range values {
+		if isScreenerAddress(value) {
+			continue
+		}
+		if _, err := parseClearanceID(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveClearanceIDs is the clearance each argument names: an id as given, or an address,
+// looked up among the senders waiting, whatever its case, and then among those already
+// decided, so a decision can be changed by address too. Each list is read at most once,
+// and only when an address needs it.
+func resolveClearanceIDs(ctx context.Context, values []string) ([]int64, error) {
+	ids := make([]int64, len(values))
+	var addresses []int
+	for i, value := range values {
+		if isScreenerAddress(value) {
+			addresses = append(addresses, i)
+			continue
+		}
 		id, err := parseClearanceID(value)
 		if err != nil {
 			return nil, err
 		}
-		ids = append(ids, id)
+		ids[i] = id
+	}
+	if len(addresses) == 0 {
+		return ids, nil
+	}
+
+	pending, err := clearancesByAddress(ctx, readPendingClearances, func(c pendingClearance) (string, int64) { return c.Email, c.ID })
+	if err != nil {
+		return nil, err
+	}
+	var decided map[string][]int64
+	for _, i := range addresses {
+		address := strings.ToLower(strings.TrimSpace(values[i]))
+		found := pending[address]
+		if len(found) == 0 {
+			if decided == nil {
+				if decided, err = clearancesByAddress(ctx, readScreenedClearances, func(c screenedClearance) (string, int64) { return c.Email, c.ID }); err != nil {
+					return nil, err
+				}
+			}
+			found = decided[address]
+		}
+		switch len(found) {
+		case 0:
+			return nil, apierr.ErrNotFoundHint("sender", values[i],
+				"Nobody waiting in The Screener or already screened sends from that address: hey screener list, hey screener history")
+		case 1:
+			ids[i] = found[0]
+		default:
+			matches := make([]string, 0, len(found))
+			for _, id := range found {
+				matches = append(matches, strconv.FormatInt(id, 10))
+			}
+			return nil, apierr.ErrAmbiguous("sender", matches)
+		}
 	}
 	return ids, nil
+}
+
+// clearancesByAddress reads a whole clearance listing, up to maxScreenerPages, and indexes
+// its clearance ids by the sender's address, lowercased.
+func clearancesByAddress[T any](ctx context.Context, read pageReader[T], key func(T) (string, int64)) (map[string][]int64, error) {
+	first, err := read(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	collected, err := collectPages(ctx, first, pageRequest{All: true, MaxPages: maxScreenerPages}, read)
+	if err != nil {
+		return nil, err
+	}
+	if collected.Truncated {
+		// Stopped at the cap with pages left: an address missing from what was read was
+		// not searched for, which is no answer that nobody sends from it; and one found
+		// there may be found again past the cap, so none is taken.
+		return nil, &apierr.Error{
+			Code:    apierr.CodeAPI,
+			Message: fmt.Sprintf("The Screener holds more than %d pages, so an address could not be looked up in all of it", maxScreenerPages),
+			Hint:    "Use the clearance ID from hey screener list instead",
+		}
+	}
+	index := make(map[string][]int64)
+	for _, item := range collected.Items {
+		address, id := key(item)
+		address = strings.ToLower(strings.TrimSpace(address))
+		if address != "" && !slices.Contains(index[address], id) {
+			index[address] = append(index[address], id)
+		}
+	}
+	return index, nil
 }
 
 func senderNoun(count int) string {

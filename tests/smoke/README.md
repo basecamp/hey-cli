@@ -13,6 +13,54 @@ The default server is `http://app.hey.localhost:3003`; see the root `AGENTS.md` 
 login and environment overrides. The full SMTP/browser suite can exceed five
 minutes; `make test-smoke` gives the complete run a ten-minute deadline.
 
+## Harness regressions and cleanup
+
+The harness has offline regression tests that need no server, browser, login or SMTP:
+
+```bash
+cd tests/smoke
+HEY_SMOKE_OFFLINE=1 go test -race -count=1 -timeout 1m -run '^TestHarness'
+```
+
+CI runs these separately because this directory is its own Go module. Offline
+mode refuses any other selector, so ordinary feature tests cannot masquerade as
+live proof. The regressions fake the existing command boundary, not a HEY HTTP
+server. They check exact fixture identity, missing fixtures, failed/no-op cleanup,
+incomplete readbacks, credential-evidence exclusion and setup-failure teardown.
+
+Draft, owned-thread, contact and event cleanup callbacks check command failures
+and read back the resulting state before credentials are removed. Event cleanup
+reads all calendars, including switched-off ones, over the fixture's date window.
+Thread setup
+polls for the exact created topic and retries transient reads. If delivery never
+arrives, cleanup makes one final lookup instead of repeating the full wait.
+Contact fixtures and their aliases are retained hidden, with notes and uploaded
+photos removed; alias pages redirect to the primary contact, not an independent
+view of each alias's hidden flag. The owned HOME/config/state/cache/work directory
+is removed on normal returns, including browser/OAuth setup and test failures.
+A killed or timed-out process can still leave state and fixtures behind; record
+the run's exact paths and fixture IDs for recovery.
+
+`HEY_SMOKE_EVIDENCE_DIR` optionally retains `commands.jsonl` for allowlisted data
+commands invoked through the shared `hey()` helper, including the test name,
+argv, stdout, stderr and status. Leading-flag invocations, unknown commands,
+auth/token commands and browser/OAuth progress are not recorded. This is not a
+complete transcript of direct subprocess calls. Use an absolute path outside
+disposable client state. Keep it private: mail bodies and sharing URLs can be
+present. On POSIX, existing directories/files with group or public permissions
+are refused rather than written.
+
+Do not run the full suite on a shared identity just to broaden coverage: journal
+tests overwrite fixed dates and some other tests still select existing mail/habits
+or lack complete cleanup. These changes do not repair every smoke test's cleanup.
+Confirm exclusive development ownership and local-only SMTP/capture before sending.
+
+Child CLIs ignore inherited `HEY_*` settings and receive only the harness's
+origin, account and keyring settings. Set `HEY_SMOKE_ACCOUNT_ID` to scope the
+suite to a particular linked development account; an ordinary `HEY_ACCOUNT_ID`
+from your shell does not select it. `HEY_BINARY` may be absolute or relative to
+`tests/smoke` (the Go test process's working directory).
+
 ## Development prerequisites
 
 A server answering HTTP is not enough for the full suite:

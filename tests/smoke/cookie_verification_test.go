@@ -75,6 +75,7 @@ func TestCookieRemovalLiveWatch(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, binaryPath, "watch", "--timeout", "8s")
 	cmd.Env = cliEnv()
+	cmd.Dir = workDir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = io.Discard

@@ -5,7 +5,7 @@
 	check-release-lockstep update-nix-hash tools clean install help
 
 BINARY := $(CURDIR)/bin/hey
-GOSEC_VERSION := v2.29.0
+GOSEC_VERSION := v2.30.0
 # gosec v2.29.0 reads packages through golang.org/x/tools v0.49.0, which cannot
 # decode the export data Go 1.27.2 writes ("export data version 5 is greater than
 # maximum supported version 4"). It analyzes source, so running it on Go 1.27.1

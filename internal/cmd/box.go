@@ -109,6 +109,9 @@ func (c *boxCommand) run(cmd *cobra.Command, args []string) error {
 	if len(args) == 0 {
 		return cmd.Help()
 	}
+	if appEndpoint() {
+		return c.runApp(cmd, args[0])
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

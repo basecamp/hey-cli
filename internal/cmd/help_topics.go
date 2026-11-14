@@ -1,6 +1,10 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/basecamp/hey-cli/internal/config"
+)
 
 var curatedHelpTopics = []string{"output", "exit-codes", "environment", "linked-accounts"}
 
@@ -46,7 +50,7 @@ EXIT CODES
   7  An API, server, or local operational failure occurred, or HEY kept a
      message as a draft instead of sending it (not_delivered).
   8  The request matched more than one resource.
-
+` + pendingExitCodeRow() + `
 JSON failures also carry a machine-readable error code and an actionable hint when one is available.`,
 		},
 		{
@@ -98,4 +102,15 @@ SELECTION ORDER
 Compose and contact creation use an individually selected account. Replies and forwards use the thread's account. Calendar, task, time tracking, and journal commands remain identity-wide.`,
 		},
 	}
+}
+
+// pendingExitCodeRow is exit 9's row, listed only in an experimental build, where an app
+// profile's hey draft send can answer it.
+func pendingExitCodeRow() string {
+	if !config.ExperimentalApp() {
+		return ""
+	}
+	return `  9  Waiting in HEY: the HEY app on this computer holds a send for the person
+     to confirm, and nothing has been sent (a profile whose endpoint is the app).
+`
 }

@@ -50,6 +50,9 @@ func newScreenerListCommand() *screenerListCommand {
 }
 
 func (c *screenerListCommand) run(cmd *cobra.Command, _ []string) error {
+	if appEndpoint() {
+		return c.runApp(cmd)
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}
