@@ -388,4 +388,10 @@ func TestTheGateWithNoAppProfileSaysSo(t *testing.T) {
 	if _, _, err := runProfileCLI(t, "shell-completion", "generate", "bash"); err != nil {
 		t.Errorf("shell-completion: %v", err)
 	}
+	// Bare hey prints help, says what is missing, and neither picks an account on HEY's
+	// server nor starts its sign-in.
+	stdout, stderr, err := runProfileCLI(t)
+	if err != nil || !strings.Contains(stdout, "Usage") && !strings.Contains(stdout, "USAGE") || !strings.Contains(stderr, "no profile") {
+		t.Errorf("bare hey: err %v, stderr %q", err, stderr)
+	}
 }

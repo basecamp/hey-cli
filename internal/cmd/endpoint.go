@@ -42,7 +42,7 @@ func appEndpoint() bool {
 // chooseEndpoint settles the endpoint once the profile is applied, and refuses what the
 // app endpoint cannot answer before anything reads a credential.
 func chooseEndpoint(cmd *cobra.Command) error {
-	answeringEndpoint = ""
+	answeringEndpoint, appGateUnmet = "", false
 	if !config.ExperimentalApp() {
 		return nil
 	}
@@ -69,14 +69,24 @@ func chooseEndpoint(cmd *cobra.Command) error {
 // (a config in another place than hey reads, say) would otherwise answer from the server
 // without a word. A profile command, which would add one, and what reads no server run.
 func noAppProfile(cmd *cobra.Command) error {
+	appGateUnmet = false
 	for _, p := range cfg.Profiles {
 		if p.Endpoint == config.EndpointApp {
 			return nil
 		}
 	}
+	appGateUnmet = true
 	if readsNoServer(cmd) {
 		return nil
 	}
+	return noAppProfileError(cmd)
+}
+
+// appGateUnmet is set when the gate is on and no profile is answered by the app: bare hey
+// then prints help and says so, picking no account on HEY's server and starting no sign-in.
+var appGateUnmet bool
+
+func noAppProfileError(cmd *cobra.Command) *apierr.Error {
 	return apierr.ErrUsageHint(
 		terminal.SanitizeLine(fmt.Sprintf("%s=app is set, but no profile in %s is answered by the HEY app, so %s would be answered by HEY's server",
 			config.ExperimentalEnv, config.GlobalConfigPath(), cmd.CommandPath())),
