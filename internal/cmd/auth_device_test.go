@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +12,7 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
-func TestPlainLoginAutoDetectsDeviceFlow(t *testing.T) {
+func TestPlainLoginUsesDeviceFlowWhenAdvertised(t *testing.T) {
 	const userCode = "AUTO-CODE"
 	const deviceCode = "auto-device-code"
 	var pollCount int
@@ -21,6 +20,16 @@ func TestPlainLoginAutoDetectsDeviceFlow(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                         serverURL,
+				"authorization_endpoint":         serverURL + "/oauth/authorizations/new",
+				"token_endpoint":                 serverURL + "/oauth/tokens",
+				"device_authorization_endpoint":  serverURL + "/oauth/device_authorizations",
+				"grant_types_supported":          []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
+				"code_challenge_methods_supported": []string{"S256"},
+			})
 		case "/oauth/device_authorizations":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -67,7 +76,7 @@ func TestPlainLoginAutoDetectsDeviceFlow(t *testing.T) {
 	configHome := t.TempDir()
 	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
 	if err != nil {
-		t.Fatalf("plain login auto-detect: %v", err)
+		t.Fatalf("plain login with device metadata: %v", err)
 	}
 	if response.Summary != "Logged in successfully" {
 		t.Errorf("summary = %q", response.Summary)
@@ -81,6 +90,167 @@ func TestPlainLoginAutoDetectsDeviceFlow(t *testing.T) {
 	}
 }
 
+func TestPlainLoginFallsBackWhenNoDeviceEndpoint(t *testing.T) {
+	sawMetadataRequest := make(chan bool, 1)
+	var serverURL string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			select {
+			case sawMetadataRequest <- true:
+			default:
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                           serverURL,
+				"authorization_endpoint":           serverURL + "/oauth/authorizations/new",
+				"token_endpoint":                   serverURL + "/oauth/tokens",
+				"grant_types_supported":            []string{"authorization_code", "refresh_token"},
+				"code_challenge_methods_supported": []string{"S256"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	configHome := t.TempDir()
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
+		done <- err
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
+
+	select {
+	case <-sawMetadataRequest:
+	default:
+		t.Error("metadata endpoint was not requested")
+	}
+}
+
+func TestPlainLogin404MetadataFallsBack(t *testing.T) {
+	sawMetadataRequest := make(chan bool, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			select {
+			case sawMetadataRequest <- true:
+			default:
+			}
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configHome := t.TempDir()
+
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
+		done <- err
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
+
+	select {
+	case <-sawMetadataRequest:
+	default:
+		t.Error("metadata endpoint was not requested")
+	}
+}
+
+func TestPlainLoginDeviceErrorNoFallback(t *testing.T) {
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                         serverURL,
+				"authorization_endpoint":         serverURL + "/oauth/authorizations/new",
+				"token_endpoint":                 serverURL + "/oauth/tokens",
+				"device_authorization_endpoint":  serverURL + "/oauth/device_authorizations",
+				"grant_types_supported":          []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
+				"code_challenge_methods_supported": []string{"S256"},
+			})
+		case "/oauth/device_authorizations":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"device_code":      "device-code",
+				"user_code":        "WILL-DENY",
+				"verification_uri": serverURL + "/verify",
+				"expires_in":       300,
+				"interval":         1,
+			})
+		case "/oauth/tokens":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "access_denied"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	configHome := t.TempDir()
+	_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
+	if err == nil {
+		t.Fatal("expected error for access_denied on plain login, got nil")
+	}
+	if !strings.Contains(err.Error(), "denied") {
+		t.Errorf("error should mention denial: %v", err)
+	}
+}
+
+func TestUnauthorizedClientAfterDiscoveryErrors(t *testing.T) {
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                         serverURL,
+				"device_authorization_endpoint":  serverURL + "/oauth/device_authorizations",
+				"token_endpoint":                 serverURL + "/oauth/tokens",
+				"grant_types_supported":          []string{"urn:ietf:params:oauth:grant-type:device_code"},
+				"code_challenge_methods_supported": []string{"S256"},
+			})
+		case "/oauth/device_authorizations":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized_client"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	configHome := t.TempDir()
+	_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
+	if err == nil {
+		t.Fatal("expected error for unauthorized_client after discovery, got nil")
+	}
+	if !strings.Contains(err.Error(), "unauthorized_client") {
+		t.Errorf("error should mention unauthorized_client: %v", err)
+	}
+}
+
 func TestDeviceCodeFlagSuccess(t *testing.T) {
 	const userCode = "ABCD-EFGH"
 	const deviceCode = "secret-device-code"
@@ -89,6 +259,15 @@ func TestDeviceCodeFlagSuccess(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                         serverURL,
+				"device_authorization_endpoint":  serverURL + "/oauth/device_authorizations",
+				"token_endpoint":                 serverURL + "/oauth/tokens",
+				"grant_types_supported":          []string{"urn:ietf:params:oauth:grant-type:device_code"},
+				"code_challenge_methods_supported": []string{"S256"},
+			})
 		case "/oauth/device_authorizations":
 			if r.Method != "POST" {
 				t.Errorf("device authorization: method = %s, want POST", r.Method)
@@ -178,6 +357,36 @@ func TestDeviceCodeFlagSuccess(t *testing.T) {
 	}
 }
 
+func TestDeviceCodeFlagWithoutAdvertisedEndpoint(t *testing.T) {
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                           serverURL,
+				"authorization_endpoint":           serverURL + "/oauth/authorizations/new",
+				"token_endpoint":                   serverURL + "/oauth/tokens",
+				"grant_types_supported":            []string{"authorization_code", "refresh_token"},
+				"code_challenge_methods_supported": []string{"S256"},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	configHome := t.TempDir()
+	_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device-code")
+	if err == nil {
+		t.Fatal("expected error when --device-code used without advertised endpoint, got nil")
+	}
+	if !strings.Contains(err.Error(), "device code flow unavailable") {
+		t.Errorf("error should mention device code flow unavailable: %v", err)
+	}
+}
+
 func TestDeviceLoginSlowDown(t *testing.T) {
 	var pollCount int
 	var lastPollTime time.Time
@@ -186,6 +395,14 @@ func TestDeviceLoginSlowDown(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                        serverURL,
+				"device_authorization_endpoint": serverURL + "/oauth/device_authorizations",
+				"token_endpoint":                serverURL + "/oauth/tokens",
+				"grant_types_supported":         []string{"urn:ietf:params:oauth:grant-type:device_code"},
+			})
 		case "/oauth/device_authorizations":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
@@ -246,6 +463,14 @@ func TestDeviceLoginAccessDenied(t *testing.T) {
 	var serverURL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                        serverURL,
+				"device_authorization_endpoint": serverURL + "/oauth/device_authorizations",
+				"token_endpoint":                serverURL + "/oauth/tokens",
+				"grant_types_supported":         []string{"urn:ietf:params:oauth:grant-type:device_code"},
+			})
 		case "/oauth/device_authorizations":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
@@ -280,44 +505,18 @@ func TestDeviceLoginAccessDenied(t *testing.T) {
 	}
 }
 
-func TestPlainLoginDeviceErrorsNoFallback(t *testing.T) {
-	var serverURL string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/oauth/device_authorizations":
-			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{
-				"device_code":      "device-code",
-				"user_code":        "WILL-DENY",
-				"verification_uri": serverURL + "/verify",
-				"expires_in":       300,
-				"interval":         1,
-			})
-		case "/oauth/tokens":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": "access_denied"})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-	serverURL = server.URL
-
-	configHome := t.TempDir()
-	_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
-	if err == nil {
-		t.Fatal("expected error for access_denied on plain login, got nil")
-	}
-	if !strings.Contains(err.Error(), "denied") {
-		t.Errorf("error should mention denial: %v", err)
-	}
-}
-
 func TestDeviceLoginExpiredToken(t *testing.T) {
 	var serverURL string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                        serverURL,
+				"device_authorization_endpoint": serverURL + "/oauth/device_authorizations",
+				"token_endpoint":                serverURL + "/oauth/tokens",
+				"grant_types_supported":         []string{"urn:ietf:params:oauth:grant-type:device_code"},
+			})
 		case "/oauth/device_authorizations":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
@@ -345,62 +544,6 @@ func TestDeviceLoginExpiredToken(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "expired") {
 		t.Errorf("error should mention expiry: %v", err)
-	}
-}
-
-func TestDeviceCodeServerUnavailable(t *testing.T) {
-	tests := []struct {
-		name       string
-		statusCode int
-		body       string
-		wantError  string
-	}{
-		{
-			name:       "404 not found",
-			statusCode: http.StatusNotFound,
-			body:       `{"error": "not_found"}`,
-			wantError:  "device code flow unavailable",
-		},
-		{
-			name:       "400 invalid_request",
-			statusCode: http.StatusBadRequest,
-			body:       `{"error": "invalid_request"}`,
-			wantError:  "device code flow unavailable",
-		},
-		{
-			name:       "401 unauthorized_client",
-			statusCode: http.StatusUnauthorized,
-			body:       `{"error": "unauthorized_client"}`,
-			wantError:  "device code flow unavailable",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/oauth/device_authorizations" {
-					w.Header().Set("Content-Type", "application/json")
-					w.WriteHeader(tt.statusCode)
-					fmt.Fprint(w, tt.body)
-				} else {
-					http.NotFound(w, r)
-				}
-			}))
-			defer server.Close()
-
-			configHome := t.TempDir()
-			_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device-code")
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !strings.Contains(err.Error(), tt.wantError) {
-				t.Errorf("error = %v, want substring %q", err, tt.wantError)
-			}
-			var authErr *apierr.Error
-			if !errors.As(err, &authErr) || authErr.Code != apierr.CodeAuth {
-				t.Errorf("error code = %v, want auth", authErr)
-			}
-		})
 	}
 }
 
@@ -445,6 +588,14 @@ func TestTopLevelLoginWithDeviceCode(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                        serverURL,
+				"device_authorization_endpoint": serverURL + "/oauth/device_authorizations",
+				"token_endpoint":                serverURL + "/oauth/tokens",
+				"grant_types_supported":         []string{"urn:ietf:params:oauth:grant-type:device_code"},
+			})
 		case "/oauth/device_authorizations":
 			seenDevice = true
 			w.Header().Set("Content-Type", "application/json")

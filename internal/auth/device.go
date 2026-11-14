@@ -22,9 +22,6 @@ import (
 // a scoped request is refused with invalid_request (or, on #9041 alone, the row with
 // unauthorized_client), and the sign-in falls back to loopback authorization.
 
-// ErrDeviceFlowUnavailable means this HEY can't serve a scoped device sign-in, so the
-// caller should sign in by loopback instead.
-var ErrDeviceFlowUnavailable = errors.New("this HEY doesn't take scoped device sign-ins yet")
 
 // deviceGrantType is RFC 8628 §3.4's grant type.
 const deviceGrantType = "urn:ietf:params:oauth:grant-type:device_code"
@@ -45,16 +42,15 @@ type deviceAuthorization struct {
 }
 
 // LoginDevice signs in with the device authorization grant, asking for the manager's
-// scope. It returns ErrDeviceFlowUnavailable, wrapped with HEY's answer, when this HEY
-// can't serve the request, so the caller can fall back to Login.
-func (m *Manager) LoginDevice(ctx context.Context, opts LoginOptions) error {
+// scope. The deviceAuthzEndpoint parameter comes from OAuth metadata discovery.
+func (m *Manager) LoginDevice(ctx context.Context, deviceAuthzEndpoint string, opts LoginOptions) error {
 	tokenEndpoint := m.baseURL + "/oauth/tokens"
 	installID, err := m.store.InstallID()
 	if err != nil {
 		return fmt.Errorf("install id: %w", err)
 	}
 
-	authorization, err := m.requestDeviceAuthorization(ctx)
+	authorization, err := m.requestDeviceAuthorization(ctx, deviceAuthzEndpoint)
 	if err != nil {
 		return err
 	}
@@ -121,22 +117,19 @@ func webLink(link string) bool {
 	return err == nil && (u.Scheme == "https" || u.Scheme == "http") && u.Host != ""
 }
 
-// requestDeviceAuthorization asks HEY for a device code (POST /oauth/device_authorizations).
-func (m *Manager) requestDeviceAuthorization(ctx context.Context) (*deviceAuthorization, error) {
+// requestDeviceAuthorization asks HEY for a device code at the given endpoint.
+func (m *Manager) requestDeviceAuthorization(ctx context.Context, endpoint string) (*deviceAuthorization, error) {
 	form := url.Values{"client_id": {m.clientID}}
 	if m.scope != "" {
 		form.Set("scope", m.scope)
 	}
-	status, body, err := m.postForm(ctx, m.baseURL+"/oauth/device_authorizations", form)
+	status, body, err := m.postForm(ctx, endpoint, form)
 	if err != nil {
 		return nil, fmt.Errorf("device authorization request failed: %w", err)
 	}
 
 	if status != http.StatusOK {
 		code := oauthErrorCode(body)
-		if deviceFlowUnavailable(status, code) {
-			return nil, fmt.Errorf("%w (HTTP %d %s)", ErrDeviceFlowUnavailable, status, code)
-		}
 		return nil, fmt.Errorf("device authorization failed: HTTP %d %s", status, code)
 	}
 
@@ -150,20 +143,6 @@ func (m *Manager) requestDeviceAuthorization(ctx context.Context) (*deviceAuthor
 	return &authorization, nil
 }
 
-// deviceFlowUnavailable reports whether a refused device request means this HEY can't
-// serve it at all: no endpoint (an older HEY), the rollout switch off (invalid_request
-// for a request naming scope, haystack#9085), or a row the device flow refuses
-// (unauthorized_client, #9041 without #9085).
-func deviceFlowUnavailable(status int, code string) bool {
-	switch status {
-	case http.StatusNotFound, http.StatusMethodNotAllowed:
-		return true
-	case http.StatusBadRequest, http.StatusUnauthorized:
-		return code == "invalid_request" || code == "unauthorized_client" || code == "unsupported_grant_type"
-	default:
-		return false
-	}
-}
 
 // pollDeviceToken asks the token endpoint once whether the device code is approved. It
 // returns the token, or the RFC 8628 §3.5 error code HEY answered.

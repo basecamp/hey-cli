@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,10 +17,19 @@ import (
 	"github.com/basecamp/hey-cli/internal/auth"
 )
 
+func mustMarshalJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
 // fakeLocalMCPOAuth serves the device flow and revocation for the local MCP client.
 type fakeLocalMCPOAuth struct {
 	t           *testing.T
 	scope       string
+	serverURL   string
 	mu          sync.Mutex
 	revocations []url.Values
 }
@@ -29,6 +39,16 @@ func (f *fakeLocalMCPOAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	form, _ := url.ParseQuery(string(raw))
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/.well-known/oauth-authorization-server":
+		metadata := map[string]any{
+			"issuer":                           f.serverURL,
+			"authorization_endpoint":           f.serverURL + "/oauth/authorizations/new",
+			"token_endpoint":                   f.serverURL + "/oauth/tokens",
+			"device_authorization_endpoint":    f.serverURL + "/oauth/device_authorizations",
+			"grant_types_supported":            []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
+			"code_challenge_methods_supported": []string{"S256"},
+		}
+		fmt.Fprintf(w, "%s\n", mustMarshalJSON(metadata))
 	case r.Method == http.MethodPost && r.URL.Path == "/oauth/device_authorizations":
 		if form.Get("client_id") != "LocalMcpClient0000000001" || form.Get("scope") != "read write send" {
 			f.t.Errorf("device request = %v", form)
@@ -50,6 +70,7 @@ func (f *fakeLocalMCPOAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func TestAuthLoginMCPKeepsTheCLIsCredentialAndStatusShowsBoth(t *testing.T) {
 	hey := &fakeLocalMCPOAuth{t: t, scope: "read write"}
 	server := httptest.NewServer(hey)
+	hey.serverURL = server.URL
 	defer server.Close()
 	configHome := t.TempDir()
 	t.Setenv("HEY_MCP_CLIENT_ID", "LocalMcpClient0000000001")

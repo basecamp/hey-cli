@@ -23,6 +23,11 @@ type fakeHEYOAuth struct {
 	t *testing.T
 
 	mu sync.Mutex
+	// metadataStatus controls metadata discovery; 404 means no metadata, 0 serves metadata.
+	// When metadataStatus is 0 and metadataOmitDevice is true, metadata omits device_authorization_endpoint.
+	metadataStatus       int
+	metadataOmitDevice   bool
+	serverURL            string
 	// deviceStatus and deviceError answer the device authorization request; zero
 	// serves a device code.
 	deviceStatus int
@@ -56,6 +61,23 @@ func (f *fakeHEYOAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/.well-known/oauth-authorization-server":
+		if f.metadataStatus != 0 {
+			w.WriteHeader(f.metadataStatus)
+			return
+		}
+		metadata := map[string]any{
+			"issuer":                           f.serverURL,
+			"authorization_endpoint":           f.serverURL + "/oauth/authorizations/new",
+			"token_endpoint":                   f.serverURL + "/oauth/tokens",
+			"grant_types_supported":            []string{"authorization_code", "refresh_token"},
+			"code_challenge_methods_supported": []string{"S256"},
+		}
+		if !f.metadataOmitDevice {
+			metadata["device_authorization_endpoint"] = f.serverURL + "/oauth/device_authorizations"
+			metadata["grant_types_supported"] = []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"}
+		}
+		json.NewEncoder(w).Encode(metadata)
 	case r.Method == http.MethodPost && r.URL.Path == "/oauth/device_authorizations":
 		f.deviceRequests = form
 		if f.deviceStatus != 0 {
@@ -127,6 +149,7 @@ func newMCPRig(t *testing.T) *mcpRig {
 	t.Setenv("HEY_NO_KEYRING", "")
 	rig := &mcpRig{hey: &fakeHEYOAuth{t: t}, keyring: newFakeKeyring()}
 	rig.server = httptest.NewServer(rig.hey)
+	rig.hey.serverURL = rig.server.URL
 	t.Cleanup(rig.server.Close)
 
 	configDir := t.TempDir()
@@ -216,6 +239,7 @@ func TestMCPLoginStoresApartInThePlaintextFallbackToo(t *testing.T) {
 	t.Setenv("HEY_NO_KEYRING", "1")
 	hey := &fakeHEYOAuth{t: t}
 	server := httptest.NewServer(hey)
+	hey.serverURL = server.URL
 	t.Cleanup(server.Close)
 	dir := t.TempDir()
 
@@ -247,17 +271,18 @@ func keysOf(all map[string]*Credentials) []string {
 }
 
 func TestMCPLoginFallsBackToLoopbackWithTheSameScope(t *testing.T) {
-	for name, refusal := range map[string]struct {
-		status int
-		code   string
+	tests := map[string]struct {
+		metadataStatus     int
+		metadataOmitDevice bool
 	}{
-		"rollout switch off (haystack#9085)":     {http.StatusBadRequest, "invalid_request"},
-		"row refused by the device flow (#9041)": {http.StatusBadRequest, "unauthorized_client"},
-		"no device endpoint":                     {http.StatusNotFound, ""},
-	} {
+		"no device endpoint":  {0, true},
+		"metadata 404":        {http.StatusNotFound, false},
+	}
+	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
 			rig := newMCPRig(t)
-			rig.hey.deviceStatus, rig.hey.deviceError = refusal.status, refusal.code
+			rig.hey.metadataStatus = tc.metadataStatus
+			rig.hey.metadataOmitDevice = tc.metadataOmitDevice
 
 			method, err := rig.mcp.LoginMCP(context.Background(), quiet)
 			if err != nil {
@@ -284,6 +309,7 @@ func TestMCPLoginFallsBackToLoopbackWithTheSameScope(t *testing.T) {
 
 func TestMCPLoginDoesntFallBackOnOtherRefusals(t *testing.T) {
 	rig := newMCPRig(t)
+	// Metadata advertises device endpoint, but device request fails with invalid_client
 	rig.hey.deviceStatus, rig.hey.deviceError = http.StatusUnauthorized, "invalid_client"
 	if _, err := rig.mcp.LoginMCP(context.Background(), quiet); err == nil {
 		t.Fatal("an unknown client id signed in")

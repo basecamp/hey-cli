@@ -113,31 +113,38 @@ saves drafts but can't send them.`,
 			ctx, cancel := context.WithTimeout(cmd.Context(), 6*time.Minute)
 			defer cancel()
 
-			var method string
-			var err error
 			logFunc := func(msg string) {
 				fmt.Fprint(cmd.ErrOrStderr(), msg)
 			}
 
+			metadata, err := authMgr.DiscoverOAuthMetadata(ctx)
+			if err != nil {
+				return apierr.ErrAuth(fmt.Sprintf("OAuth metadata discovery failed: %v", err))
+			}
+
+			var method string
 			if deviceCode {
-				err = authMgr.LoginDevice(ctx, auth.LoginOptions{NoBrowser: true, Logger: logFunc})
+				if metadata == nil || !metadata.SupportsDeviceFlow() {
+					return apierr.ErrAuth("device code flow unavailable: this HEY server does not advertise device authorization support (RFC 8628). Sign in without --device-code to use the browser flow: " + authMgr.LoginCommand())
+				}
+				err = authMgr.LoginDevice(ctx, metadata.DeviceAuthorizationEndpoint, auth.LoginOptions{NoBrowser: true, Logger: logFunc})
 				if err != nil {
-					if errors.Is(err, auth.ErrDeviceFlowUnavailable) {
-						return apierr.ErrAuth(fmt.Sprintf("device code flow unavailable: %v\n\nThis HEY server does not support device authorization (RFC 8628). Sign in without --device-code to use the browser flow: %s", err, authMgr.LoginCommand()))
-					}
 					return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
 				}
 				method = "device"
 			} else {
-				err = authMgr.LoginDevice(ctx, auth.LoginOptions{NoBrowser: true, Logger: logFunc})
-				if err == nil {
+				if metadata != nil && metadata.SupportsDeviceFlow() {
+					err = authMgr.LoginDevice(ctx, metadata.DeviceAuthorizationEndpoint, auth.LoginOptions{NoBrowser: true, Logger: logFunc})
+					if err != nil {
+						return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
+					}
 					method = "device"
-				} else if errors.Is(err, auth.ErrDeviceFlowUnavailable) {
+				} else {
 					err = authMgr.Login(ctx, auth.LoginOptions{NoBrowser: noBrowser})
+					if err != nil {
+						return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
+					}
 					method = "oauth"
-				}
-				if err != nil {
-					return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
 				}
 			}
 

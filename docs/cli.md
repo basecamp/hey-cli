@@ -54,9 +54,9 @@ Browser session cookies are no longer supported. Existing cookie-only logins mus
 
 OAuth tokens refresh automatically on expiry. Credentials are stored in the system keyring (with file fallback at `~/.config/hey-cli/credentials.json`).
 
-When the server supports the OAuth device flow (RFC 8628), `hey auth login` uses it automatically: you approve a short code in the browser instead of a redirect. Login falls back to the browser callback flow only when the server doesn't support device authorization. Once device flow is selected, failures surface as errors rather than silently falling back.
+Login uses RFC 8414 metadata discovery (`/.well-known/oauth-authorization-server`) to determine whether the server supports device authorization (RFC 8628). When a device endpoint is advertised in metadata, `hey auth login` uses it automatically: you approve a short code in the browser instead of a redirect. Login falls back to the browser callback flow only when metadata is missing or doesn't advertise a device endpoint. Once device flow is selected through discovery, all errors surface as real failures (no silent fallback for 404, `invalid_request`, `unauthorized_client`, or other device flow errors).
 
-The `--device-code` flag forces device code flow: it prints a link and a one-time code, waits for you to approve the code in HEY from any device (your phone, another computer), and never opens a browser. If the server doesn't support device flow, the command fails with a clear error. It's designed for headless environments where a browser cannot open or a callback server cannot listen.
+The `--device-code` flag forces device code flow: it performs metadata discovery, prints a link and a one-time code if the endpoint is advertised, waits for you to approve the code in HEY from any device (your phone, another computer), and never opens a browser. If metadata doesn't advertise a device endpoint, the command fails with a clear error. It's designed for headless environments where a browser cannot open or a callback server cannot listen.
 
 ```bash
 hey auth status   # check auth status

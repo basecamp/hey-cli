@@ -58,9 +58,9 @@ func (m *Manager) ClientID() string {
 	return m.clientID
 }
 
-// LoginMCP signs in the local MCP client. It uses the device flow where HEY serves
-// scoped device requests, and otherwise loopback authorization with the same scope,
-// returning which one it used ("device" or "oauth").
+// LoginMCP signs in the local MCP client. It uses RFC 8414 metadata discovery to
+// determine whether device flow is available, using it when present and falling back
+// to loopback authorization otherwise. Returns which flow was used ("device" or "oauth").
 func (m *Manager) LoginMCP(ctx context.Context, opts LoginOptions) (string, error) {
 	switch m.clientID {
 	case "":
@@ -71,11 +71,16 @@ func (m *Manager) LoginMCP(ctx context.Context, opts LoginOptions) (string, erro
 		return "", fmt.Errorf("the configured MCP client id is the CLI's own; set the HEY MCP (local) client id")
 	}
 
-	err := m.LoginDevice(ctx, opts)
-	if !errors.Is(err, ErrDeviceFlowUnavailable) {
+	metadata, err := m.DiscoverOAuthMetadata(ctx)
+	if err != nil {
+		return "", fmt.Errorf("OAuth metadata discovery failed: %w", err)
+	}
+
+	if metadata != nil && metadata.SupportsDeviceFlow() {
+		err := m.LoginDevice(ctx, metadata.DeviceAuthorizationEndpoint, opts)
 		return "device", err
 	}
-	opts.log(fmt.Sprintf("\n%v, so signing in through the browser instead.\n", err))
+
 	return "oauth", m.Login(ctx, opts)
 }
 
