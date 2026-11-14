@@ -61,6 +61,9 @@ func newDraftsCommand() *draftsCommand {
 }
 
 func (c *draftsCommand) run(cmd *cobra.Command, args []string) error {
+	if appEndpoint() {
+		return c.runApp(cmd)
+	}
 	if err := requireAuth(); err != nil {
 		return err
 	}

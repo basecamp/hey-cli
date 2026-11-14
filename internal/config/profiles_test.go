@@ -285,3 +285,103 @@ func TestAnEmptyProfileAccountIsNone(t *testing.T) {
 		t.Errorf("profiles = %#v, %v", profiles, err)
 	}
 }
+
+// A profile's endpoint is the server or the app; anything else is refused rather than read
+// as the server, and the app needs no base_url of its own.
+func TestParseProfilesReadsTheEndpoint(t *testing.T) {
+	entries, err := parseProfiles("config.json", map[string]json.RawMessage{
+		"this-computer": json.RawMessage(`{"endpoint":"app"}`),
+		"hey.com":       json.RawMessage(`{"base_url":"https://app.hey.com","endpoint":"server"}`),
+		"bare":          json.RawMessage(`{"endpoint":"server"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if app := entries["this-computer"]; app.Endpoint != EndpointApp || app.BaseURL != defaultBase {
+		t.Errorf("this-computer = %#v", app)
+	}
+	if server := entries["hey.com"]; server.Endpoint != EndpointServer {
+		t.Errorf("hey.com = %#v", server)
+	}
+	if _, ok := entries["bare"]; ok {
+		t.Errorf("a server profile with no base_url was read: %#v", entries["bare"])
+	}
+	if _, err := parseProfiles("config.json", map[string]json.RawMessage{
+		"typo": json.RawMessage(`{"base_url":"https://app.hey.com","endpoint":"ap"}`),
+	}); err == nil || !strings.Contains(err.Error(), "endpoint must be") {
+		t.Errorf("err = %v", err)
+	}
+	if _, err := parseProfiles("config.json", map[string]json.RawMessage{
+		"flag": json.RawMessage(`{"base_url":"https://app.hey.com","endpoint":true}`),
+	}); err == nil || !strings.Contains(err.Error(), "endpoint must be") {
+		t.Errorf("err = %v", err)
+	}
+}
+
+// Only HEY_EXPERIMENTAL=app honours an app profile, and the app takes no mail account.
+func TestApplyProfileGatesTheAppEndpoint(t *testing.T) {
+	profileConfigHome(t)
+	t.Setenv(ExperimentalEnv, "")
+	app := func() *Config {
+		c := Defaults()
+		c.Profiles = map[string]*ProfileConfig{"this-computer": {BaseURL: defaultBase, Endpoint: EndpointApp}}
+		return c
+	}
+
+	c := app()
+	if err := c.ApplyProfile("this-computer", SourceFlag); err == nil || !strings.Contains(err.Error(), "not in this build") {
+		t.Fatalf("without the gate: %v", err)
+	}
+	if c.ActiveEndpoint() != EndpointServer {
+		t.Errorf("a refused profile is active: %q", c.ActiveEndpoint())
+	}
+
+	t.Setenv(ExperimentalEnv, "calendar, app")
+	c = app()
+	if err := c.ApplyProfile("this-computer", SourceFlag); err != nil {
+		t.Fatal(err)
+	}
+	if c.ActiveEndpoint() != EndpointApp {
+		t.Errorf("endpoint = %q", c.ActiveEndpoint())
+	}
+
+	c = app()
+	c.Profiles["this-computer"].AccountID = "42"
+	if err := c.ApplyProfile("this-computer", SourceFlag); err == nil || !strings.Contains(err.Error(), "takes no mail account") {
+		t.Errorf("an account on the app profile: %v", err)
+	}
+}
+
+// A nearer file's explicit "server" overrides a farther "app", and an app-only entry counts
+// as a profile wherever entries are counted.
+func TestAnExplicitServerEndpointOverridesTheApp(t *testing.T) {
+	farther, err := parseProfiles("global", map[string]json.RawMessage{"work": json.RawMessage(`{"endpoint":"app"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nearer, err := parseProfiles("repo", map[string]json.RawMessage{"work": json.RawMessage(`{"base_url":"https://app.hey.com","endpoint":"server"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	profiles := map[string]*ProfileConfig{}
+	mergeProfile(profiles, "work", farther["work"])
+	mergeProfile(profiles, "work", nearer["work"])
+	if p := profiles["work"]; p.Endpoint == EndpointApp {
+		t.Errorf("work = %#v", p)
+	}
+	if !EntryIsProfile(map[string]any{"endpoint": "app"}) || EntryIsProfile(map[string]any{"endpoint": "server"}) {
+		t.Error("EntryIsProfile misreads an app-only entry")
+	}
+}
+
+func TestAnAppOnlyProfileIsCountedBeforeTheNextBecomesTheDefault(t *testing.T) {
+	home := profileConfigHome(t)
+	writeConfigFile(t, filepath.Join(home, "hey-cli", "config.json"), `{"profiles":{"this-computer":{"endpoint":"app"}},"default_profile":"this-computer"}`)
+	isDefault, err := RegisterProfile("hey.com", ProfileConfig{BaseURL: defaultBase})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if isDefault {
+		t.Error("the server profile became the default beside an app-only one")
+	}
+}

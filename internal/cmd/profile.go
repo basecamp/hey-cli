@@ -80,9 +80,12 @@ func newProfileListCommand() *cobra.Command {
 			for _, name := range names {
 				p := cfg.Profiles[name]
 				entry := map[string]any{
-					"name":          name,
-					"base_url":      p.BaseURL,
-					"authenticated": profileAuthenticated(name),
+					"name":     name,
+					"base_url": p.BaseURL,
+				}
+				// The app's profile has no credential of its own to look for.
+				if !appProfile(p) {
+					entry["authenticated"] = profileAuthenticated(name)
 				}
 				if cfg.DefaultProfile == name {
 					entry["default"] = true
@@ -92,6 +95,9 @@ func newProfileListCommand() *cobra.Command {
 				}
 				if p.AccountID != "" {
 					entry["account_id"] = p.AccountID
+				}
+				if config.ExperimentalApp() {
+					entry["endpoint"] = profileEndpoint(p)
 				}
 				profiles = append(profiles, entry)
 			}
@@ -111,6 +117,9 @@ func newProfileListCommand() *cobra.Command {
 					}
 					if cfg.DefaultProfile == name {
 						marks = append(marks, "default")
+					}
+					if appProfile(p) {
+						signedIn = "the HEY app"
 					}
 					table.addRow([]string{terminal.SanitizeLine(name), terminal.SanitizeLine(p.BaseURL), p.AccountID, signedIn, strings.Join(marks, ", ")})
 				}
@@ -147,17 +156,24 @@ func newProfileShowCommand() *cobra.Command {
 			}
 
 			result := map[string]any{
-				"name":          name,
-				"base_url":      p.BaseURL,
-				"authenticated": false,
+				"name":     name,
+				"base_url": p.BaseURL,
 			}
 			if p.AccountID != "" {
 				result["account_id"] = p.AccountID
 			}
+			if config.ExperimentalApp() {
+				result["endpoint"] = profileEndpoint(p)
+			}
 			if cfg.DefaultProfile == name {
 				result["default"] = true
 			}
-			creds, err := authMgr.GetStore().Load(auth.ProfileCredentialKey(name))
+			var creds *auth.Credentials
+			err := auth.ErrCredentialsNotFound
+			if !appProfile(p) {
+				result["authenticated"] = false
+				creds, err = authMgr.GetStore().Load(auth.ProfileCredentialKey(name))
+			}
 			if err != nil && !errors.Is(err, auth.ErrCredentialsNotFound) {
 				return auth.CredentialStorageError("could not read the profile's credential", err)
 			}
@@ -178,10 +194,15 @@ func newProfileShowCommand() *cobra.Command {
 				if p.AccountID != "" {
 					fmt.Fprintf(w, "Mail:      %s\n", p.AccountID)
 				}
+				if appProfile(p) {
+					fmt.Fprintln(w, "Endpoint:  the HEY app on this computer")
+				}
 				if cfg.DefaultProfile == name {
 					fmt.Fprintln(w, "Default:   yes")
 				}
-				if result["authenticated"] == true {
+				if appProfile(p) {
+					fmt.Fprintln(w, "Status:    Answered by the HEY app")
+				} else if result["authenticated"] == true {
 					fmt.Fprintln(w, "Status:    Logged in")
 				} else {
 					fmt.Fprintln(w, "Status:    Not logged in")
@@ -325,33 +346,37 @@ func newProfileDeleteCommand() *cobra.Command {
 			}
 
 			fields := map[string]any{"name": name, "status": "deleted"}
-			// The revocation goes to the deleted profile's own saved server, never to
-			// the active configuration's, which may belong to another profile.
-			httpClient := &http.Client{Timeout: 15 * time.Second}
-			cli := auth.NewManager(p.BaseURL, httpClient, config.ConfigDir())
-			cli.UseProfile(name)
-			// An unreadable client id still leaves a credential to remove; its own
-			// record names the client it was issued to.
-			clientID, _, _ := config.MCPClientID(p.BaseURL)
-			mcp := auth.NewMCPManager(p.BaseURL, httpClient, config.ConfigDir(), clientID)
-			mcp.UseProfile(name)
-			for _, mgr := range []*auth.Manager{cli, mcp} {
-				revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
-				if err != nil {
-					// The profile stays, so its credential can still be reached to retry.
-					arg := name
-					if !config.ValidProfileName(name) {
-						arg = shellQuoted(name)
+			// The app's profile has no credential of its own, so its delete looks for none
+			// and revokes nothing, as profile list and show look for none.
+			if !appProfile(p) {
+				// The revocation goes to the deleted profile's own saved server, never to
+				// the active configuration's, which may belong to another profile.
+				httpClient := &http.Client{Timeout: 15 * time.Second}
+				cli := auth.NewManager(p.BaseURL, httpClient, config.ConfigDir())
+				cli.UseProfile(name)
+				// An unreadable client id still leaves a credential to remove; its own
+				// record names the client it was issued to.
+				clientID, _, _ := config.MCPClientID(p.BaseURL)
+				mcp := auth.NewMCPManager(p.BaseURL, httpClient, config.ConfigDir(), clientID)
+				mcp.UseProfile(name)
+				for _, mgr := range []*auth.Manager{cli, mcp} {
+					revoked, err := revokeAndForget(cmd, mgr, name, p.BaseURL)
+					if err != nil {
+						// The profile stays, so its credential can still be reached to retry.
+						arg := name
+						if !config.ValidProfileName(name) {
+							arg = shellQuoted(name)
+						}
+						// A storage error keeps its own class and hint, a refused keyring's.
+						e := *apierr.AsError(auth.CredentialStorageError(fmt.Sprintf("could not delete credentials for profile %q", name), err))
+						if e.Hint == "" {
+							e.Hint = "Run hey doctor -P " + arg + " to check the credential store, then delete the profile again"
+						}
+						return &e
 					}
-					// A storage error keeps its own class and hint, a refused keyring's.
-					e := *apierr.AsError(auth.CredentialStorageError(fmt.Sprintf("could not delete credentials for profile %q", name), err))
-					if e.Hint == "" {
-						e.Hint = "Run hey doctor -P " + arg + " to check the credential store, then delete the profile again"
+					if revoked != nil && mgr == cli {
+						fields["revoked"] = *revoked
 					}
-					return &e
-				}
-				if revoked != nil && mgr == cli {
-					fields["revoked"] = *revoked
 				}
 			}
 			clearProfileHTTPCache(cmd, name)
@@ -457,9 +482,23 @@ func clearProfileHTTPCache(cmd *cobra.Command, name string) {
 }
 
 // localEntrySetsProfile reports whether a repository config's entry for name is one the
-// loader reads as a profile: an entry with no base_url is skipped there.
+// loader reads as a profile: an entry with no base_url is skipped there, unless the app
+// answers it (config.EntryIsProfile).
 func localEntrySetsProfile(local *config.LocalConfig, name string) bool {
 	entry, _ := local.Profiles[name].(map[string]any)
-	baseURL, _ := entry["base_url"].(string)
-	return baseURL != ""
+	return config.EntryIsProfile(entry)
+}
+
+// profileEndpoint is a profile's endpoint as profile list and show name it.
+func profileEndpoint(p *config.ProfileConfig) string {
+	if p.Endpoint == config.EndpointApp {
+		return config.EndpointApp
+	}
+	return config.EndpointServer
+}
+
+// appProfile reports a profile the HEY app answers in this build: one that needs, and
+// has, no credential of its own.
+func appProfile(p *config.ProfileConfig) bool {
+	return p.Endpoint == config.EndpointApp && config.ExperimentalApp()
 }

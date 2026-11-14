@@ -29,12 +29,48 @@ import (
 type ProfileConfig struct {
 	BaseURL   string `json:"base_url"`
 	AccountID string `json:"account_id,omitempty"`
+	// Endpoint is EndpointApp for a profile answered by the HEY app on this computer,
+	// and "" (the server) otherwise. Only an experimental build honours it (ExperimentalApp).
+	Endpoint string `json:"endpoint,omitempty"`
 }
 
 // profileEntry is a profile as one config file writes it.
 type profileEntry struct {
 	BaseURL   string
 	AccountID string
+	Endpoint  string
+}
+
+// The endpoints a profile names: HEY's server, or the HEY app on this computer, reached
+// through the door it opens while "Let Agents Use HEY" is on.
+const (
+	EndpointServer = "server"
+	EndpointApp    = "app"
+)
+
+// ExperimentalEnv turns on what is not ready to be anyone's default. Its value is a
+// comma-separated list; "app" lets a profile's endpoint be the HEY app.
+const ExperimentalEnv = "HEY_EXPERIMENTAL"
+
+// ExperimentalApp reports whether HEY_EXPERIMENTAL lists "app". Without it a profile whose
+// endpoint is the app is refused, and nothing about the app shows in help.
+func ExperimentalApp() bool {
+	for _, feature := range strings.Split(os.Getenv(ExperimentalEnv), ",") {
+		if strings.TrimSpace(feature) == EndpointApp {
+			return true
+		}
+	}
+	return false
+}
+
+// ActiveEndpoint is the endpoint this invocation answers from: EndpointApp only for an
+// active profile that names the app, which ApplyProfile has already refused unless
+// ExperimentalApp.
+func (c *Config) ActiveEndpoint() string {
+	if p := c.Profiles[c.ActiveProfile]; c.ActiveProfile != "" && p != nil && p.Endpoint == EndpointApp {
+		return EndpointApp
+	}
+	return EndpointServer
 }
 
 // SourcePrompt is a profile chosen at the terminal's picker.
@@ -69,7 +105,8 @@ func NormalizeAccountID(accountID string) (string, error) {
 }
 
 // parseProfiles reads a config file's profiles. An entry with no base_url is left
-// out, as if the file did not name the profile.
+// out, as if the file did not name the profile, unless it names the app as its endpoint:
+// the app needs no server named, and takes HEY's own.
 func parseProfiles(path string, raw map[string]json.RawMessage) (map[string]profileEntry, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -81,10 +118,17 @@ func parseProfiles(path string, raw map[string]json.RawMessage) (map[string]prof
 			return nil, fmt.Errorf("could not parse config %s: profile %q is not an object", path, name)
 		}
 		baseURL, _ := fields["base_url"].(string)
-		if baseURL == "" {
+		endpoint, err := parseEndpoint(path, name, fields)
+		if err != nil {
+			return nil, err
+		}
+		if baseURL == "" && endpoint != EndpointApp {
 			continue
 		}
-		entry := profileEntry{BaseURL: baseURL}
+		if baseURL == "" {
+			baseURL = defaultBase
+		}
+		entry := profileEntry{BaseURL: baseURL, Endpoint: endpoint}
 		if raw, present := fields["account_id"]; present && raw != nil && raw != "" {
 			account := stringOrNumber(raw)
 			if account == "" {
@@ -99,6 +143,36 @@ func parseProfiles(path string, raw map[string]json.RawMessage) (map[string]prof
 		entries[name] = entry
 	}
 	return entries, nil
+}
+
+// parseEndpoint reads a profile's endpoint: "" for none or "server", EndpointApp for the
+// app. Any other value is refused rather than read as the server, since a mistyped "app"
+// would otherwise send the profile's requests to HEY's server.
+func parseEndpoint(path, name string, fields map[string]any) (string, error) {
+	raw, present := fields["endpoint"]
+	if !present || raw == nil {
+		return "", nil
+	}
+	endpoint, isString := raw.(string)
+	switch {
+	case isString && endpoint == "":
+		return "", nil
+	case isString && endpoint == EndpointServer:
+		// Kept, not read as "", so a nearer file's "server" overrides a farther "app".
+		return EndpointServer, nil
+	case isString && endpoint == EndpointApp:
+		return EndpointApp, nil
+	default:
+		return "", fmt.Errorf("could not parse config %s: profile %q: endpoint must be %q or %q", path, name, EndpointServer, EndpointApp)
+	}
+}
+
+// EntryIsProfile reports whether a config file's entry names a profile, as parseProfiles
+// reads it: one with a base_url, or one the app answers, which needs none.
+func EntryIsProfile(fields map[string]any) bool {
+	baseURL, _ := fields["base_url"].(string)
+	endpoint, _ := fields["endpoint"].(string)
+	return baseURL != "" || endpoint == EndpointApp
 }
 
 func stringOrNumber(value any) string {
@@ -127,6 +201,9 @@ func mergeProfile(profiles map[string]*ProfileConfig, name string, entry profile
 	p.BaseURL = entry.BaseURL
 	if entry.AccountID != "" {
 		p.AccountID = entry.AccountID
+	}
+	if entry.Endpoint != "" {
+		p.Endpoint = entry.Endpoint
 	}
 }
 
@@ -206,6 +283,11 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	if !ok {
 		return fmt.Errorf("profile %q not found", name)
 	}
+	if p.Endpoint == EndpointApp {
+		if err := c.checkAppProfile(name, p); err != nil {
+			return err
+		}
+	}
 	if err := validateBaseURL(p.BaseURL); err != nil {
 		return err
 	}
@@ -241,6 +323,32 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	// by that record before any profile was chosen. Re-reading it against the
 	// profile's server would ignore the profiles it had just approved on the next run.
 	return nil
+}
+
+// checkAppProfile refuses a profile whose endpoint is the app where this run cannot honour
+// it: a build without ExperimentalApp, which must not quietly answer from HEY's server
+// instead, and a mail account named for it, since the app answers for whichever account
+// its window shows.
+func (c *Config) checkAppProfile(name string, p *ProfileConfig) error {
+	if !ExperimentalApp() {
+		return apierr.ErrUsageHint(
+			fmt.Sprintf("profile %q is answered by the HEY app on this computer, which is not in this build of hey", terminal.SanitizeLine(name)),
+			"Use another profile: hey profile list")
+	}
+	var by string
+	switch {
+	case p.AccountID != "":
+		by = fmt.Sprintf("its account_id %s", p.AccountID)
+	case c.SourceOf("account_id") == SourceEnv:
+		by = "HEY_ACCOUNT_ID"
+	case c.SourceOf("account_id") == SourceLocal:
+		by = "this repository's account_id"
+	default:
+		return nil
+	}
+	return apierr.ErrUsageHint(
+		fmt.Sprintf("profile %q is answered by the HEY app on this computer, which takes no mail account, but %s names one", terminal.SanitizeLine(name), by),
+		"The app answers for the account its window shows: drop the account, or use a server profile")
 }
 
 // CheckProfileServer refuses a server override, named by, that is not the active
@@ -300,14 +408,15 @@ func RegisterProfile(name string, p ProfileConfig) (isDefault bool, err error) {
 		return false, fmt.Errorf("could not marshal profile: %w", err)
 	}
 	profiles[name] = encoded
-	// Counted as the loader counts them: an entry with no base_url is no profile.
+	// Counted as the loader counts them: an entry with no base_url is no profile, unless
+	// the app answers it (EntryIsProfile).
 	isDefault = true
 	for other, raw := range profiles {
 		var fields map[string]any
 		if other == name || json.Unmarshal(raw, &fields) != nil {
 			continue
 		}
-		if baseURL, _ := fields["base_url"].(string); baseURL != "" {
+		if EntryIsProfile(fields) {
 			isDefault = false
 		}
 	}
