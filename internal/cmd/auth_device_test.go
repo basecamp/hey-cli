@@ -23,11 +23,11 @@ func TestPlainLoginUsesDeviceFlowWhenAdvertised(t *testing.T) {
 		case "/.well-known/oauth-authorization-server":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
-				"issuer":                         serverURL,
-				"authorization_endpoint":         serverURL + "/oauth/authorizations/new",
-				"token_endpoint":                 serverURL + "/oauth/tokens",
-				"device_authorization_endpoint":  serverURL + "/oauth/device_authorizations",
-				"grant_types_supported":          []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
+				"issuer":                           serverURL,
+				"authorization_endpoint":           serverURL + "/oauth/authorizations/new",
+				"token_endpoint":                   serverURL + "/oauth/tokens",
+				"device_authorization_endpoint":    serverURL + "/oauth/device_authorizations",
+				"grant_types_supported":            []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 				"code_challenge_methods_supported": []string{"S256"},
 			})
 		case "/oauth/device_authorizations":
@@ -180,11 +180,11 @@ func TestPlainLoginDeviceErrorNoFallback(t *testing.T) {
 		case "/.well-known/oauth-authorization-server":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
-				"issuer":                         serverURL,
-				"authorization_endpoint":         serverURL + "/oauth/authorizations/new",
-				"token_endpoint":                 serverURL + "/oauth/tokens",
-				"device_authorization_endpoint":  serverURL + "/oauth/device_authorizations",
-				"grant_types_supported":          []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
+				"issuer":                           serverURL,
+				"authorization_endpoint":           serverURL + "/oauth/authorizations/new",
+				"token_endpoint":                   serverURL + "/oauth/tokens",
+				"device_authorization_endpoint":    serverURL + "/oauth/device_authorizations",
+				"grant_types_supported":            []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 				"code_challenge_methods_supported": []string{"S256"},
 			})
 		case "/oauth/device_authorizations":
@@ -224,10 +224,10 @@ func TestUnauthorizedClientAfterDiscoveryErrors(t *testing.T) {
 		case "/.well-known/oauth-authorization-server":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
-				"issuer":                         serverURL,
-				"device_authorization_endpoint":  serverURL + "/oauth/device_authorizations",
-				"token_endpoint":                 serverURL + "/oauth/tokens",
-				"grant_types_supported":          []string{"urn:ietf:params:oauth:grant-type:device_code"},
+				"issuer":                           serverURL,
+				"device_authorization_endpoint":    serverURL + "/oauth/device_authorizations",
+				"token_endpoint":                   serverURL + "/oauth/tokens",
+				"grant_types_supported":            []string{"urn:ietf:params:oauth:grant-type:device_code"},
 				"code_challenge_methods_supported": []string{"S256"},
 			})
 		case "/oauth/device_authorizations":
@@ -262,10 +262,10 @@ func TestDeviceCodeFlagSuccess(t *testing.T) {
 		case "/.well-known/oauth-authorization-server":
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{
-				"issuer":                         serverURL,
-				"device_authorization_endpoint":  serverURL + "/oauth/device_authorizations",
-				"token_endpoint":                 serverURL + "/oauth/tokens",
-				"grant_types_supported":          []string{"urn:ietf:params:oauth:grant-type:device_code"},
+				"issuer":                           serverURL,
+				"device_authorization_endpoint":    serverURL + "/oauth/device_authorizations",
+				"token_endpoint":                   serverURL + "/oauth/tokens",
+				"grant_types_supported":            []string{"urn:ietf:params:oauth:grant-type:device_code"},
 				"code_challenge_methods_supported": []string{"S256"},
 			})
 		case "/oauth/device_authorizations":

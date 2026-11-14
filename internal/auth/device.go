@@ -22,7 +22,6 @@ import (
 // a scoped request is refused with invalid_request (or, on #9041 alone, the row with
 // unauthorized_client), and the sign-in falls back to loopback authorization.
 
-
 // deviceGrantType is RFC 8628 §3.4's grant type.
 const deviceGrantType = "urn:ietf:params:oauth:grant-type:device_code"
 
@@ -142,7 +141,6 @@ func (m *Manager) requestDeviceAuthorization(ctx context.Context, endpoint strin
 	}
 	return &authorization, nil
 }
-
 
 // pollDeviceToken asks the token endpoint once whether the device code is approved. It
 // returns the token, or the RFC 8628 §3.5 error code HEY answered.

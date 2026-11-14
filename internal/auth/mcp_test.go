@@ -25,9 +25,9 @@ type fakeHEYOAuth struct {
 	mu sync.Mutex
 	// metadataStatus controls metadata discovery; 404 means no metadata, 0 serves metadata.
 	// When metadataStatus is 0 and metadataOmitDevice is true, metadata omits device_authorization_endpoint.
-	metadataStatus       int
-	metadataOmitDevice   bool
-	serverURL            string
+	metadataStatus     int
+	metadataOmitDevice bool
+	serverURL          string
 	// deviceStatus and deviceError answer the device authorization request; zero
 	// serves a device code.
 	deviceStatus int
@@ -275,8 +275,8 @@ func TestMCPLoginFallsBackToLoopbackWithTheSameScope(t *testing.T) {
 		metadataStatus     int
 		metadataOmitDevice bool
 	}{
-		"no device endpoint":  {0, true},
-		"metadata 404":        {http.StatusNotFound, false},
+		"no device endpoint": {0, true},
+		"metadata 404":       {http.StatusNotFound, false},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
