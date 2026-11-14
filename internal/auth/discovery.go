@@ -60,7 +60,7 @@ func (m *Manager) DiscoverOAuthMetadata(ctx context.Context) (*OAuthMetadata, er
 }
 
 // SupportsDeviceFlow reports whether the metadata advertises device authorization support.
-func (md *oauthMetadata) SupportsDeviceFlow() bool {
+func (md *OAuthMetadata) SupportsDeviceFlow() bool {
 	if md == nil {
 		return false
 	}
