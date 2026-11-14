@@ -3607,15 +3607,18 @@ var tuiThreadLimits = func() threadload.Limits {
 }()
 
 // fetchTopic reads a whole thread through threadload — every page of the index, every
-// body within the limits — and then its inline images within the image budget. A
-// thread read only in part is shown with a notice rather than refused: the reader is
+// body within the limits — and then its inline images within the image budget. It keeps
+// each message's recipients and inbound delivery addresses so the header can show them.
+// A thread read only in part is shown with a notice rather than refused: the reader is
 // looking at it, and can see what is missing.
 func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topicID, postingID int64, title string) tea.Cmd {
 	return func() tea.Msg {
 		thread, err := threadload.Load(ctx, threadload.NewSDKSource(v.vc.sdk), threadload.Request{
-			TopicID: topicID,
-			Hydrate: true,
-			Limits:  tuiThreadLimits,
+			TopicID:           topicID,
+			Hydrate:           true,
+			RetainRecipients:  true,
+			RetainReceivedVia: true,
+			Limits:            tuiThreadLimits,
 		})
 		if err != nil {
 			return topicLoadedMsg{requestID: requestID, boxID: boxID, topicID: topicID, title: title, err: err}
@@ -3674,6 +3677,34 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 	}
 }
 
+// headingFrom is who a thread entry is from. A send-as address wins, then an
+// alternative sender name, which HEY gives as a name and no address, then the
+// creator. Whoever is left with both a name and an address is written
+// Name <address>, mail you sent included. A note or a share notice keeps the
+// name alone: neither was emailed, and the label is "Note by …" or "… shared
+// this thread".
+func headingFrom(e mail.Entry) (from, tag string, internal bool) {
+	name, email := e.Creator.Name, e.Creator.EmailAddress
+	if e.AlternativeSenderName != "" {
+		name, email = e.AlternativeSenderName, ""
+	}
+	if e.Sender.EmailAddress != "" {
+		name, email = e.Sender.Name, e.Sender.EmailAddress
+	}
+	author := name
+	if author == "" {
+		author = email
+	}
+	from, tag, internal = mail.InternalEntryLabel(e.Kind, terminal.SanitizeLine(author))
+	if internal {
+		return from, tag, true
+	}
+	if name != "" && email != "" {
+		return terminal.SanitizeLine(name + " <" + email + ">"), "", false
+	}
+	return terminal.SanitizeLine(author), "", false
+}
+
 // --- Entry rendering ---
 
 // renderEntries renders the thread's messages and returns the content along
@@ -3710,28 +3741,13 @@ func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, 
 		}
 		offsets = append(offsets, lineCount)
 
-		from := e.Creator.Name
-		if from == "" {
-			from = e.Creator.EmailAddress
+		from, tag, internal := headingFrom(e)
+		date := formatDisplayDateTime(e.CreatedAt)
+		if internal {
+			date += "  · " + tag
 		}
-		if e.AlternativeSenderName != "" {
-			from = e.AlternativeSenderName
-		}
-		if e.Sender.EmailAddress != "" {
-			from = e.Sender.EmailAddress
-			if e.Sender.Name != "" {
-				from = fmt.Sprintf("%s <%s>", terminal.SanitizeLine(e.Sender.Name), terminal.SanitizeLine(e.Sender.EmailAddress))
-			}
-		}
-
-		// A note or a share notice was never emailed, so it is headed by what it is
-		// rather than by a From line that reads as mail that went out.
-		heading := v.vc.styles.entryFrom.Render(terminal.SanitizeLine(from))
-		date := v.vc.styles.entryDate.Render(formatDisplayDateTime(e.CreatedAt))
-		if label, tag, internal := mail.InternalEntryLabel(e.Kind, terminal.SanitizeLine(from)); internal {
-			heading = v.vc.styles.entryFrom.Render(label)
-			date += v.vc.styles.entryDate.Render("  · " + tag)
-		}
+		date = truncateStr(date, max(v.vc.width-2, 0))
+		heading := v.vc.styles.entryFrom.Render(truncateStr(from, max(v.vc.width-2-displayWidth(date), 0)))
 
 		// Each arm below opens with a blank line, which is what separates the header
 		// from whatever follows it. The summary is HEY's ~105-character preview of the
@@ -3739,7 +3755,12 @@ func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, 
 		// as printThreadStyled in internal/cmd/topic.go. Printed beside a body it repeats
 		// the message's opening line; printed for a body that was read and rendered to
 		// nothing, or for one that was not read, it passes a preview off as the message.
-		write(fmt.Sprintf("%s  %s\n", heading, date))
+		write(fmt.Sprintf("%s  %s\n", heading, v.vc.styles.entryDate.Render(date)))
+		if !internal {
+			for _, line := range envelopeLines(e.Recipients, e.ReceivedVia, max(v.vc.width, 1)) {
+				write(v.vc.styles.entryDate.Render(line) + "\n")
+			}
+		}
 		switch {
 		case !e.Body.IsEmpty():
 			linked := markdown.RenderLinked(e.Body, sepWidth, -1)

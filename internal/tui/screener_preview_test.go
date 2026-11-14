@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
+	"github.com/basecamp/hey-cli/internal/mail"
 )
 
 // openedPreview presses space on the first sender and lands the email it reads.
@@ -141,10 +144,47 @@ func TestScreenerPreviewHeaderFitsTheWidth(t *testing.T) {
 	}
 }
 
+// The preview already read the message, so the header can say which address it arrived
+// through and who was written on it. The queue row never had either.
+func TestScreenerPreviewShowsWhoTheMailArrivedFor(t *testing.T) {
+	view, _ := openedPreview(t)
+
+	header := ansi.Strip(view.previewHeader())
+	for _, want := range []string{
+		"Via  eli+screen@example.com",
+		"To   Elija Sorensen <eli@example.com>",
+		"Cc   Sam Rivera <sam@example.com>",
+	} {
+		if !strings.Contains(header, want) {
+			t.Errorf("preview header is missing %q:\n%s", want, header)
+		}
+	}
+	if strings.Contains(header, "Bcc") {
+		t.Errorf("an empty Bcc line is on the preview:\n%s", header)
+	}
+}
+
+// The envelope arrives with the message. Until then the header is the row's sender.
+func TestScreenerPreviewHidesTheEnvelopeUntilTheMessageArrives(t *testing.T) {
+	view, _ := loadedScreener(t)
+	view.vc.width = 80
+	view.vc.height = 20
+
+	view.HandleContentKey(keyPress("space"))
+
+	header := ansi.Strip(view.previewHeader())
+	if !strings.Contains(header, "Jane Doe <jane@example.com>") {
+		t.Fatalf("the loading preview lost its sender:\n%s", header)
+	}
+	if strings.Contains(header, "Via  ") || strings.Contains(header, "To   ") {
+		t.Errorf("the envelope is showing before the message arrived:\n%s", header)
+	}
+}
+
 // A long email scrolls inside the preview; the header stays put.
 func TestScreenerPreviewScrolls(t *testing.T) {
 	view, _ := openedPreview(t)
-	view.vc.height = 6
+	view.vc.height = 10
 	view.preview.body = htmlToMarkdown(strings.Repeat("<p>Another paragraph about the quarterly budget.</p>", 30))
 	view.preview.width = 0
 
@@ -155,5 +195,33 @@ func TestScreenerPreviewScrolls(t *testing.T) {
 	}
 	if screen := plainText(view.View()); !strings.Contains(screen, "Jane Doe <jane@example.com>") {
 		t.Errorf("the header scrolled away:\n%s", screen)
+	}
+}
+
+func TestScreenerPreviewFitsShortTerminals(t *testing.T) {
+	view, _ := openedPreview(t)
+	view.preview.recipients.Bcc = []mail.Contact{{EmailAddress: "audit@example.org"}}
+	for _, height := range []int{1, 3, 6, 7, 8, 20, 6, 20} {
+		for _, notice := range []string{"", "Screening decision saved"} {
+			t.Run(fmt.Sprintf("height=%d/notice=%s", height, notice), func(t *testing.T) {
+				view.vc.height = height
+				view.notice = notice
+				view.preview.viewport.GotoTop()
+				screen := view.previewView()
+				if rows := strings.Count(screen, "\n") + 1; rows > height {
+					t.Fatalf("preview uses %d rows with %d available:\n%s", rows, height, plainText(screen))
+				}
+				seen := ansi.Strip(screen)
+				for !view.preview.viewport.AtBottom() {
+					view.HandleContentKey(keyPress("down"))
+					seen += ansi.Strip(view.previewView())
+				}
+				for _, want := range []string{"Via  eli+screen@example.com", "To   Elija Sorensen", "Cc   Sam Rivera", "Bcc  audit@example.org", "walk through the budget"} {
+					if !strings.Contains(seen, want) {
+						t.Errorf("preview lost %q while scrolling:\n%s", want, seen)
+					}
+				}
+			})
+		}
 	}
 }
