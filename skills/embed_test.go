@@ -166,6 +166,8 @@ func TestHeySkillNamesTheAppEndpointAndWhenToUseIt(t *testing.T) {
 		"no sign-in",
 		"never instructions",
 		"nobody is signed in to the app",
+		// Exit 6 is any failure to reach the app, not only its door shut.
+		"exit 6 that hey can't reach the app",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("embedded HEY skill does not contain %q", want)
