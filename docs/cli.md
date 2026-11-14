@@ -43,6 +43,9 @@ scripts and agents can handle it.
 # Browser-based OAuth against HEY's own OAuth server (primary method)
 hey auth login
 
+# Headless device code flow (for SSH, servers, CI, Docker)
+hey auth login --device
+
 # Or use a pre-generated token
 hey auth login --token TOKEN
 ```
@@ -50,6 +53,8 @@ hey auth login --token TOKEN
 Browser session cookies are no longer supported. Existing cookie-only logins must sign in again with `hey auth login`.
 
 OAuth tokens refresh automatically on expiry. Credentials are stored in the system keyring (with file fallback at `~/.config/hey-cli/credentials.json`).
+
+The device code flow (`--device`) prints a link and a one-time code, waits for you to approve the code in HEY from any device (your phone, another computer), and never opens a browser. It's designed for headless environments where a browser cannot open or a callback server cannot listen.
 
 ```bash
 hey auth status   # check auth status

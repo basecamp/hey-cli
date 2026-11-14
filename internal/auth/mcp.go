@@ -72,7 +72,7 @@ func (m *Manager) LoginMCP(ctx context.Context, opts LoginOptions) (string, erro
 	}
 
 	err := m.LoginDevice(ctx, opts)
-	if !errors.Is(err, errDeviceFlowUnavailable) {
+	if !errors.Is(err, ErrDeviceFlowUnavailable) {
 		return "device", err
 	}
 	opts.log(fmt.Sprintf("\n%v, so signing in through the browser instead.\n", err))

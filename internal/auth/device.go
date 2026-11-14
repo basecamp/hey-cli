@@ -22,9 +22,9 @@ import (
 // a scoped request is refused with invalid_request (or, on #9041 alone, the row with
 // unauthorized_client), and the sign-in falls back to loopback authorization.
 
-// errDeviceFlowUnavailable means this HEY can't serve a scoped device sign-in, so the
+// ErrDeviceFlowUnavailable means this HEY can't serve a scoped device sign-in, so the
 // caller should sign in by loopback instead.
-var errDeviceFlowUnavailable = errors.New("this HEY doesn't take scoped device sign-ins yet")
+var ErrDeviceFlowUnavailable = errors.New("this HEY doesn't take scoped device sign-ins yet")
 
 // deviceGrantType is RFC 8628 §3.4's grant type.
 const deviceGrantType = "urn:ietf:params:oauth:grant-type:device_code"
@@ -45,7 +45,7 @@ type deviceAuthorization struct {
 }
 
 // LoginDevice signs in with the device authorization grant, asking for the manager's
-// scope. It returns errDeviceFlowUnavailable, wrapped with HEY's answer, when this HEY
+// scope. It returns ErrDeviceFlowUnavailable, wrapped with HEY's answer, when this HEY
 // can't serve the request, so the caller can fall back to Login.
 func (m *Manager) LoginDevice(ctx context.Context, opts LoginOptions) error {
 	tokenEndpoint := m.baseURL + "/oauth/tokens"
@@ -135,7 +135,7 @@ func (m *Manager) requestDeviceAuthorization(ctx context.Context) (*deviceAuthor
 	if status != http.StatusOK {
 		code := oauthErrorCode(body)
 		if deviceFlowUnavailable(status, code) {
-			return nil, fmt.Errorf("%w (HTTP %d %s)", errDeviceFlowUnavailable, status, code)
+			return nil, fmt.Errorf("%w (HTTP %d %s)", ErrDeviceFlowUnavailable, status, code)
 		}
 		return nil, fmt.Errorf("device authorization failed: HTTP %d %s", status, code)
 	}

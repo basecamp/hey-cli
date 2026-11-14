@@ -53,6 +53,7 @@ func buildLoginCommand(path string) *cobra.Command {
 	var (
 		token     string
 		noBrowser bool
+		device    bool
 		mcp       bool
 	)
 
@@ -64,6 +65,10 @@ func buildLoginCommand(path string) *cobra.Command {
 Opens a browser for OAuth authentication against HEY's own OAuth server, using PKCE.
 Use --token for non-interactive login.
 
+--device signs in with a device code (RFC 8628): prints a link and a one-time code,
+waits for you to approve the code in HEY from any device, and never opens a browser.
+Designed for headless environments (servers, CI, Docker) and remote sessions over SSH.
+
 --mcp signs in hey mcp instead, as its own app ("HEY MCP (local)" in HEY's Connected
 Apps), asking to read, write and send but nothing more. Its credential is kept apart
 from the CLI's, and hey mcp serves on it alone. It uses a device code where HEY
@@ -73,6 +78,7 @@ saves drafts but can't send them.`,
 			"  " + path,
 			"  " + path + " --token YOUR_BEARER_TOKEN",
 			"  " + path + " --no-browser",
+			"  " + path + " --device",
 			"  " + path + " --mcp",
 		}, "\n"),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -80,10 +86,16 @@ saves drafts but can't send them.`,
 				if token != "" || cmd.Flags().Changed("token") {
 					return apierr.ErrUsage("--mcp signs in through HEY; it takes no --token")
 				}
+				if device {
+					return apierr.ErrUsage("--mcp signs in through HEY; it takes no --device")
+				}
 				return loginMCP(cmd, noBrowser)
 			}
 
 			if token != "" {
+				if device {
+					return apierr.ErrUsage("--device signs in through HEY; it takes no --token")
+				}
 				if err := authMgr.LoginWithToken(token); err != nil {
 					return apierr.ErrAuth(fmt.Sprintf("could not save token: %v", err))
 				}
@@ -95,7 +107,22 @@ saves drafts but can't send them.`,
 			ctx, cancel := context.WithTimeout(cmd.Context(), 6*time.Minute)
 			defer cancel()
 
-			if err := authMgr.Login(ctx, auth.LoginOptions{NoBrowser: noBrowser}); err != nil {
+			var method string
+			var err error
+			if device {
+				logFunc := func(msg string) {
+					fmt.Fprint(cmd.ErrOrStderr(), msg)
+				}
+				err = authMgr.LoginDevice(ctx, auth.LoginOptions{NoBrowser: true, Logger: logFunc})
+				method = "device"
+			} else {
+				err = authMgr.Login(ctx, auth.LoginOptions{NoBrowser: noBrowser})
+				method = "oauth"
+			}
+			if err != nil {
+				if errors.Is(err, auth.ErrDeviceFlowUnavailable) {
+					return apierr.ErrAuth(fmt.Sprintf("device flow sign-in failed: %v\n\nThis HEY server does not support device authorization (RFC 8628) yet. Sign in with the browser flow instead: %s", err, authMgr.LoginCommand()))
+				}
 				return apierr.ErrAuth(fmt.Sprintf("login failed: %v", err))
 			}
 			// Replaced credentials orphan whatever the old ones cached.
@@ -112,12 +139,13 @@ saves drafts but can't send them.`,
 				ensureOmarchyBarPluginAfterLogin(cmd.ErrOrStderr())
 				return nil
 			}
-			return writeOK(map[string]string{"method": "oauth"}, output.WithSummary("Logged in successfully"))
+			return writeOK(map[string]string{"method": method}, output.WithSummary("Logged in successfully"))
 		},
 	}
 
 	cmd.Flags().StringVar(&token, "token", "", "Pre-generated Bearer token")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "Don't open browser, print URL instead")
+	cmd.Flags().BoolVar(&device, "device", false, "Headless device code flow: print link and code, never open browser")
 	cmd.Flags().BoolVar(&mcp, "mcp", false, "Sign in hey mcp with its own credential (read, write and send)")
 
 	return cmd
