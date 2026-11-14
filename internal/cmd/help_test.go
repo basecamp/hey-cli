@@ -360,7 +360,8 @@ func TestHelpListsEveryGlobalFlag(t *testing.T) {
 	var rootHelp strings.Builder
 	renderRootHelp(&rootHelp, root)
 	for _, name := range global {
-		if !strings.Contains(rootHelp.String(), "--"+name+" ") {
+		// pflag 1.1.0+ formats boolean flags as --name[=true|false] instead of --name<space>
+		if !strings.Contains(rootHelp.String(), "--"+name+" ") && !strings.Contains(rootHelp.String(), "--"+name+"[") {
 			t.Errorf("root help does not list the global --%s:\n%s", name, rootHelp.String())
 		}
 	}
@@ -375,7 +376,8 @@ func TestHelpListsEveryGlobalFlag(t *testing.T) {
 			renderCommandHelp(command)
 
 			for _, name := range global {
-				if !strings.Contains(help.String(), "--"+name+" ") {
+				// pflag 1.1.0+ formats boolean flags as --name[=true|false] instead of --name<space>
+				if !strings.Contains(help.String(), "--"+name+" ") && !strings.Contains(help.String(), "--"+name+"[") {
 					t.Errorf("%s help does not list the global --%s:\n%s", command.CommandPath(), name, help.String())
 				}
 			}
