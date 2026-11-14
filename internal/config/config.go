@@ -36,6 +36,13 @@ type Config struct {
 	AccountID string `json:"account_id,omitempty"`
 	Onboarded bool   `json:"onboarded,omitempty"`
 
+	// OAuthIssuerURL and OAuthTokenURL move sign-in off BaseURL: the issuer authorizes
+	// it in the browser, the token endpoint exchanges, refreshes and revokes it. Empty
+	// is BaseURL. Only a profile or the environment sets them, never a repository's
+	// top-level keys, since they decide where a code and a refresh token are sent.
+	OAuthIssuerURL string `json:"oauth_issuer_url,omitempty"`
+	OAuthTokenURL  string `json:"oauth_token_url,omitempty"`
+
 	// Profiles, DefaultProfile and ActiveProfile are profiles.go's: the profiles the
 	// global config and a trusted repository config name, the one chosen when nothing
 	// else chooses, and the one this invocation runs as ("" for none).
@@ -214,6 +221,14 @@ func load(localPath string) (*Config, error) {
 		cfg.BaseURL = env
 		cfg.sources["base_url"] = SourceEnv
 	}
+	if env := os.Getenv("HEY_OAUTH_ISSUER_URL"); env != "" {
+		cfg.OAuthIssuerURL = env
+		cfg.sources["oauth_issuer_url"] = SourceEnv
+	}
+	if env := os.Getenv("HEY_OAUTH_TOKEN_URL"); env != "" {
+		cfg.OAuthTokenURL = env
+		cfg.sources["oauth_token_url"] = SourceEnv
+	}
 	if env := os.Getenv("HEY_ACCOUNT_ID"); env != "" {
 		accountID, accountErr := normalizeAccountID(env)
 		if accountErr != nil {
@@ -224,6 +239,9 @@ func load(localPath string) (*Config, error) {
 	}
 
 	if validationErr := validateBaseURL(cfg.BaseURL); validationErr != nil {
+		return nil, validationErr
+	}
+	if validationErr := validateOAuthServer(cfg.OAuthIssuerURL, cfg.OAuthTokenURL); validationErr != nil {
 		return nil, validationErr
 	}
 	if cfg.SourceOf("account_id") == SourceDefault {
@@ -717,18 +735,36 @@ func serverOrigin(base string) (string, error) {
 	return (&url.URL{Scheme: scheme, Host: host}).String(), nil
 }
 
+// validateOAuthServer holds an issuer and a token endpoint, where set, to the rules a
+// base URL is held to.
+func validateOAuthServer(issuerURL, tokenURL string) error {
+	if issuerURL != "" {
+		if err := validateServerURL("oauth_issuer_url", issuerURL); err != nil {
+			return err
+		}
+	}
+	if tokenURL != "" {
+		return validateServerURL("oauth_token_url", tokenURL)
+	}
+	return nil
+}
+
 func validateBaseURL(base string) error {
-	u, err := url.Parse(base)
+	return validateServerURL("base URL", base)
+}
+
+func validateServerURL(name, value string) error {
+	u, err := url.Parse(value)
 	if err != nil {
-		return apierr.ErrUsage(fmt.Sprintf("invalid base URL %q: %v", base, err))
+		return apierr.ErrUsage(fmt.Sprintf("invalid %s %q: %v", name, value, err))
 	}
 	if u.Scheme == "" || u.Host == "" {
-		return apierr.ErrUsage(fmt.Sprintf("base URL must be an absolute URL with scheme and host (got %q)", base))
+		return apierr.ErrUsage(fmt.Sprintf("%s must be an absolute URL with scheme and host (got %q)", name, value))
 	}
 	// Enforce HTTPS for non-localhost
 	host := u.Hostname()
 	if u.Scheme != "https" && host != "localhost" && host != "127.0.0.1" && host != "::1" && !strings.HasSuffix(host, ".localhost") {
-		return apierr.ErrUsage(fmt.Sprintf("base URL must use HTTPS (got %q)", base))
+		return apierr.ErrUsage(fmt.Sprintf("%s must use HTTPS (got %q)", name, value))
 	}
 	return nil
 }

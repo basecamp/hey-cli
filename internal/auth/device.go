@@ -48,7 +48,7 @@ type deviceAuthorization struct {
 // scope. It returns errDeviceFlowUnavailable, wrapped with HEY's answer, when this HEY
 // can't serve the request, so the caller can fall back to Login.
 func (m *Manager) LoginDevice(ctx context.Context, opts LoginOptions) error {
-	tokenEndpoint := m.baseURL + "/oauth/tokens"
+	tokenEndpoint := m.tokenURL + "/oauth/tokens"
 	installID, err := m.store.InstallID()
 	if err != nil {
 		return fmt.Errorf("install id: %w", err)
@@ -127,7 +127,7 @@ func (m *Manager) requestDeviceAuthorization(ctx context.Context) (*deviceAuthor
 	if m.scope != "" {
 		form.Set("scope", m.scope)
 	}
-	status, body, err := m.postForm(ctx, m.baseURL+"/oauth/device_authorizations", form)
+	status, body, err := m.postForm(ctx, m.issuerURL+"/oauth/device_authorizations", form)
 	if err != nil {
 		return nil, fmt.Errorf("device authorization request failed: %w", err)
 	}

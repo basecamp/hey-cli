@@ -286,6 +286,141 @@ func TestAnEmptyProfileAccountIsNone(t *testing.T) {
 	}
 }
 
+func TestAProfileSignsInWhereItsOAuthServerSays(t *testing.T) {
+	home := profileConfigHome(t)
+	t.Setenv("HEY_OAUTH_ISSUER_URL", "")
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "")
+	writeConfigFile(t, filepath.Join(home, configDirName, configFile), `{
+		"profiles":{
+			"api":{"base_url":"https://api.hey.com","oauth_issuer_url":"https://app.hey.com"},
+			"plain":{"base_url":"https://app.hey.com"},
+			"insecure":{"base_url":"https://api.hey.com","oauth_token_url":"http://app.hey.com"}}}`)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OAuthIssuerURL != "" || cfg.OAuthTokenURL != "" {
+		t.Errorf("the top level took a profile's OAuth server: %q %q", cfg.OAuthIssuerURL, cfg.OAuthTokenURL)
+	}
+	if err := cfg.ApplyProfile("api", SourceFlag); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BaseURL != "https://api.hey.com" || cfg.OAuthIssuerURL != "https://app.hey.com" || cfg.OAuthTokenURL != "" || cfg.SourceOf("oauth_issuer_url") != SourceProfile {
+		t.Errorf("api = %q, issuer %q, token %q", cfg.BaseURL, cfg.OAuthIssuerURL, cfg.OAuthTokenURL)
+	}
+
+	cfg, _ = Load()
+	if err := cfg.ApplyProfile("plain", SourceFlag); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OAuthIssuerURL != "" || cfg.OAuthTokenURL != "" {
+		t.Errorf("plain signs in off its base_url: %q %q", cfg.OAuthIssuerURL, cfg.OAuthTokenURL)
+	}
+
+	cfg, _ = Load()
+	if err := cfg.ApplyProfile("insecure", SourceFlag); err == nil || !strings.Contains(err.Error(), "HTTPS") || cfg.ActiveProfile != "" {
+		t.Errorf("a plain-HTTP token endpoint was applied: %v", err)
+	}
+
+	t.Setenv("HEY_OAUTH_ISSUER_URL", "https://beta.hey.com")
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "https://api.hey.com")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyProfile("api", SourceFlag); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OAuthIssuerURL != "https://beta.hey.com" || cfg.OAuthTokenURL != "https://api.hey.com" || cfg.SourceOf("oauth_issuer_url") != SourceEnv {
+		t.Errorf("the environment lost to the profile: %q %q", cfg.OAuthIssuerURL, cfg.OAuthTokenURL)
+	}
+
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "http://api.hey.com")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Errorf("a plain-HTTP HEY_OAUTH_TOKEN_URL was taken: %v", err)
+	}
+}
+
+func TestARepositoryNeverMovesAProfilesOAuthServer(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "config"))
+	t.Setenv("HEY_BASE_URL", "")
+	t.Setenv("HEY_ACCOUNT_ID", "")
+	t.Setenv("HEY_OAUTH_ISSUER_URL", "")
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "")
+	workspace := filepath.Join(tmp, "workspace")
+	writeConfigFile(t, filepath.Join(tmp, "config", configDirName, configFile), `{"profiles":{"api":{"base_url":"https://api.hey.com"}}}`)
+	writeConfigFile(t, filepath.Join(workspace, ".hey", configFile), `{"profiles":{
+		"api":{"base_url":"https://api.hey.com","oauth_token_url":"https://elsewhere.example"},
+		"theirs":{"base_url":"https://app.hey.com","oauth_issuer_url":"https://elsewhere.example"}}}`)
+	t.Chdir(workspace)
+
+	untrusted, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := untrusted.TrustLocalConfig(); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"api", "theirs"} {
+		if p := cfg.Profiles[name]; p == nil || p.OAuthIssuerURL != "" || p.OAuthTokenURL != "" {
+			t.Errorf("profile %q took a repository's OAuth server: %#v", name, p)
+		}
+	}
+	if warnings := strings.Join(cfg.Warnings(), "\n"); !strings.Contains(warnings, `ignoring oauth_issuer_url and oauth_token_url of profile "api"`) || !strings.Contains(warnings, `of profile "theirs"`) {
+		t.Errorf("warnings = %q", warnings)
+	}
+}
+
+func TestAProfilesOAuthServerIsReadStrictly(t *testing.T) {
+	home := profileConfigHome(t)
+	t.Setenv("HEY_OAUTH_ISSUER_URL", "")
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "https://api.hey.com")
+	path := filepath.Join(home, configDirName, configFile)
+
+	writeConfigFile(t, path, `{"profiles":{"api":{"base_url":"https://api.hey.com","oauth_issuer_url":null}}}`)
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "oauth_issuer_url must be a string") {
+		t.Errorf("a null oauth_issuer_url was taken: %v", err)
+	}
+
+	writeConfigFile(t, path, `{"profiles":{"api":{"base_url":"https://api.hey.com","oauth_token_url":"http://api.hey.com"}}}`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyProfile("api", SourceFlag); err != nil || cfg.OAuthTokenURL != "https://api.hey.com" {
+		t.Errorf("the environment did not stand in for a profile's bad token server: %v, %q", err, cfg.OAuthTokenURL)
+	}
+
+	t.Setenv("HEY_OAUTH_TOKEN_URL", "")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyProfile("api", SourceFlag); err == nil || !strings.Contains(err.Error(), "oauth_token_url must use HTTPS") {
+		t.Errorf("a plain-HTTP oauth_token_url was applied: %v", err)
+	}
+}
+
+func TestAnotherAccountKeepsAProfilesOAuthServer(t *testing.T) {
+	profiles := map[string]*ProfileConfig{}
+	mergeProfile(profiles, "api", profileEntry{BaseURL: "https://api.hey.com", AccountID: "1", OAuthIssuerURL: "https://app.hey.com"})
+	mergeProfile(profiles, "api", profileEntry{BaseURL: "https://api.hey.com", AccountID: "2"})
+	if p := profiles["api"]; p.AccountID != "2" || p.OAuthIssuerURL != "https://app.hey.com" {
+		t.Errorf("another account on the same server = %#v", p)
+	}
+	mergeProfile(profiles, "api", profileEntry{BaseURL: "https://staging.example.com"})
+	if p := profiles["api"]; p.OAuthIssuerURL != "" {
+		t.Errorf("another server kept the OAuth server: %#v", p)
+	}
+}
+
 // A profile's endpoint is the server or the app; anything else is refused rather than read
 // as the server, and the app needs no base_url of its own.
 func TestParseProfilesReadsTheEndpoint(t *testing.T) {

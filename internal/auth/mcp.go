@@ -115,7 +115,7 @@ func (m *Manager) Revoke(ctx context.Context) error {
 	// A profile's grant is revoked only at the server that issued it: its base_url
 	// may have been edited since, and the DELETE carries the refresh token.
 	if m.profile != "" && creds.TokenEndpoint == "" {
-		return fmt.Errorf("profile %q's sign-in does not record its server; not revoking it at %s", m.profile, m.baseURL)
+		return fmt.Errorf("profile %q's sign-in does not record its server; not revoking it at %s", m.profile, m.tokenURL)
 	}
 	if issuerErr := m.checkProfileIssuer(creds); issuerErr != nil {
 		return issuerErr
@@ -132,8 +132,14 @@ func (m *Manager) Revoke(ctx context.Context) error {
 		clientID = m.clientID
 	}
 
+	// Revoked where it was issued, as it is refreshed: the token endpoint configured now
+	// may have moved since the sign-in.
+	endpoint := creds.TokenEndpoint
+	if endpoint == "" {
+		endpoint = m.tokenURL + "/oauth/tokens"
+	}
 	form := url.Values{"client_id": {clientID}, "token": {token}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, m.baseURL+"/oauth/tokens", strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return fmt.Errorf("creating revocation request: %w", err)
 	}

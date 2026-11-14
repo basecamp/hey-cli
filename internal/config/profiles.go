@@ -27,18 +27,30 @@ import (
 
 // ProfileConfig is one named profile.
 type ProfileConfig struct {
-	BaseURL   string `json:"base_url"`
-	AccountID string `json:"account_id,omitempty"`
+	BaseURL        string `json:"base_url"`
+	AccountID      string `json:"account_id,omitempty"`
+	OAuthIssuerURL string `json:"oauth_issuer_url,omitempty"`
+	OAuthTokenURL  string `json:"oauth_token_url,omitempty"`
 	// Endpoint is EndpointApp for a profile answered by the HEY app on this computer,
 	// and "" (the server) otherwise. Only an experimental build honours it (ExperimentalApp).
 	Endpoint string `json:"endpoint,omitempty"`
 }
 
+// TokenServer is where the profile's sign-in is exchanged, refreshed and revoked.
+func (p ProfileConfig) TokenServer() string {
+	if p.OAuthTokenURL != "" {
+		return p.OAuthTokenURL
+	}
+	return p.BaseURL
+}
+
 // profileEntry is a profile as one config file writes it.
 type profileEntry struct {
-	BaseURL   string
-	AccountID string
-	Endpoint  string
+	BaseURL        string
+	AccountID      string
+	OAuthIssuerURL string
+	OAuthTokenURL  string
+	Endpoint       string
 }
 
 // The endpoints a profile names: HEY's server, or the HEY app on this computer, reached
@@ -129,6 +141,15 @@ func parseProfiles(path string, raw map[string]json.RawMessage) (map[string]prof
 			baseURL = defaultBase
 		}
 		entry := profileEntry{BaseURL: baseURL, Endpoint: endpoint}
+		for key, into := range map[string]*string{"oauth_issuer_url": &entry.OAuthIssuerURL, "oauth_token_url": &entry.OAuthTokenURL} {
+			if raw, present := fields[key]; present {
+				value, ok := raw.(string)
+				if !ok {
+					return nil, fmt.Errorf("could not parse config %s: profile %q: %s must be a string", path, name, key)
+				}
+				*into = value
+			}
+		}
 		if raw, present := fields["account_id"]; present && raw != nil && raw != "" {
 			account := stringOrNumber(raw)
 			if account == "" {
@@ -190,17 +211,28 @@ func stringOrNumber(value any) string {
 // made of it, by basecamp-cli's rule: an entry for the same server (the same origin)
 // refines it field by field, and one for another server, or for another account on
 // the same one, replaces it whole, since an account on one server means nothing on
-// another.
+// another. Another account on the same server still signs in where that server does.
 func mergeProfile(profiles map[string]*ProfileConfig, name string, entry profileEntry) {
 	p := profiles[name]
+	sameServer := p != nil && originOrSelf(p.BaseURL) == originOrSelf(entry.BaseURL)
 	otherAccount := p != nil && p.AccountID != "" && entry.AccountID != "" && p.AccountID != entry.AccountID
-	if p == nil || otherAccount || originOrSelf(p.BaseURL) != originOrSelf(entry.BaseURL) {
-		p = &ProfileConfig{}
+	if !sameServer || otherAccount {
+		replacement := &ProfileConfig{}
+		if sameServer {
+			replacement.OAuthIssuerURL, replacement.OAuthTokenURL = p.OAuthIssuerURL, p.OAuthTokenURL
+		}
+		p = replacement
 		profiles[name] = p
 	}
 	p.BaseURL = entry.BaseURL
 	if entry.AccountID != "" {
 		p.AccountID = entry.AccountID
+	}
+	if entry.OAuthIssuerURL != "" {
+		p.OAuthIssuerURL = entry.OAuthIssuerURL
+	}
+	if entry.OAuthTokenURL != "" {
+		p.OAuthTokenURL = entry.OAuthTokenURL
 	}
 	if entry.Endpoint != "" {
 		p.Endpoint = entry.Endpoint
@@ -232,6 +264,13 @@ func (c *Config) applyFileProfiles(file fileConfig, source Source) {
 			c.warnings = append(c.warnings, fmt.Sprintf("warning: ignoring profile %q from local config at %s: it names %s, and the global config's %q is for %s",
 				terminal.SanitizeLine(name), terminal.SanitizeLine(file.path), terminal.SanitizeLine(entry.BaseURL), terminal.SanitizeLine(name), terminal.SanitizeLine(existing.BaseURL)))
 			continue
+		}
+		// The sign-in's server is the global config's or the environment's to move: a
+		// repository's entry may not send a profile's code or refresh token elsewhere.
+		if source == SourceLocal && (entry.OAuthIssuerURL != "" || entry.OAuthTokenURL != "") {
+			c.warnings = append(c.warnings, fmt.Sprintf("warning: ignoring oauth_issuer_url and oauth_token_url of profile %q from local config at %s: only the global config sets them",
+				terminal.SanitizeLine(name), terminal.SanitizeLine(file.path)))
+			entry.OAuthIssuerURL, entry.OAuthTokenURL = "", ""
 		}
 		mergeProfile(c.Profiles, name, entry)
 	}
@@ -291,6 +330,16 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	if err := validateBaseURL(p.BaseURL); err != nil {
 		return err
 	}
+	issuerURL, tokenURL := p.OAuthIssuerURL, p.OAuthTokenURL
+	if c.SourceOf("oauth_issuer_url") == SourceEnv {
+		issuerURL = ""
+	}
+	if c.SourceOf("oauth_token_url") == SourceEnv {
+		tokenURL = ""
+	}
+	if err := validateOAuthServer(issuerURL, tokenURL); err != nil {
+		return err
+	}
 	if c.sources == nil {
 		c.sources = map[string]Source{}
 	}
@@ -306,6 +355,14 @@ func (c *Config) ApplyProfile(name string, source Source) error {
 	if c.SourceOf("base_url") != SourceEnv {
 		c.BaseURL = p.BaseURL
 		c.sources["base_url"] = SourceProfile
+	}
+	if issuerURL != "" {
+		c.OAuthIssuerURL = issuerURL
+		c.sources["oauth_issuer_url"] = SourceProfile
+	}
+	if tokenURL != "" {
+		c.OAuthTokenURL = tokenURL
+		c.sources["oauth_token_url"] = SourceProfile
 	}
 	switch {
 	case c.SourceOf("account_id") == SourceEnv:
@@ -402,6 +459,12 @@ func RegisterProfile(name string, p ProfileConfig) (isDefault bool, err error) {
 	entry := map[string]any{"base_url": p.BaseURL}
 	if p.AccountID != "" {
 		entry["account_id"] = p.AccountID
+	}
+	if p.OAuthIssuerURL != "" {
+		entry["oauth_issuer_url"] = p.OAuthIssuerURL
+	}
+	if p.OAuthTokenURL != "" {
+		entry["oauth_token_url"] = p.OAuthTokenURL
 	}
 	encoded, err := json.Marshal(entry)
 	if err != nil {

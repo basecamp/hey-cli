@@ -61,6 +61,9 @@ type Credentials struct {
 	ExpiresAt     int64  `json:"expires_at"`
 	OAuthType     string `json:"oauth_type"`
 	TokenEndpoint string `json:"token_endpoint"`
+	// ResourceURL is the base URL the sign-in was made for, which its access token is
+	// sent to. It differs from TokenEndpoint's server under a profile's oauth_token_url.
+	ResourceURL string `json:"resource_url,omitempty"`
 	// SessionCookie is inert legacy data, read only to explain why sign-in is required.
 	// New logins replace the record; it must never authenticate or become a bearer.
 	SessionCookie string `json:"session_cookie,omitempty"`
