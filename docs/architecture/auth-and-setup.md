@@ -2,7 +2,7 @@
 
 Authentication supports three methods, all managed through `internal/auth/`:
 
-1. **Browser-based OAuth with PKCE** (primary) — `hey auth login` opens a browser for OAuth authentication against HEY's own OAuth server (`/oauth/authorizations/new`), using PKCE (S256) for security. A local callback server on an ephemeral `127.0.0.1` port (RFC 8252 §7.3) receives the authorization code, which is exchanged for access and refresh tokens at `/oauth/tokens`.
+1. **OAuth authentication** (primary) — `hey auth login` authenticates against HEY's OAuth server. When the server supports device authorization (RFC 8628), login uses it automatically: a device code request to `/oauth/device_authorizations` returns a short code and verification URL, polling `/oauth/tokens` exchanges the approved code for access and refresh tokens. When device flow is unavailable, login falls back to browser-based OAuth with PKCE: it opens a browser for `/oauth/authorizations/new`, a local callback server on an ephemeral `127.0.0.1` port (RFC 8252 §7.3) receives the authorization code, which is exchanged at `/oauth/tokens`. Once device flow is selected (server supports it), failures surface as errors rather than falling back. `--device-code` forces device code flow and fails if unsupported.
 2. **Pre-generated bearer token** — `hey auth login --token TOKEN` stores a token directly.
 3. **Environment variable** — Set `HEY_TOKEN` to use a token without storing it.
 

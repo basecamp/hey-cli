@@ -26,7 +26,7 @@ hey attachment save --force
 hey attachment save --output
 hey auth
 hey auth login
-hey auth login --device
+hey auth login --device-code
 hey auth login --mcp
 hey auth login --no-browser
 hey auth login --token
@@ -283,7 +283,7 @@ hey label view --all
 hey label view --limit
 hey label view --page
 hey login
-hey login --device
+hey login --device-code
 hey login --mcp
 hey login --no-browser
 hey login --token

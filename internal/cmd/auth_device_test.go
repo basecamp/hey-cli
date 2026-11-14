@@ -13,7 +13,114 @@ import (
 	"github.com/basecamp/hey-cli/internal/apierr"
 )
 
-func TestDeviceLoginSuccess(t *testing.T) {
+func TestPlainLoginAutoDetectsDeviceFlow(t *testing.T) {
+	const userCode = "AUTO-CODE"
+	const deviceCode = "auto-device-code"
+	var pollCount int
+	var serverURL string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/device_authorizations":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{
+				"device_code":               deviceCode,
+				"user_code":                 userCode,
+				"verification_uri":          serverURL + "/verify",
+				"verification_uri_complete": serverURL + "/verify?code=" + userCode,
+				"expires_in":                300,
+				"interval":                  1,
+			})
+		case "/oauth/tokens":
+			if err := r.ParseForm(); err != nil {
+				t.Fatal(err)
+			}
+			if r.Form.Get("grant_type") != "urn:ietf:params:oauth:grant-type:device_code" {
+				t.Errorf("grant_type = %s", r.Form.Get("grant_type"))
+			}
+			pollCount++
+			w.Header().Set("Content-Type", "application/json")
+			if pollCount < 2 {
+				w.WriteHeader(http.StatusBadRequest)
+				json.NewEncoder(w).Encode(map[string]string{"error": "authorization_pending"})
+			} else {
+				w.WriteHeader(http.StatusOK)
+				json.NewEncoder(w).Encode(map[string]any{
+					"access_token": "auto-token",
+					"expires_in":   3600,
+				})
+			}
+		case "/authorization":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"identity": map[string]any{"id": "1", "email_address": "test@example.com"},
+				"accounts": []any{},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	configHome := t.TempDir()
+	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
+	if err != nil {
+		t.Fatalf("plain login auto-detect: %v", err)
+	}
+	if response.Summary != "Logged in successfully" {
+		t.Errorf("summary = %q", response.Summary)
+	}
+	data, ok := response.Data.(map[string]any)
+	if !ok || data["method"] != "device" {
+		t.Errorf("expected device method, got: %#v", response.Data)
+	}
+	if pollCount < 2 {
+		t.Errorf("device endpoint polled %d times, expected >= 2", pollCount)
+	}
+}
+
+func TestPlainLoginFallsBackWhenDeviceUnavailable(t *testing.T) {
+	var sawAuthorizationsRequest bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/device_authorizations":
+			sawAuthorizationsRequest = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "not_found"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	configHome := t.TempDir()
+
+	errChan := make(chan error, 1)
+	go func() {
+		_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
+		errChan <- err
+	}()
+
+	select {
+	case err := <-errChan:
+		if !sawAuthorizationsRequest {
+			t.Error("device authorization endpoint was not attempted")
+		}
+		if err != nil && strings.Contains(err.Error(), "doesn't take scoped device sign-ins") {
+			t.Error("got device unavailable error - fallback did not happen")
+		}
+	case <-time.After(2 * time.Second):
+		if !sawAuthorizationsRequest {
+			t.Error("device authorization endpoint was not attempted")
+		}
+	}
+}
+
+func TestDeviceCodeFlagSuccess(t *testing.T) {
 	const userCode = "ABCD-EFGH"
 	const deviceCode = "secret-device-code"
 	var pollCount int
@@ -85,9 +192,9 @@ func TestDeviceLoginSuccess(t *testing.T) {
 	serverURL = server.URL
 
 	configHome := t.TempDir()
-	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device")
+	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device-code")
 	if err != nil {
-		t.Fatalf("device login: %v", err)
+		t.Fatalf("--device-code login: %v", err)
 	}
 	if response.Summary != "Logged in successfully" {
 		t.Errorf("summary = %q", response.Summary)
@@ -162,7 +269,7 @@ func TestDeviceLoginSlowDown(t *testing.T) {
 	serverURL = server.URL
 
 	configHome := t.TempDir()
-	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device")
+	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device-code")
 	if err != nil {
 		t.Fatalf("device login: %v", err)
 	}
@@ -199,7 +306,7 @@ func TestDeviceLoginAccessDenied(t *testing.T) {
 	serverURL = server.URL
 
 	configHome := t.TempDir()
-	_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device")
+	_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device-code")
 	if err == nil {
 		t.Fatal("expected error for access_denied, got nil")
 	}
@@ -209,6 +316,40 @@ func TestDeviceLoginAccessDenied(t *testing.T) {
 	var authErr *apierr.Error
 	if !errors.As(err, &authErr) || authErr.Code != apierr.CodeAuth {
 		t.Errorf("error code = %v, want auth", authErr)
+	}
+}
+
+func TestPlainLoginDeviceErrorsNoFallback(t *testing.T) {
+	var serverURL string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/device_authorizations":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"device_code":      "device-code",
+				"user_code":        "WILL-DENY",
+				"verification_uri": serverURL + "/verify",
+				"expires_in":       300,
+				"interval":         1,
+			})
+		case "/oauth/tokens":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": "access_denied"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	serverURL = server.URL
+
+	configHome := t.TempDir()
+	_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login")
+	if err == nil {
+		t.Fatal("expected error for access_denied on plain login, got nil")
+	}
+	if !strings.Contains(err.Error(), "denied") {
+		t.Errorf("error should mention denial: %v", err)
 	}
 }
 
@@ -237,7 +378,7 @@ func TestDeviceLoginExpiredToken(t *testing.T) {
 	serverURL = server.URL
 
 	configHome := t.TempDir()
-	_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device")
+	_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device-code")
 	if err == nil {
 		t.Fatal("expected error for expired token, got nil")
 	}
@@ -246,7 +387,7 @@ func TestDeviceLoginExpiredToken(t *testing.T) {
 	}
 }
 
-func TestDeviceLoginServerUnavailable(t *testing.T) {
+func TestDeviceCodeServerUnavailable(t *testing.T) {
 	tests := []struct {
 		name       string
 		statusCode int
@@ -257,19 +398,19 @@ func TestDeviceLoginServerUnavailable(t *testing.T) {
 			name:       "404 not found",
 			statusCode: http.StatusNotFound,
 			body:       `{"error": "not_found"}`,
-			wantError:  "does not support device authorization",
+			wantError:  "device code flow unavailable",
 		},
 		{
 			name:       "400 invalid_request",
 			statusCode: http.StatusBadRequest,
 			body:       `{"error": "invalid_request"}`,
-			wantError:  "does not support device authorization",
+			wantError:  "device code flow unavailable",
 		},
 		{
 			name:       "401 unauthorized_client",
 			statusCode: http.StatusUnauthorized,
 			body:       `{"error": "unauthorized_client"}`,
-			wantError:  "does not support device authorization",
+			wantError:  "device code flow unavailable",
 		},
 	}
 
@@ -287,7 +428,7 @@ func TestDeviceLoginServerUnavailable(t *testing.T) {
 			defer server.Close()
 
 			configHome := t.TempDir()
-			_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device")
+			_, _, err := runAuthCommand(t, configHome, server.URL, "", true, "auth", "login", "--device-code")
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -302,21 +443,21 @@ func TestDeviceLoginServerUnavailable(t *testing.T) {
 	}
 }
 
-func TestDeviceLoginFlagConflicts(t *testing.T) {
+func TestDeviceCodeFlagConflicts(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
 		want string
 	}{
 		{
-			name: "device with token",
-			args: []string{"auth", "login", "--device", "--token", "fake-token"},
-			want: "--device signs in through HEY; it takes no --token",
+			name: "device-code with token",
+			args: []string{"auth", "login", "--device-code", "--token", "fake-token"},
+			want: "--device-code signs in through HEY; it takes no --token",
 		},
 		{
-			name: "device with mcp",
-			args: []string{"auth", "login", "--device", "--mcp"},
-			want: "--mcp signs in through HEY; it takes no --device",
+			name: "device-code with mcp",
+			args: []string{"auth", "login", "--device-code", "--mcp"},
+			want: "--mcp signs in through HEY; it takes no --device-code",
 		},
 	}
 
@@ -336,7 +477,7 @@ func TestDeviceLoginFlagConflicts(t *testing.T) {
 	}
 }
 
-func TestTopLevelLoginWithDevice(t *testing.T) {
+func TestTopLevelLoginWithDeviceCode(t *testing.T) {
 	const userCode = "TOP-LEVEL"
 	var seenDevice bool
 	var serverURL string
@@ -374,9 +515,9 @@ func TestTopLevelLoginWithDevice(t *testing.T) {
 	serverURL = server.URL
 
 	configHome := t.TempDir()
-	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "login", "--device")
+	_, response, err := runAuthCommand(t, configHome, server.URL, "", true, "login", "--device-code")
 	if err != nil {
-		t.Fatalf("top-level login --device: %v", err)
+		t.Fatalf("top-level login --device-code: %v", err)
 	}
 	if !seenDevice {
 		t.Error("device authorization endpoint was not called")
