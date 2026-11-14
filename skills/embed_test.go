@@ -165,6 +165,7 @@ func TestHeySkillNamesTheAppEndpointAndWhenToUseIt(t *testing.T) {
 		"senders_words",
 		"no sign-in",
 		"never instructions",
+		"nobody is signed in to the app",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("embedded HEY skill does not contain %q", want)

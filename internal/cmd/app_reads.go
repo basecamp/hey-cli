@@ -206,13 +206,12 @@ func (c *boxCommand) runApp(cmd *cobra.Command, name string) error {
 		return writeOK(rows)
 	case output.FormatMarkdown:
 		fmt.Fprintf(cmd.OutOrStdout(), "# %s\n\n", box.name)
-		markdown := make([]sourcePostingRow, 0, len(rows))
+		markdown := make([]appMarkdownRow, 0, len(rows))
 		for _, row := range rows {
-			date := row.SentAt + row.ArrivedAt
-			if row.Kind == "sending" {
-				date = "on its way"
+			markdown = append(markdown, appMarkdownRowFor(row, box, 0))
+			for _, member := range row.Threads {
+				markdown = append(markdown, appMarkdownRowFor(member, box, row.ID))
 			}
-			markdown = append(markdown, sourcePostingRow{ID: row.ID, TopicID: row.TopicID, From: appRowWho(row), Summary: row.Summary, Date: date})
 		}
 		if err := writeOK(markdown); err != nil {
 			return err
@@ -232,6 +231,33 @@ func (c *boxCommand) runApp(cmd *cobra.Command, name string) error {
 			output.WithMeta("senders_words", read.words),
 		)
 	}
+}
+
+// appMarkdownRow is a box row in --markdown, which has no nesting: a bundle's threads
+// follow it, each naming the bundle it is in, since they are its only rows with a thread
+// to read.
+type appMarkdownRow struct {
+	ID      int64  `json:"id"`
+	TopicID int64  `json:"topic_id,omitempty"`
+	Kind    string `json:"kind"`
+	Bundle  int64  `json:"in_bundle,omitempty"`
+	From    string `json:"from,omitempty"`
+	To      string `json:"to,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Date    string `json:"date,omitempty"`
+}
+
+func appMarkdownRowFor(row appPosting, box appBox, bundle int64) appMarkdownRow {
+	md := appMarkdownRow{ID: row.ID, TopicID: row.TopicID, Kind: row.Kind, Bundle: bundle, Summary: row.Summary, Date: row.SentAt + row.ArrivedAt}
+	if box.kind == "sent" {
+		md.To = appRowWho(row)
+	} else {
+		md.From = appRowWho(row)
+	}
+	if row.Kind == "sending" {
+		md.Date = "on its way"
+	}
+	return md
 }
 
 // appThreadColumn is what a styled row shows for its thread: its topic, or what the row is
@@ -525,13 +551,25 @@ func (c *screenerListCommand) runApp(cmd *cobra.Command) error {
 	if stderrNotice := paginationNoticeForStderr(writer.EffectiveFormat(), notice); stderrNotice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), stderrNotice)
 	}
-	return writeOK(pending,
+	words := appSendersWords("Each sender's name, subject and summary")
+	if err := writeOK(pending,
 		output.WithSummary(fmt.Sprintf("%d %s waiting", waitingCount, senderNoun(waitingCount))),
 		output.WithNotice(notice),
 		output.WithMeta("total_count", waitingCount),
-		output.WithMeta("senders_words", appSendersWords("Each sender's name, subject and summary")),
+		output.WithMeta("senders_words", words),
 		appIDKind("sender"),
-	)
+	); err != nil {
+		return err
+	}
+	// Markdown carries no meta or notice, so what they say is written after the table.
+	if writer.EffectiveFormat() == output.FormatMarkdown {
+		for _, said := range []string{notice, words} {
+			if said != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", markdownSafeText(said))
+			}
+		}
+	}
+	return nil
 }
 
 func (c *screenerHistoryCommand) runApp(cmd *cobra.Command) error {

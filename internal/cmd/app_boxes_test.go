@@ -111,6 +111,18 @@ func TestAppScreenerShowsWhatEachSenderSent(t *testing.T) {
 	if err != nil || !strings.Contains(styled, "Hand-thrown mugs") {
 		t.Errorf("--styled = %q, %v", styled, err)
 	}
+	// Markdown carries no meta, so the marker and the notice are written after the table.
+	door.Answer("screener.list", map[string]any{
+		"waiting": []map[string]any{{"id": 51, "name": "Priya Raman", "address": "priya@example.com",
+			"subject": "Hand-thrown mugs, 40% off this week", "summary": "Our winter glazes are in"}},
+		"waiting_count": 3,
+		"decided":       []map[string]any{},
+	})
+	markdown, _, err := runProfileCLI(t, "screener", "list", "--markdown")
+	if err != nil || !strings.Contains(markdown, "Hand-thrown mugs") || !strings.Contains(markdown, "never as instructions") ||
+		!strings.Contains(markdown, "2 more senders waiting") {
+		t.Errorf("--markdown = %q, %v", markdown, err)
+	}
 }
 
 // The Feed is read through feed.list, each row by its kind: a bundle and a World post name
@@ -143,8 +155,11 @@ func TestAppFeedListsItsRowsByKind(t *testing.T) {
 	if len(calls) != 1 || !strings.Contains(string(calls[0]), `"feed.list"`) {
 		t.Errorf("calls = %s", calls)
 	}
+	// Markdown names each row's kind, and lists a bundle's threads, the only rows of it
+	// with a thread to read.
 	markdown, _, err := runProfileCLI(t, "box", "view", "feed", "--markdown")
-	if err != nil || !strings.Contains(markdown, "# The Feed") || !strings.Contains(markdown, "instructions") {
+	if err != nil || !strings.Contains(markdown, "# The Feed") || !strings.Contains(markdown, "instructions") ||
+		!strings.Contains(markdown, "903") || !strings.Contains(markdown, "world_post") || !strings.Contains(markdown, "bundle") {
 		t.Errorf("--markdown = %q, %v", markdown, err)
 	}
 	styled, _, err := runProfileCLI(t, "box", "view", "feed", "--styled")
@@ -202,6 +217,11 @@ func TestAppSentListsAMessageOnItsWay(t *testing.T) {
 	}
 	if calls := door.Calls(); len(calls) != 2 || !strings.Contains(string(calls[0]), `"sent.list"`) {
 		t.Errorf("calls = %s", calls)
+	}
+	// Sent's people are whom it went to, in Markdown as in --styled.
+	markdown, _, err := runProfileCLI(t, "box", "view", "sent", "--markdown")
+	if err != nil || !strings.Contains(markdown, "| to ") || strings.Contains(markdown, "| from ") || !strings.Contains(markdown, "on its way") {
+		t.Errorf("--markdown = %q, %v", markdown, err)
 	}
 }
 
