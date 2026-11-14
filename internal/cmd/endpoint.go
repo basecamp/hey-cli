@@ -87,13 +87,14 @@ func noAppProfile(cmd *cobra.Command) error {
 // like, completion, and bare hey.
 func readsNoServer(cmd *cobra.Command) bool {
 	return len(strings.Fields(cmd.CommandPath())) < 2 || isProfileCommand(cmd) || !commandUsesRuntimeConfig(cmd) ||
-		cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd
+		commandReadsNoServer(cmd) || cmd.Name() == cobra.ShellCompRequestCmd || cmd.Name() == cobra.ShellCompNoDescRequestCmd
 }
 
-// appOffered names what the app answers, for a hint on a command it does not.
+// appOffered names what the app answers, for a hint on a command it does not, in words: a
+// | in a command someone copies would run its alternatives as other shell commands.
 func appOffered() string {
-	return "On this computer the HEY app answers " + appCommandLine("box view imbox|feed|sent|spam") +
-		", screener list|history|approve|deny, draft list|send, and compose|reply --draft; do the rest in the HEY app"
+	return "On this computer the HEY app answers " + appCommandLine("box view imbox") +
+		" (or feed, sent or spam), screener list, history, approve and deny, draft list and send, and compose or reply with --draft; do the rest in the HEY app"
 }
 
 // appRoutes are the commands the app answers: the reads its door serves. Each one's RunE

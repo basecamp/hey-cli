@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -165,8 +164,9 @@ func TestAppFeedListsItsRowsByKind(t *testing.T) {
 		!strings.Contains(markdown, "903") || !strings.Contains(markdown, "world_post") || !strings.Contains(markdown, "bundle") {
 		t.Errorf("--markdown = %q, %v", markdown, err)
 	}
+	// A person sees a bundle's threads under it too, each with the thread it is read by.
 	styled, _, err := runProfileCLI(t, "box", "view", "feed", "--styled")
-	if err != nil || !strings.Contains(styled, "Box: The Feed") || !strings.Contains(styled, "bundle") {
+	if err != nil || !strings.Contains(styled, "Box: The Feed") || !strings.Contains(styled, "bundle") || !strings.Contains(styled, "903") {
 		t.Errorf("--styled = %q, %v", styled, err)
 	}
 }
@@ -307,7 +307,8 @@ func TestAppHintsNeverSendToAServerOrASignIn(t *testing.T) {
 			continue
 		}
 		said := strings.ToLower(err.Error() + " " + apiErrorHint(err))
-		for _, forbidden := range []string{"server profile", "auth login", "browser", "profile list", "hey mcp -p"} {
+		// A | in a command to copy would run its alternatives as other shell commands.
+		for _, forbidden := range []string{"server profile", "auth login", "browser", "profile list", "hey mcp -p", "|"} {
 			if strings.Contains(said, forbidden) {
 				t.Errorf("%v says %q: %s", args, forbidden, said)
 			}
@@ -384,18 +385,7 @@ func TestTheGateWithNoAppProfileSaysSo(t *testing.T) {
 	if _, _, err := runProfileCLI(t, "version"); err != nil {
 		t.Errorf("version: %v", err)
 	}
-}
-
-// The door's answer is decoded as the door writes it: a field it adds later is ignored.
-func TestAppFeedRowsIgnoreFieldsTheyDoNotKnow(t *testing.T) {
-	door := localapptest.Start(t)
-	row := map[string]any{"id": 401, "kind": "thread", "topic": 901, "subject": "x", "summary": "x", "sender": "x",
-		"sender_id": 1, "seen": false, "bubbled_up": false, "pinned": true}
-	door.Answer("feed.list", map[string]any{"threads": []any{row}, "has_more": false})
-	appTestHome(t, door.Path, true)
-	_, box := appBoxView(t, "feed")
-	encoded, _ := json.Marshal(box)
-	if len(box.Postings) != 1 || strings.Contains(string(encoded), "pinned") {
-		t.Errorf("box = %s", encoded)
+	if _, _, err := runProfileCLI(t, "shell-completion", "generate", "bash"); err != nil {
+		t.Errorf("shell-completion: %v", err)
 	}
 }

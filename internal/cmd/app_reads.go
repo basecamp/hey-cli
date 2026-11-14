@@ -193,6 +193,15 @@ func (c *boxCommand) runApp(cmd *cobra.Command, name string) error {
 				truncate(terminal.SanitizeLine(appRowWho(row)), 32),
 				truncate(terminal.SanitizeLine(row.Summary), 60),
 			})
+			// A bundle's threads follow it, indented: they are its rows with a thread to read.
+			for _, member := range row.Threads {
+				table.addRow([]string{
+					fmt.Sprintf("  %d", member.ID),
+					appThreadColumn(member),
+					truncate(terminal.SanitizeLine(appRowWho(member)), 32),
+					truncate(terminal.SanitizeLine(member.Summary), 60),
+				})
+			}
 		}
 		table.print()
 		if notice != "" {
