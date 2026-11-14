@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/output"
@@ -81,6 +82,8 @@ func screenerServer(t *testing.T) (*httptest.Server, *recordedScreener) {
 				 "most_recent_entry":{"id":71,"subject":"New numbers!","topic_id":81,"summary":"The latest sales figures"}}]}`))
 		case req.Method == http.MethodPatch && req.URL.Path == "/clearances/91.json":
 			_, _ = w.Write([]byte(`{"id":91,"status":"approved","petitioner":{"id":51,"name":"Hollis Heimboch","email_address":"hollis@example.com"}}`))
+		case req.Method == http.MethodPatch && req.URL.Path == "/clearances/93.json":
+			_, _ = w.Write([]byte(`{"id":93,"status":"denied","petitioner":{"id":53,"name":"Priya Natarajan","email_address":"priya@example.com"}}`))
 		case req.Method == http.MethodPatch && req.URL.Path == "/clearances/bulk.json":
 			_, _ = w.Write([]byte(`{"clearances":[
 				{"id":91,"status":"denied","petitioner":{"id":51,"name":"Hollis Heimboch"}},
@@ -464,5 +467,122 @@ func TestScreenerSurfacesServerRefusals(t *testing.T) {
 
 	if _, err := runScreener(t, server, "approve", "91"); err == nil {
 		t.Fatal("expected a forbidden response to be surfaced")
+	}
+}
+
+// An address is looked up among the senders waiting, across pages, whatever its case, and
+// screened by the clearance it names: an agent never needs the clearance id.
+func TestScreenerApproveTakesAnAddress(t *testing.T) {
+	server, recorded := screenerServer(t)
+
+	resp, err := runScreener(t, server, "approve", "HOLLIS@example.com")
+	if err != nil {
+		t.Fatalf("approve failed: %v; requests=%+v", err, recorded.snapshot())
+	}
+	results := decodeScreenerData[[]screenedResult](t, resp.Data)
+	if len(results) != 1 || results[0].ID != 91 || results[0].Status != "approved" {
+		t.Errorf("results = %+v", results)
+	}
+	requests := recorded.snapshot()
+	last := requests[len(requests)-1]
+	if last.Method != http.MethodPatch || last.Path != "/clearances/91.json" {
+		t.Errorf("requests = %+v", requests)
+	}
+}
+
+// An address on a later page of the queue, and several senders by address and id at once.
+func TestScreenerDenyTakesAddressesAndIDsTogether(t *testing.T) {
+	server, recorded := screenerServer(t)
+
+	if _, err := runScreener(t, server, "deny", "91", "scott@example.com"); err != nil {
+		t.Fatalf("deny failed: %v; requests=%+v", err, recorded.snapshot())
+	}
+	requests := recorded.snapshot()
+	last := requests[len(requests)-1]
+	var body map[string]any
+	_ = json.Unmarshal(last.Body, &body)
+	if last.Path != "/clearances/bulk.json" || body["ids"] != "91,92" {
+		t.Errorf("last request = %s %s %s", last.Method, last.Path, last.Body)
+	}
+}
+
+// A sender no longer waiting is found among those already decided, so a decision can be
+// changed by address too.
+func TestScreenerAddressFindsADecidedSender(t *testing.T) {
+	server, recorded := screenerServer(t)
+
+	if _, err := runScreener(t, server, "deny", "priya@example.com"); err != nil {
+		t.Fatalf("deny failed: %v; requests=%+v", err, recorded.snapshot())
+	}
+	requests := recorded.snapshot()
+	if last := requests[len(requests)-1]; last.Method != http.MethodPatch || last.Path != "/clearances/93.json" {
+		t.Errorf("requests = %+v", requests)
+	}
+}
+
+// An address nobody in the Screener sent from is not found, and nobody is screened.
+func TestScreenerAddressNobodySentIsNotFound(t *testing.T) {
+	server, recorded := screenerServer(t)
+
+	_, err := runScreener(t, server, "approve", "nobody@example.com")
+	if output.ExitCodeFor(err) != output.ExitNotFound {
+		t.Fatalf("err = %v", err)
+	}
+	for _, request := range recorded.snapshot() {
+		if request.Method != http.MethodGet {
+			t.Errorf("screened someone: %+v", request)
+		}
+	}
+}
+
+// A lookup that stopped at the page cap with pages left says so, never that nobody sends
+// from the address.
+func TestScreenerAddressPastThePageCapIsNotNotFound(t *testing.T) {
+	var screened atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if req.Method != http.MethodGet {
+			screened.Add(1)
+		}
+		w.Header().Set("Link", `<https://app.hey.com/clearances.json?page=more>; rel="next"`)
+		_, _ = w.Write([]byte(`{"pending_clearances_count":5000,"clearances":[
+			{"id":91,"status":"pending","petitioner":{"id":51,"name":"Hollis Heimboch","email_address":"hollis@example.com"}}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	_, err := runScreener(t, server, "approve", "nobody@example.com")
+	if output.ExitCodeFor(err) != output.ExitAPI || !strings.Contains(err.Error(), "more than 100 pages") {
+		t.Fatalf("err = %v", err)
+	}
+	if screened.Load() != 0 {
+		t.Error("screened someone")
+	}
+}
+
+// An empty last page that still carries a next link ends the list, as collectPages ends
+// it, and is no cap: the address is looked up in what was read.
+func TestScreenerAddressLookupEndsOnAnEmptyPage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case req.Method == http.MethodGet && req.URL.Query().Get("page") == "":
+			w.Header().Set("Link", `<https://app.hey.com/clearances.json?page=2>; rel="next"`)
+			_, _ = w.Write([]byte(`{"pending_clearances_count":1,"clearances":[
+				{"id":91,"status":"pending","petitioner":{"id":51,"name":"Hollis Heimboch","email_address":"hollis@example.com"}}]}`))
+		case req.Method == http.MethodGet:
+			w.Header().Set("Link", `<https://app.hey.com/clearances.json?page=3>; rel="next"`)
+			_, _ = w.Write([]byte(`{"pending_clearances_count":1,"clearances":[]}`))
+		case req.Method == http.MethodPatch && req.URL.Path == "/clearances/91.json":
+			_, _ = w.Write([]byte(`{"id":91,"status":"approved","petitioner":{"id":51,"name":"Hollis Heimboch"}}`))
+		default:
+			t.Errorf("unexpected request: %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"unexpected request"}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	if _, err := runScreener(t, server, "approve", "hollis@example.com"); err != nil {
+		t.Fatalf("err = %v", err)
 	}
 }

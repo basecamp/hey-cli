@@ -378,11 +378,7 @@ func (c *draftsCommand) runApp(cmd *cobra.Command) error {
 
 	drafts := make([]appDraft, 0, len(answer.Drafts))
 	for _, d := range answer.Drafts {
-		drafts = append(drafts, appDraft{
-			ID: d.ID, Subject: d.Subject, Summary: d.Summary, UpdatedAt: d.SavedAt, ScheduledDeliveryAt: d.SendsAt,
-			MadeAs: d.MadeAs, Kind: d.Kind, Thread: d.Thread, Account: d.Account,
-			From: d.From, To: orEmpty(d.To), Cc: orEmpty(d.Cc), Bcc: orEmpty(d.Bcc), Sendable: *d.Sendable,
-		})
+		drafts = append(drafts, appDraftFrom(d))
 	}
 	notice := ""
 	if c.limit > 0 && len(drafts) > c.limit {
@@ -413,6 +409,16 @@ func (c *draftsCommand) runApp(cmd *cobra.Command) error {
 		output.WithSummary(fmt.Sprintf("%d drafts", len(drafts))),
 		output.WithNotice(notice),
 	)
+}
+
+// appDraftFrom is a draft the door answered under the server's field names. Its sendable
+// has been checked to be there.
+func appDraftFrom(d appDoorDraft) appDraft {
+	return appDraft{
+		ID: d.ID, Subject: d.Subject, Summary: d.Summary, UpdatedAt: d.SavedAt, ScheduledDeliveryAt: d.SendsAt,
+		MadeAs: d.MadeAs, Kind: d.Kind, Thread: d.Thread, Account: d.Account,
+		From: d.From, To: orEmpty(d.To), Cc: orEmpty(d.Cc), Bcc: orEmpty(d.Bcc), Sendable: *d.Sendable,
+	}
 }
 
 // orEmpty keeps a missing address list a list in the JSON, never null.

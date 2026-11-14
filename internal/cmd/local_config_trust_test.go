@@ -178,6 +178,8 @@ func resetRootFlagsForTrustTest(t *testing.T) {
 	previousJQ := jqFlag
 	previousAccount := accountFlag
 	previousBaseURL := baseURL
+	previousEndpoint := answeringEndpoint
+	previousConfig := cfg
 	jsonFlag = false
 	jqFlag = ""
 	accountFlag = ""
@@ -187,6 +189,10 @@ func resetRootFlagsForTrustTest(t *testing.T) {
 		jqFlag = previousJQ
 		accountFlag = previousAccount
 		baseURL = previousBaseURL
+		// A run on an app profile leaves the endpoint it answered from; the next test,
+		// in whatever order -shuffle picks, starts from none.
+		answeringEndpoint = previousEndpoint
+		cfg = previousConfig
 	})
 }
 

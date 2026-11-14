@@ -1209,9 +1209,10 @@ func TestCommandsThatReadNoServerSkipProfiles(t *testing.T) {
 }
 
 func TestAFailedAnswerNamesTheProfile(t *testing.T) {
-	previous := cfg
-	t.Cleanup(func() { cfg = previous })
+	previous, previousEndpoint := cfg, answeringEndpoint
+	t.Cleanup(func() { cfg, answeringEndpoint = previous, previousEndpoint })
 	cfg = &config.Config{ActiveProfile: "work"}
+	answeringEndpoint = ""
 	shared := &apierr.Error{Code: "not_found", Message: "resource not found", Meta: map[string]any{"status": 404}}
 	got := apierr.AsError(withProfileMeta(shared))
 	if got.Meta["profile"] != "work" || got.Meta["status"] != 404 {

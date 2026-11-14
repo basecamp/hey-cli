@@ -55,6 +55,10 @@ func TestUnavailableAccountNotice(t *testing.T) {
 }
 
 func TestAccountOverrideNotice(t *testing.T) {
+	// No profile: a run before this one, in whatever order -shuffle picks, may have left one.
+	previous := cfg
+	t.Cleanup(func() { cfg = previous })
+	cfg = nil
 	if accountOverrideNotice(config.SourceGlobal) != "" {
 		t.Fatal("global default unexpectedly reported an override")
 	}
