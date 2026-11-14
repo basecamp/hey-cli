@@ -266,6 +266,8 @@ func TestAppBoxRowsThatContradictTheirKindAreRefused(t *testing.T) {
 			{"id": 7, "kind": "sending", "subject": "x", "summary": "x", "recipients": []string{}, "sent_at": "2026-11-13T09:00:00Z", "still_trying": false}}, "has_more": false}},
 		{"a sending with a topic", "sent.list", "sent", map[string]any{"threads": []map[string]any{
 			{"id": -7, "kind": "sending", "topic": 805, "subject": "x", "summary": "x", "recipients": []string{}, "sent_at": "2026-11-13T09:00:00Z", "still_trying": false}}, "has_more": false}},
+		{"a bundle that lists no threads", "feed.list", "feed", map[string]any{"threads": []map[string]any{
+			{"id": 402, "kind": "bundle", "subject": "x", "summary": "x", "sender": "x", "sender_id": 1, "seen": false, "bubbled_up": false}}, "has_more": false}},
 		{"a Spam row with no topic", "spam.list", "spam", map[string]any{"threads": []map[string]any{
 			{"id": 501, "kind": "thread", "subject": "x", "summary": "x", "sender": "x", "arrived_at": "2026-11-13T07:15:00Z"}}, "has_more": false}},
 	} {
@@ -393,5 +395,19 @@ func TestTheGateWithNoAppProfileSaysSo(t *testing.T) {
 	stdout, stderr, err := runProfileCLI(t)
 	if err != nil || !strings.Contains(stdout, "Usage") && !strings.Contains(stdout, "USAGE") || !strings.Contains(stderr, "no profile") {
 		t.Errorf("bare hey: err %v, stderr %q", err, stderr)
+	}
+}
+
+// A Spam row of a kind this hey does not know keeps its kind and names no thread to read.
+func TestAppSpamRowOfAnUnknownKindNamesNoThread(t *testing.T) {
+	door := localapptest.Start(t)
+	door.Answer("spam.list", map[string]any{"threads": []map[string]any{
+		{"id": 502, "kind": "future_kind", "topic": 952, "subject": "x", "summary": "x", "sender": "x", "arrived_at": "2026-11-13T07:15:00Z"},
+	}, "has_more": false})
+	appTestHome(t, door.Path, true)
+
+	_, box := appBoxView(t, "spam")
+	if len(box.Postings) != 1 || box.Postings[0].Kind != "future_kind" || box.Postings[0].TopicID != nil {
+		t.Errorf("postings = %+v", box.Postings)
 	}
 }

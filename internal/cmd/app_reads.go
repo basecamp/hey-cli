@@ -65,6 +65,7 @@ type appSentThreads struct {
 // which Not Spam takes, and topic the thread it is read by.
 type appSpamThread struct {
 	ID        int64  `json:"id"`
+	Kind      string `json:"kind"`
 	Topic     int64  `json:"topic"`
 	Subject   string `json:"subject"`
 	Summary   string `json:"summary"`
@@ -335,6 +336,11 @@ func appThreadComplete(thread appThread) error {
 			return fmt.Errorf("it lists thread %d without the topic it is read by", thread.ID)
 		}
 	case "bundle":
+		// The door gives a bundle its list, empty while its threads' facts land; none at
+		// all would read as a bundle holding nothing.
+		if thread.Threads == nil {
+			return fmt.Errorf("it lists bundle %d without its threads", thread.ID)
+		}
 		for _, member := range thread.Threads {
 			if member.Kind != "" && member.Kind != "thread" {
 				return fmt.Errorf("bundle %d lists a %s among its threads", thread.ID, member.Kind)
@@ -442,7 +448,7 @@ func readAppSpam(cmd *cobra.Command, box appBox) (appBoxRows, error) {
 			return errors.New("it does not say whether Spam holds more")
 		}
 		for _, thread := range answer.Threads {
-			if thread.ID <= 0 || thread.Topic <= 0 {
+			if thread.ID <= 0 || (thread.Kind == "" || thread.Kind == "thread") && thread.Topic <= 0 {
 				return errors.New("it lists a thread without an ID")
 			}
 		}
@@ -453,10 +459,15 @@ func readAppSpam(cmd *cobra.Command, box appBox) (appBoxRows, error) {
 	}
 	rows := make([]appPosting, 0, len(answer.Threads))
 	for _, thread := range answer.Threads {
-		rows = append(rows, appPosting{
+		row := appPosting{
 			ID: thread.ID, TopicID: thread.Topic, Kind: "topic", Name: thread.Subject, Summary: thread.Summary,
 			Creator: &appCreator{ID: thread.SenderID, Name: thread.Sender}, ArrivedAt: thread.ArrivedAt,
-		})
+		}
+		if thread.Kind != "" && thread.Kind != "thread" {
+			// A kind this hey does not know names no thread it can vouch for.
+			row.Kind, row.TopicID = thread.Kind, 0
+		}
+		rows = append(rows, row)
 	}
 	return appBoxRows{rows: rows, hasMore: *answer.HasMore, words: appSendersWords("Each row's name, summary and creator.name")}, nil
 }
