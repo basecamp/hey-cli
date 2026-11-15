@@ -104,7 +104,8 @@ func readsNoServer(cmd *cobra.Command) bool {
 // | in a command someone copies would run its alternatives as other shell commands.
 func appOffered() string {
 	return "On this computer the HEY app answers " + appCommandLine("box view imbox") +
-		" (or feed, sent or spam), screener list, history, approve and deny, draft list and send, and compose or reply with --draft; do the rest in the HEY app"
+		" (or feed, sent or spam), screener list, history, approve and deny, draft list and send, and compose or reply with --draft; " +
+		"screener deny <email> also screens out a sender already screened in, one in the Feed or Paper Trail too; do the rest in the HEY app"
 }
 
 // appRoutes are the commands the app answers: the reads its door serves. Each one's RunE
