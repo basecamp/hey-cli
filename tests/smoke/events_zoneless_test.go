@@ -35,7 +35,11 @@ func TestEventZonelessOccurrenceTitleAcrossDST(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	run(network.SetCookie("session_token", sessionCookie).WithDomain(parsed.Hostname()).WithPath("/").WithHTTPOnly(true),
+	// The emulated browser must not let HEY's automatic-zone beacon change the
+	// identity before we inspect its preference and refuse automatic mode.
+	run(network.Enable(),
+		network.SetBlockedURLs([]string{baseURL + "/identity/time_zone?from_beacon=*"}),
+		network.SetCookie("session_token", sessionCookie).WithDomain(parsed.Hostname()).WithPath("/").WithHTTPOnly(true),
 		emulation.SetTimezoneOverride("America/Chicago"))
 
 	type preference struct {
@@ -46,8 +50,8 @@ func TestEventZonelessOccurrenceTitleAcrossDST(t *testing.T) {
 		t.Helper()
 		var value preference
 		run(chromedp.Navigate(baseURL+"/identity/time_zone/edit"),
-			chromedp.WaitReady(`[name="time_zone"]`, chromedp.ByQuery),
-			chromedp.Evaluate(`({zone: document.querySelector('[name="time_zone"]').value, auto: document.querySelector('#auto_time_zone_enabled').checked})`, &value))
+			chromedp.WaitReady(`#auto_time_zone_enabled`, chromedp.ByQuery),
+			chromedp.Evaluate(`({zone: document.querySelector('[name="time_zone"]')?.value || '', auto: document.querySelector('#auto_time_zone_enabled').checked})`, &value))
 		return value
 	}
 	original := readPreference()
@@ -89,14 +93,23 @@ func TestEventZonelessOccurrenceTitleAcrossDST(t *testing.T) {
 	// a failed redirect can recover the exact uniquely named series.
 	var ids []string
 	t.Cleanup(func() {
-		rows := dataAs[[]smokeEvent](t, heyJSON(t, "event", "list", "--starts-on", firstDay, "--ends-on", "2026-11-19", "--all"))
+		data, err := smokeJSON(commandFor(t), "event", "list", "--starts-on", firstDay, "--ends-on", "2026-11-19", "--all")
+		var rows []smokeEvent
+		if err == nil {
+			err = json.Unmarshal(data, &rows)
+		}
+		if err != nil {
+			t.Errorf("discover owned series %q for cleanup: %v", title, err)
+		}
 		for _, row := range rows {
 			if row.Title == title && row.ParentID == 0 {
 				ids = append(ids, fmt.Sprint(row.ID))
 			}
 		}
 		if len(ids) == 0 {
-			t.Log("no owned series was created")
+			if err == nil {
+				t.Log("no owned series was created")
+			}
 			return
 		}
 		if err := cleanupEventsWith(commandFor(t), ids, title, []string{firstDay, selectedDay, "2026-11-18"}); err != nil {
