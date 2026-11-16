@@ -1,12 +1,12 @@
 # Local development environment
 
-Read `tests/smoke/README.md` for current versions, OAuth registration, Chromium and sender prerequisites. This skill does not provision or reset Haystack. A clean client is supported; a fresh unprepared VM/database is not yet proved.
+Haystack is a closed-source service, not part of this repository. Public contributors are not expected to provision it or have internal access. They can build the CLI, run unit/offline harness tests and check isolated local configuration. Live integration checks require an explicitly authorized, prepared internal test environment; otherwise report them blocked. Never use a personal production HEY account as a substitute for the development mutation suite. Read `tests/smoke/README.md` for the current internal environment, OAuth, Chromium and sender prerequisites.
 
 ## Ownership and readiness
 
 Obtain exclusive use of a prepared **development** identity/server. Record who owns the backend/capture and which linked account is permitted. Do not infer permission from an open port. A backend supplied by the operator/coordinator is a prerequisite, not a process the child agent may stop.
 
-Default origin is `http://app.hey.localhost:3003`. Elasticsearch 8 uses 29208. Haystack conventionally lives at `$HOME/Work/basecamp/haystack`. If you are authorized to start it, confirm 3003 is unused, read that checkout's AGENTS/README and Ruby version, and use its `bin/dev` in a uniquely owned terminal. `bin/dev` includes Hotcell, required for photo processing. Use its configured Ruby through mise if the shell's Ruby differs. Stop that terminal with Ctrl+C after final cleanup, not by process name. Never run `bin/setup` on an existing checkout/database as a repair shortcut.
+Default origin is `http://app.hey.localhost:3003`. Elasticsearch 8 uses 29208. Use the backend checkout or test environment supplied by its owner, without assuming a location on disk. If you are authorized to start it, confirm 3003 is unused, read that checkout's AGENTS/README and Ruby version, and use its `bin/dev` in a uniquely owned terminal. `bin/dev` includes Hotcell, required for photo processing. Use its configured Ruby through mise if the shell's Ruby differs. Stop that terminal with Ctrl+C after final cleanup, not by process name. Never run `bin/setup` on an existing checkout/database as a repair shortcut.
 
 Do not capture raw browser/OAuth or server request logs; URLs/parameters can contain credentials or OAuth state. The smoke harness deliberately suppresses OAuth progress. Keep data evidence private too.
 
