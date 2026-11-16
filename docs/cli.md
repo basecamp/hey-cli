@@ -609,6 +609,12 @@ other moment cannot be sent to HEY as a clock time and zone, and nor can one wit
 since HEY is sent whole minutes, so an edit that would move either refuses and asks you to
 retype it.
 
+A virtual occurrence of a zoneless preset series is expanded in your HEY account's zone,
+so editing only its title keeps its local time across daylight saving changes. That source
+zone is needed even when `--time-zone` names a new destination zone; if the account's zone
+is missing or unknown, set it in HEY before retrying. A day already written out keeps its
+own stored times. This does not change the times HEY's period API serves to `day` or `week`.
+
 `hey event edit` changes only the flags you name, but that is this command's doing rather
 than HEY's: an event write is a replacement, so the edit reads the event first and sends
 back the notes, location, link, attached email, reminders and time zones it is not

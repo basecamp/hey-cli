@@ -1461,7 +1461,7 @@ func TestOccurrenceInstants(t *testing.T) {
 			day:    "2026-03-08", start: "2026-03-08T06:30:00Z", end: "2026-03-08T08:30:00Z",
 		},
 		{
-			name:   "no zone is UTC",
+			name:   "zoneless with a UTC account",
 			series: timed("2026-09-01T09:00:00Z", "2026-09-01T09:30:00Z", ""),
 			day:    "2026-09-15", start: "2026-09-15T09:00:00Z", end: "2026-09-15T09:30:00Z",
 		},
@@ -1486,7 +1486,7 @@ func TestOccurrenceInstants(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			start, end := occurrenceInstants(tt.series, day(tt.day))
+			start, end := occurrenceInstants(tt.series, day(tt.day), time.UTC)
 			if got := start.UTC().Format(time.RFC3339); got != tt.start {
 				t.Errorf("start = %s, want %s", got, tt.start)
 			}
