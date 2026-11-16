@@ -25,8 +25,8 @@ If a report concerns an unmapped feature, inspect its public entry points and so
 
 ## Maintenance
 
-Follow upstream `/maintain-verification-skill`: check index hygiene; fan out read-only source readers per feature; reconcile their recipes; sweep recent changes for missing user paths; then have the coordinator drive every mapped feature at least once under its documented launch model. Structural checks do not replace this live pass.
+Check index hygiene; fan out read-only source readers per feature; reconcile their recipes; sweep recent changes for missing user paths; then have the coordinator drive every mapped feature at least once under its documented launch model. Structural checks do not replace this live pass.
 
-The outcome is `clean` only when the required source/live coverage completed and nothing needs shipping; `changed` ships at most one skill-directory PR of proven corrections; `blocked` names unfinished coverage or an unsafe/unshippable correction. An unreachable path needs the attempted route and concrete prerequisite, not merely the word manual. With the current TUI gap, do not call a whole-map pass clean without actual PTY evidence or the upstream-required concrete unreachable proof.
+The outcome is `clean` only when the required source/live coverage completed and nothing needs shipping; `changed` ships at most one skill-directory PR of proven corrections; `blocked` names unfinished coverage or an unsafe/unshippable correction. An unreachable path needs the attempted route and concrete prerequisite, not merely the word manual. With the current TUI gap, do not call a whole-map pass clean without actual PTY evidence or a concrete attempted route and unmet prerequisite.
 
 Correct doc drift and skill-owned helper gaps here, re-driving helper fixes live. Record product regressions without editing away the expected behavior. A harness change outside this directory is a separate PR. Keep concise dated coverage/evidence notes outside the repository; do not commit a permanent verified flag or private run artifacts.

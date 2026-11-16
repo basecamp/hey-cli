@@ -11,7 +11,7 @@ Work from the hey-cli repository root. Read [the feature index](features/README.
 
 For local configuration, follow [settings](features/settings.md); no server is needed.
 
-Live journeys use `tests/smoke`. Read its [README](../../../tests/smoke/README.md) and [development setup](references/development.md) first. They require prepared local Haystack, exclusive development-account/server ownership, Chromium and the registered loopback OAuth client. Sending additionally requires confirmed local-only sender routing and SMTP capture. Do not reset/reseed an existing database, use production/beta, copy operator credentials or stop somebody else's server. A private client directory does not isolate the database.
+Public contributors can run local CLI checks, unit tests and offline harness regressions without backend access. Live integration journeys use `tests/smoke` and require an authorized internal test environment: Haystack is closed source and is not supplied by this repository. Unavailable access is a blocker, not a provisioning task or permission to use a production account. Read the smoke [README](../../../tests/smoke/README.md) and [development setup](references/development.md) first. They require prepared local Haystack, exclusive development-account/server ownership, Chromium and the registered loopback OAuth client. Sending additionally requires confirmed local-only sender routing and SMTP capture. Do not reset/reseed an existing database, use production/beta, copy operator credentials or stop somebody else's server. A private client directory does not isolate the database.
 
 ```bash
 make build
@@ -74,4 +74,4 @@ Stop a backend/capture only if this run started it, by its dedicated terminal or
 
 The helper runs the existing Go harness; it is not a second HTTP/auth client. Local settings use the public binary directly as documented in their recipe.
 
-For `/maintain-verification-skill`, use [the index's maintenance contract](features/README.md#maintenance). Keep recipes tied to observable behavior, not every implementation symbol. A maintenance run edits only this skill's directory. A needed fix in `tests/smoke` or product code is a separate change, not permission to copy that code here or weaken the expected behavior.
+To maintain this guide, use [the index's maintenance contract](features/README.md#maintenance). Keep recipes tied to observable behavior, not every implementation symbol. A maintenance run edits only this skill's directory. A needed fix in `tests/smoke` or product code is a separate change, not permission to copy that code here or weaken the expected behavior.
