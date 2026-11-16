@@ -34,7 +34,10 @@ def audit(events, names, code):
 
 
 def group_running(pgid):
-    states = subprocess.run(["ps", "-axo", "pgid=,stat="], capture_output=True, text=True)
+    try:
+        states = subprocess.run(["ps", "-axo", "pgid=,stat="], capture_output=True, text=True)
+    except OSError:
+        return True  # Unknown liveness still requires escalation, never successful cleanup.
     if states.returncode:
         return True
     return any(len(fields := line.split()) == 2 and fields[0] == str(pgid) and not fields[1].startswith("Z")
@@ -68,6 +71,8 @@ def execute(binary, names, timeout, tags):
     if not duration:
         raise ValueError("timeout must be a positive integer followed by s or m")
     seconds = int(duration[1]) * (60 if duration[2] == "m" else 1)
+    if os.name != "posix" or shutil.which("ps") is None:
+        raise ValueError("live runner requires POSIX process groups and ps; no test was started")
     binary = binary.resolve(strict=True)
     run = Path(tempfile.mkdtemp(prefix="hv-", dir="/tmp")).resolve()
     temporary = run / "tmp"

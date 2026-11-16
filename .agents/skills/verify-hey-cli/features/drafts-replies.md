@@ -11,7 +11,7 @@ Save unfinished mail without delivering it, resume/edit it, and preserve a reply
 
 ## How to get to it (user POV)
 
-CLI entry points are `hey compose --draft`, `hey compose --thread-id <topic-id> --draft`, `hey reply <topic-id> --draft`, and `hey draft list/show/edit/send/delete`. Explicit reply recipient overrides use `--to`, `--cc`, `--bcc` and `--replace-recipients`; do not confuse replacement with merging HEY's prefill. TUI compose/reply forms are a separate entry point under [TUI](tui.md).
+The live recipes target the server API, not app profiles. Server entry points are `hey compose --draft`, `hey compose --thread-id <topic-id> --draft`, `hey reply <topic-id> --draft`, and `hey draft list/show/edit/send/delete`. Explicit reply recipient overrides use `--to`, `--cc`, `--bcc` and `--replace-recipients`; do not confuse replacement with merging HEY's prefill. App profiles reject `compose --thread-id` and reply recipient overrides; use their supported `hey reply <topic-id> --draft` path and verify it separately. TUI compose/reply forms are a separate entry point under [TUI](tui.md).
 
 ## Driving it with the smoke harness
 

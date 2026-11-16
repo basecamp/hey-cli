@@ -228,8 +228,9 @@ Never use abbreviations or placeholders like "Test Event", "User1", "a@ex.com". 
 
 For before/after bug proof or PR runtime checks, read
 `.agents/skills/verify-hey-cli/SKILL.md` and its user-facing feature recipe.
-The existing smoke harness is the driver; unit tests or a neighboring green smoke
-case do not prove the reported behavior. CLI and live TUI evidence stay separate.
+Use the existing smoke harness for live CLI checks, the isolated binary for local
+settings, and an authorized PTY for live TUI checks. Unit tests or a neighboring
+green smoke case do not prove the reported behavior; keep these surfaces separate.
 
 ### Unit Testing
 

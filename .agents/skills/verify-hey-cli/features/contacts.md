@@ -10,7 +10,7 @@ Read a contact, edit its identity/aliases, preserve private notes, and manage th
 
 ## How to get to it (user POV)
 
-Use `hey contact list/show/threads/add/update`, `hey contact note`, `hey contact photo`, `hey contact hide` and `hey contact show-again`. TUI contact list/detail/forms are a separate surface under [TUI](tui.md).
+Use `hey contact list/show/threads/add/update`, `hey contact note`, `hey contact photo`, `hey contact hide`, `hey contact show-again`, `hey contact deliver`, `hey contact bundle` and `hey contact unbundle`. TUI contact list/detail/forms are a separate surface under [TUI](tui.md).
 
 ## Driving it with the smoke harness
 

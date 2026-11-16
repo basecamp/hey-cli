@@ -33,6 +33,15 @@ class RunnerTests(unittest.TestCase):
             with patch.dict(os.environ, {"HEY_SMOKE_BASE_URL": origin}), self.assertRaises(ValueError):
                 EXECUTE(Path("not-a-binary"), names, "1m", "")
 
+    def test_missing_ps_refuses_launch_and_unknown_liveness_does_not_pass(self):
+        with patch.object(shutil, "which", return_value=None), \
+             patch.dict(os.environ, {"HEY_SMOKE_BASE_URL": "http://app.hey.localhost:3003"}), \
+             self.assertRaisesRegex(ValueError, "ps"):
+            EXECUTE(Path("not-a-binary"), ["TestChosen"], "1m", "")
+        with patch.object(subprocess, "run", side_effect=FileNotFoundError("ps unavailable")):
+            self.assertTrue(MODULE["group_running"](123456789))
+
+    @unittest.skipUnless(os.name == "posix" and shutil.which("ps"), "requires POSIX process groups and ps")
     def test_stubborn_owned_process_group_is_stopped(self):
         child = "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); print('ready',flush=True); time.sleep(60)"
         leader = "import subprocess,sys; p=subprocess.Popen([sys.executable,'-c'," + repr(child) + "],stdout=subprocess.PIPE,text=True); print(p.stdout.readline().strip(),flush=True)"
@@ -47,13 +56,15 @@ class RunnerTests(unittest.TestCase):
             try:
                 os.killpg(process.pid, 9)
             except ProcessLookupError:
-                pass
+                pass  # The stop assertion already removed the owned group.
             process.wait()
             process.stdout.close()
 
+    @unittest.skipUnless(os.name == "posix" and shutil.which("ps"), "requires POSIX process groups and ps")
     def test_real_process_status_pin_private_evidence_and_retained_state(self):
-        for code, name, leftover in [(0, "TestChosen", False), (7, "TestChosen", False),
-                                     (0, "TestOther", False), (0, "TestChosen", True)]:
+        for code, name, leftover, stopped in [(0, "TestChosen", False, True), (7, "TestChosen", False, True),
+                                             (0, "TestOther", False, True), (0, "TestChosen", True, True),
+                                             (0, "TestChosen", False, False)]:
             with self.subTest(code=code, name=name, leftover=leftover), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 (root / "tests/smoke").mkdir(parents=True)
@@ -65,19 +76,21 @@ class RunnerTests(unittest.TestCase):
                                 + "print(json.dumps({'Action':'pass','Test':" + repr(name) + "}))\n"
                                 + "raise SystemExit(" + str(code) + ")\n")
                 fake.chmod(0o700)
-                with patch.dict(EXECUTE.__globals__, ROOT=root), \
+                real_stop = MODULE["stop_group"]
+                with patch.dict(EXECUTE.__globals__, ROOT=root, stop_group=real_stop if stopped else lambda _: False), \
                      patch.dict(os.environ, {"PATH": str(root) + os.pathsep + os.environ["PATH"],
                                              "HEY_SMOKE_BASE_URL": "http://app.hey.localhost:3003", "HEY_TOKEN": "SYNTHETIC"}), \
                      contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     status, run = EXECUTE(binary, ["TestChosen"], "1m", "")
                 try:
                     result = json.loads((run / "result.json").read_text())
-                    self.assertEqual(result["ok"], code == 0 and name == "TestChosen" and not leftover)
+                    self.assertEqual(result["ok"], code == 0 and name == "TestChosen" and not leftover and stopped)
+                    self.assertEqual(result["process_group_stopped"], stopped)
                     self.assertEqual(status, 7 if code == 7 else 0 if result["ok"] else 1)
                     self.assertTrue((run / "events.jsonl").exists())
                     self.assertTrue((run / "hey").exists())
                     self.assertEqual(run.stat().st_mode & 0o777, 0o700)
-                    self.assertEqual((run / "tmp").exists(), leftover)
+                    self.assertEqual((run / "tmp").exists(), leftover or not stopped)
                     self.assertNotIn("SYNTHETIC", (run / "command.json").read_text())
                 finally:
                     shutil.rmtree(run)
