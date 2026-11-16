@@ -67,7 +67,7 @@ Stop a backend/capture only if this run started it, by its dedicated terminal or
 ## Helpers
 
 ```bash
-# From the repository root; Python 3 standard library and cached Go dependencies.
+# From the repository root; POSIX/Linux/macOS, Python 3, git, ps and cached Go dependencies.
 .agents/skills/verify-hey-cli/scripts/smoke TestReplyDraft
 .agents/skills/verify-hey-cli/scripts/test-smoke
 ```
