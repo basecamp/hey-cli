@@ -187,16 +187,13 @@ func (c *eventsEditCommand) editOccurrence(ctx context.Context, cmd *cobra.Comma
 	if err != nil {
 		return err
 	}
-	event := day.event()
-	if day.realized == nil && !day.series.RecurrenceSchedule.Preset {
-		event, err = readCustomVirtualOccurrence(ctx, edit.occurrence)
-		if err != nil {
-			return err
-		}
+	event, err := day.event(ctx, &c.fields.account)
+	if err != nil {
+		return err
 	}
 
 	if edit.scope == hey.OccurrenceScopeThisAndFollowing {
-		if err = day.refuseAnUnsafeFutureBoundary("changed",
+		if err = day.refuseAnUnsafeFutureBoundary(ctx, &c.fields.account, "changed",
 			"use --apply-to current for that day, edit the whole series, or split from a later virtual occurrence",
 			"move that occurrence back to its series date and time with --apply-to current, then retry the future edit"); err != nil {
 			return err
@@ -369,11 +366,34 @@ func locateOccurrence(cmd *cobra.Command, rows []generated.Recording, occurrence
 // event is the day as an event: the recording HEY wrote out for it, or a preset series with
 // the day's own times in place of the series' first. A custom series needs the authoritative
 // virtual occurrence from readCustomVirtualOccurrence instead.
-func (d occurrenceDay) event() generated.Recording {
+func (d occurrenceDay) event(ctx context.Context, account *accountZone) (generated.Recording, error) {
 	if d.realized != nil {
-		return *d.realized
+		return *d.realized, nil
 	}
-	return virtualOccurrence(d.series, d.occurrence.Date)
+	if !d.series.RecurrenceSchedule.Preset {
+		return readCustomVirtualOccurrence(ctx, d.occurrence)
+	}
+	loc, err := occurrenceLocation(ctx, d.series, account)
+	if err != nil {
+		return generated.Recording{}, err
+	}
+	return virtualOccurrence(d.series, d.occurrence.Date, loc), nil
+}
+
+// A zoneless series follows the identity's wall clock. Expand its first stored
+// instant in that source zone so the occurrence keeps its local time across DST,
+// even if --time-zone names a new destination zone.
+// All-day and explicitly zoned series do not need the identity's zone.
+func occurrenceLocation(ctx context.Context, series generated.Recording, account *accountZone) (*time.Location, error) {
+	if series.AllDay || series.StartsAtTimeZone != "" {
+		return time.UTC, nil
+	}
+	_, loc, err := account.location(ctx)
+	if err != nil {
+		return nil, accountZoneRefusal(err, "no time zone to expand the zoneless series in",
+			"set your time zone in HEY, then retry the occurrence write")
+	}
+	return loc, nil
 }
 
 // refuseAnUnsafeFutureBoundary refuses a future write from a day HEY has written out when
@@ -387,7 +407,7 @@ func (d occurrenceDay) event() generated.Recording {
 //
 // verb says what the write would do to the days ("changed", "deleted"); the hints are the
 // caller's way round each refusal.
-func (d occurrenceDay) refuseAnUnsafeFutureBoundary(verb, customHint, movedHint string) error {
+func (d occurrenceDay) refuseAnUnsafeFutureBoundary(ctx context.Context, account *accountZone, verb, customHint, movedHint string) error {
 	if d.realized == nil {
 		return nil
 	}
@@ -396,7 +416,11 @@ func (d occurrenceDay) refuseAnUnsafeFutureBoundary(verb, customHint, movedHint 
 			fmt.Sprintf("occurrence %s belongs to an opaque custom schedule and cannot be %s with --apply-to future after HEY has written that day out", d.occurrence.String(), verb),
 			customHint)
 	}
-	virtual := virtualOccurrence(d.series, d.occurrence.Date)
+	loc, err := occurrenceLocation(ctx, d.series, account)
+	if err != nil {
+		return err
+	}
+	virtual := virtualOccurrence(d.series, d.occurrence.Date, loc)
 	if !d.realized.StartsAt.Equal(virtual.StartsAt) {
 		return apierr.ErrUsageHint(
 			fmt.Sprintf("occurrence %s was moved from %s to %s and cannot be %s with --apply-to future", d.occurrence.String(), virtual.StartsAt.Format(time.RFC3339), d.realized.StartsAt.Format(time.RFC3339), verb),
@@ -433,12 +457,12 @@ func readCustomVirtualOccurrence(ctx context.Context, occurrence hey.EventOccurr
 // virtualOccurrence is one day of a preset series the way HEY builds it: the series' own
 // fields, with the day's start and end in place of the first day's. It is what the write has
 // to send, since a date the series began on would move the day there.
-func virtualOccurrence(series generated.Recording, day time.Time) generated.Recording {
+func virtualOccurrence(series generated.Recording, day time.Time, accountLocation *time.Location) generated.Recording {
 	occurrence := series
 	occurrence.Id = 0
 	occurrence.ParentId = series.Id
 	occurrence.OccurrenceId = hey.EventOccurrence{EventID: series.Id, Date: day}.String()
-	occurrence.StartsAt, occurrence.EndsAt = occurrenceInstants(series, day)
+	occurrence.StartsAt, occurrence.EndsAt = occurrenceInstants(series, day, accountLocation)
 	return occurrence
 }
 
@@ -446,15 +470,16 @@ func virtualOccurrence(series generated.Recording, day time.Time) generated.Reco
 // UTC date of its start and gives it the series' wall-clock time in the series' own zone,
 // so a series that starts late in the evening west of Greenwich, or early in the morning
 // east of it, has its wall-clock day on the day either side of the one named. The end
-// follows the start by the series' own length.
-func occurrenceInstants(series generated.Recording, day time.Time) (time.Time, time.Time) {
+// follows the start by the series' own length. A zoneless series uses the account's
+// zone, as the web calendar does, while retaining its empty stored zone names.
+func occurrenceInstants(series generated.Recording, day time.Time, accountLocation *time.Location) (time.Time, time.Time) {
 	duration := series.EndsAt.Sub(series.StartsAt)
 	if series.AllDay {
 		start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, time.UTC)
 		return start, start.Add(duration)
 	}
 
-	loc := time.UTC
+	loc := accountLocation
 	if series.StartsAtTimeZone != "" {
 		if zone, err := time.LoadLocation(series.StartsAtTimeZone); err == nil {
 			loc = zone

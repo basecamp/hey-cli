@@ -281,6 +281,12 @@ repeat as they go back names two moments, of which HEY takes the daylight-saving
 the later where neither is; a time you keep at the other, or with seconds, cannot be sent,
 so the edit refuses until you retype it. All of this holds for an --occurrence edit too.
 
+A virtual occurrence of a zoneless preset series is expanded in your HEY account's zone,
+so a title-only edit keeps its local time across daylight saving changes. This needs the
+account's zone even when --time-zone names a new destination zone; if it is missing or
+unknown, set your time zone in HEY before retrying. A day already written out keeps its
+own stored times.
+
 The event is found by reading every calendar it might be on, which is one request each and
 covers the pages HEY answers with. Give the day it starts as [date] to look on that day
 alone. Without [date] it is looked for within a year either side of today, and an event not
@@ -731,7 +737,7 @@ func (c *eventsDeleteCommand) deleteOccurrence(ctx context.Context, cmd *cobra.C
 		if err != nil {
 			return err
 		}
-		if err = day.refuseAnUnsafeFutureBoundary("deleted",
+		if err = day.refuseAnUnsafeFutureBoundary(ctx, &accountZone{}, "deleted",
 			"delete that day alone with --apply-to current, then delete from a later virtual occurrence with --apply-to future",
 			"delete that day alone with --apply-to current, then delete from the next day with --apply-to future"); err != nil {
 			return err
