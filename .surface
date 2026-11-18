@@ -176,6 +176,7 @@ hey event add --circle
 hey event add --countdown
 hey event add --countdown-unit
 hey event add --end-time
+hey event add --end-time-zone
 hey event add --ends-on
 hey event add --invite
 hey event add --link
@@ -204,6 +205,7 @@ hey event edit --circle
 hey event edit --countdown
 hey event edit --countdown-unit
 hey event edit --end-time
+hey event edit --end-time-zone
 hey event edit --ends-on
 hey event edit --invite
 hey event edit --link
