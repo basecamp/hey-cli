@@ -3,9 +3,7 @@ package mcpserver
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -14,13 +12,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/basecamp/mcp/confirm"
 	"github.com/basecamp/mcp/gateway"
 )
 
@@ -83,12 +81,9 @@ const (
 	confirmInputID = "confirm_send"
 
 	// confirmKind and confirmMethod mark a signed state as a send_draft confirmation,
-	// so no other validator accepts it (basecamp-mcp-server's confirm.go).
+	// so no other validator accepts it (confirm.State).
 	confirmKind   = "send_draft"
 	confirmMethod = "tools/call\x00send_draft"
-
-	// confirmTTL: a send confirmation should not outlive the person's attention (D2).
-	confirmTTL = 5 * time.Minute
 
 	// claimTTL is how long a claimed draft stays claimed: well past the confirmation's
 	// TTL and HEY's undo window (D2.3).
@@ -102,10 +97,13 @@ const (
 
 type sender struct {
 	cfg SendConfig
-	// key signs confirmations. It lives as long as the process: both rounds of a send
-	// reach the same hey mcp, and a confirmation that outlives a restart is asked again.
-	key    []byte
-	claims *sendClaims
+	// keys sign confirmations: one key that lives as long as the process. Both rounds
+	// of a send reach the same hey mcp, and a confirmation that outlives a restart is
+	// asked again.
+	keys *confirm.Keys
+	// claims claim each draft id once per process (D2.3). A claim is never released,
+	// even when HEY refuses the send, so there's no rollback to get wrong.
+	claims *confirm.Claims
 }
 
 func newSender(cfg SendConfig) (*sender, error) {
@@ -120,46 +118,16 @@ func newSender(cfg SendConfig) (*sender, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
+	keys, err := confirm.EphemeralKeys()
+	if err != nil {
 		return nil, fmt.Errorf("make the confirmation key: %w", err)
 	}
-	return &sender{cfg: cfg, key: key, claims: newSendClaims()}, nil
+	return &sender{cfg: cfg, keys: keys, claims: confirm.NewClaims(claimTTL)}, nil
 }
 
-// sendClaims claims each draft id once per process (D2.3). A claim is never released,
-// even when HEY refuses the send, so there's no rollback to get wrong.
-type sendClaims struct {
-	mu     sync.Mutex
-	claims map[int64]time.Time
-}
-
-func newSendClaims() *sendClaims {
-	return &sendClaims{claims: map[int64]time.Time{}}
-}
-
-// claimed reports whether a draft was claimed within claimTTL.
-func (c *sendClaims) claimed(id int64, now time.Time) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	at, ok := c.claims[id]
-	return ok && now.Sub(at) < claimTTL
-}
-
-// claim takes a draft id, or reports it already taken.
-func (c *sendClaims) claim(id int64, now time.Time) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for k, at := range c.claims {
-		if now.Sub(at) >= claimTTL {
-			delete(c.claims, k)
-		}
-	}
-	if _, taken := c.claims[id]; taken {
-		return false
-	}
-	c.claims[id] = now
-	return true
+// claimID is a draft's id as the claims hold it.
+func claimID(draftID int64) string {
+	return strconv.FormatInt(draftID, 10)
 }
 
 const sendDescription = "Send a saved draft: the only way hey mcp delivers mail. " +
@@ -243,7 +211,7 @@ func (s *sender) handle(ctx context.Context, req *mcp.CallToolRequest) (*mcp.Cal
 // ask is the first round: review the draft and ask the person to confirm it.
 func (s *sender) ask(ctx context.Context, draftID int64) (*mcp.CallToolResult, error) {
 	// A draft this process sent isn't put to the person again.
-	if s.claims.claimed(draftID, s.cfg.Now()) {
+	if s.claims.Claimed(claimID(draftID), s.cfg.Now()) {
 		return alreadySent(), nil
 	}
 	snap, refusal := s.review(ctx, draftID)
@@ -251,17 +219,35 @@ func (s *sender) ask(ctx context.Context, draftID int64) (*mcp.CallToolResult, e
 		return refusal, nil
 	}
 
-	state := s.sign(confirmState{
-		Kind: confirmKind, Method: confirmMethod,
-		Grant: s.cfg.GrantKey, Origin: s.cfg.Origin, Draft: draftID,
-		Fingerprint: snap.fingerprint,
-		Expires:     s.cfg.Now().Add(confirmTTL).Unix(),
-	})
+	asked := s.asked(draftID)
+	asked.Digest = snap.fingerprint
+	asked.Expires = s.cfg.Now().Add(confirm.TTL).Unix()
+	state, err := s.keys.Sign(asked)
+	if err != nil {
+		return gateway.ErrorResult("not sent: hey mcp couldn't sign the confirmation (%v)", err), nil
+	}
 
 	return &mcp.CallToolResult{
-		InputRequests: mcp.InputRequestMap{confirmInputID: confirmElicitation(s.prompt(snap))},
-		RequestState:  state,
+		InputRequests: mcp.InputRequestMap{confirmInputID: confirm.Elicitation(s.prompt(snap), confirm.Field{
+			Title:       "Send this email",
+			Description: "Check to send it now. Anything else, or declining, sends nothing.",
+		})},
+		RequestState: state,
 	}, nil
+}
+
+// asked is what a confirmation of this draft is bound to: the draft, the HEY and the
+// sign-in. The fingerprint of what the person was shown is compared on its own, so a
+// changed draft is told apart from a different one.
+func (s *sender) asked(draftID int64) confirm.State {
+	return confirm.State{
+		Kind:     confirmKind,
+		Method:   confirmMethod,
+		Tool:     sendDraftName,
+		ArgsHash: confirm.HashArgs(draftID),
+		Identity: s.cfg.Origin,
+		Grant:    s.cfg.GrantKey,
+	}
 }
 
 func alreadySent() *mcp.CallToolResult {
@@ -271,16 +257,20 @@ func alreadySent() *mcp.CallToolResult {
 // confirmAndSend is the second round: the person's answer, then the checks again, the
 // claim, and the one send.
 func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState string, responses mcp.InputResponseMap) (*mcp.CallToolResult, error) {
-	state, err := s.verify(rawState)
+	state, err := s.keys.Verify(rawState, s.cfg.Now())
+	if errors.Is(err, confirm.ErrExpired) {
+		err = fmt.Errorf("it expired; a confirmation lasts %d minutes", int(confirm.TTL/time.Minute))
+	}
 	if err != nil {
 		return gateway.ErrorResult("the confirmation for this send isn't valid (%v), so nothing was sent; call send_draft again to ask again", err), nil
 	}
-	if state.Draft != draftID || state.Grant != s.cfg.GrantKey || state.Origin != s.cfg.Origin {
+	if !state.Matches(s.asked(draftID)) {
 		return gateway.ErrorResult("the confirmation was for a different draft or sign-in, so nothing was sent; call send_draft again"), nil
 	}
 
-	answer, _ := responses[confirmInputID].(*mcp.ElicitResult)
-	if answer == nil || answer.Action != "accept" || answer.Content["confirm"] != true {
+	// Only an accepted form with confirm: true sends. A decline, a cancel, a no, and an
+	// answer that is missing or malformed (yes is false with the error) all send nothing.
+	if yes, _ := confirm.Answer(responses, confirmInputID); !yes {
 		return s.notSent(draftID, "The send wasn't approved."), nil
 	}
 
@@ -288,7 +278,7 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 	if refusal != nil {
 		return refusal, nil
 	}
-	if !hmac.Equal([]byte(snap.fingerprint), []byte(state.Fingerprint)) {
+	if !hmac.Equal([]byte(snap.fingerprint), []byte(state.Digest)) {
 		return gateway.ErrorResult("not sent: the draft changed since you approved it (its recipients, sender, subject, body or attachments differ). Call send_draft again to review it as it is now"), nil
 	}
 
@@ -298,7 +288,7 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 	if err = s.checkGrant(ctx); err != nil {
 		return gateway.ErrorResult("not sent: %v", err), nil
 	}
-	if !s.claims.claim(draftID, s.cfg.Now()) {
+	if !s.claims.Claim(claimID(draftID), s.cfg.Now()) {
 		return alreadySent(), nil
 	}
 
@@ -392,43 +382,12 @@ func draftIDParam(params map[string]any) (int64, error) {
 	return id, nil
 }
 
-// clientRequest is any request that says what its client can do: a 2026-07-28 request
-// carries it in _meta, an older one has it from the session's initialize.
-type clientRequest interface {
-	ClientCapabilities() *mcp.ClientCapabilities
-}
-
-// canElicitForm reports whether the client can be asked: it declared form elicitation.
-// A client that declares the capability with neither mode is read as form, as the SDK
-// does.
+// canElicitForm reports whether the client can be asked: it declared form elicitation
+// (confirm.CanAsk). hey mcp serves one stdio session, where a legacy client is asked
+// through the SDK's elicitation/create and a 2026-07-28 one through input_required.
 func canElicitForm(req mcp.Request) bool {
-	r, ok := req.(clientRequest)
-	if !ok {
-		return false
-	}
-	caps := r.ClientCapabilities()
-	if caps == nil || caps.Elicitation == nil {
-		return false
-	}
-	return caps.Elicitation.Form != nil || caps.Elicitation.URL == nil
-}
-
-func confirmElicitation(message string) *mcp.ElicitParams {
-	return &mcp.ElicitParams{
-		Mode:    "form",
-		Message: message,
-		RequestedSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"confirm": map[string]any{
-					"type":        "boolean",
-					"title":       "Send this email",
-					"description": "Check to send it now. Anything else, or declining, sends nothing.",
-				},
-			},
-			"required": []any{"confirm"},
-		},
-	}
+	r, ok := req.(confirm.ClientRequest)
+	return ok && confirm.CanAsk(r, confirm.TransportStdio)
 }
 
 // --- the draft as reviewed ---
@@ -570,58 +529,4 @@ func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *mc
 		}
 	}
 	return snap, nil
-}
-
-// --- the signed confirmation state ---
-
-// confirmState is what the request state carries between the rounds: the draft's
-// fingerprint, bound to the sign-in and the HEY, with an expiry. It is signed with the
-// process's key, because a 2026-07-28 client holds it between the rounds.
-type confirmState struct {
-	Kind        string `json:"k"`
-	Method      string `json:"m"`
-	Grant       string `json:"g"`
-	Origin      string `json:"o"`
-	Draft       int64  `json:"d"`
-	Fingerprint string `json:"f"`
-	Expires     int64  `json:"e"`
-}
-
-func (s *sender) sign(state confirmState) string {
-	// A struct of strings and integers always marshals.
-	payload, _ := json.Marshal(state)
-	mac := hmac.New(sha256.New, s.key)
-	mac.Write(payload)
-	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-}
-
-func (s *sender) verify(raw string) (*confirmState, error) {
-	encoded, signature, ok := strings.Cut(raw, ".")
-	if !ok {
-		return nil, errors.New("malformed")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		return nil, errors.New("malformed")
-	}
-	given, err := base64.RawURLEncoding.DecodeString(signature)
-	if err != nil {
-		return nil, errors.New("malformed")
-	}
-	mac := hmac.New(sha256.New, s.key)
-	mac.Write(payload)
-	if !hmac.Equal(given, mac.Sum(nil)) {
-		return nil, errors.New("signature doesn't match")
-	}
-	var state confirmState
-	if err := json.Unmarshal(payload, &state); err != nil {
-		return nil, errors.New("malformed")
-	}
-	if state.Kind != confirmKind || state.Method != confirmMethod {
-		return nil, errors.New("not a send confirmation")
-	}
-	if !s.cfg.Now().Before(time.Unix(state.Expires, 0)) {
-		return nil, fmt.Errorf("it expired; a confirmation lasts %d minutes", int(confirmTTL/time.Minute))
-	}
-	return &state, nil
 }

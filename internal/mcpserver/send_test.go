@@ -18,6 +18,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/basecamp/mcp/confirm"
 	"github.com/basecamp/mcp/mcptest"
 )
 
@@ -507,16 +508,23 @@ func TestAForgedOrExpiredConfirmationSendsNothing(t *testing.T) {
 		},
 		"made up": func(*sendRig, string) string { return "eyJrIjoic2VuZF9kcmFmdCJ9.c2lnbmF0dXJl" },
 		"expired": func(rig *sendRig, state string) string {
-			rig.clock.advance(confirmTTL + time.Second)
+			rig.clock.advance(confirm.TTL + time.Second)
 			return state
 		},
 		"another process's key": func(_ *sendRig, state string) string {
-			other := &sender{key: []byte("a different process's key......."), cfg: SendConfig{Now: time.Now}}
+			other, err := confirm.EphemeralKeys()
+			if err != nil {
+				panic(err)
+			}
 			payload, _, _ := strings.Cut(state, ".")
 			raw, _ := base64Decode(payload)
-			var st confirmState
+			var st confirm.State
 			_ = json.Unmarshal(raw, &st)
-			return other.sign(st)
+			signed, err := other.Sign(st)
+			if err != nil {
+				panic(err)
+			}
+			return signed
 		},
 	}
 	for name, forge := range cases {
@@ -714,7 +722,7 @@ func TestAGrantNarrowedDuringTheReviewDoesntClaimTheDraft(t *testing.T) {
 	if result := sendDraft(t, session); !result.IsError {
 		t.Fatalf("sent on a grant narrowed below sending: %s", resultText(t, result))
 	}
-	if rig.server.sender.claims.claimed(5, rig.clock.Now()) {
+	if rig.server.sender.claims.Claimed("5", rig.clock.Now()) {
 		t.Error("the draft was claimed anyway")
 	}
 }
