@@ -11,13 +11,13 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/basecamp/actioncable-client/go/v2 v2.0.2
 	github.com/basecamp/hey-sdk/go v0.35.0
-	github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d
+	github.com/basecamp/mcp v0.0.0-20261118214004-663b2e5d2836
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.2
 	github.com/itchyny/gojq v0.12.20
 	github.com/mattn/go-runewidth v0.0.31
-	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/modelcontextprotocol/go-sdk v1.8.1-0.20261014132652-7c486efa8223
 	github.com/rivo/uniseg v0.4.7
 	github.com/sigstore/sigstore-go v1.4.0
 	github.com/spf13/cobra v1.10.2
