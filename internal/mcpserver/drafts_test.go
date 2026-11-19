@@ -372,6 +372,7 @@ func TestDescribeServesTheDraftOnlyContract(t *testing.T) {
 				Summary string `json:"summary"`
 				Doc     string `json:"doc"`
 				Body    struct {
+					Required   []string `json:"required"`
 					Properties struct {
 						Entry struct {
 							Properties           map[string]map[string]any `json:"properties"`
@@ -398,6 +399,11 @@ func TestDescribeServesTheDraftOnlyContract(t *testing.T) {
 			}
 			if entry.AdditionalProperties == nil || *entry.AdditionalProperties {
 				t.Error("entry schema admits other properties")
+			}
+			// An update may leave acting_sender_id out to keep the draft's
+			// sender; a new draft still names one.
+			if requires := slices.Contains(op.Body.Required, "acting_sender_id"); requires == (action == "update_message") {
+				t.Errorf("%s body required = %v", action, op.Body.Required)
 			}
 		})
 	}

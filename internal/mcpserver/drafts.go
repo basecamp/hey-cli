@@ -256,12 +256,34 @@ func holdToDrafts(cat *catalog.Catalog) error {
 			if err != nil {
 				return fmt.Errorf("%s: %w", op.ID, err)
 			}
+			if op.ID == "UpdateMessage" {
+				// The model reuses CreateMessage's body, which requires
+				// acting_sender_id; an update may leave it out to keep the
+				// address the draft sends from (keepSavedSender).
+				dropRequired(body, "acting_sender_id")
+			}
 			op.Body = body
 			op.Summary = strings.TrimSuffix(op.Summary, ".") + " (saved as a draft, never sent)"
 			op.Doc = draftDoc + op.Doc
 		}
 	}
 	return nil
+}
+
+// dropRequired takes name out of a JSON schema's required list.
+func dropRequired(schema map[string]any, name string) {
+	required, _ := schema["required"].([]any)
+	kept := make([]any, 0, len(required))
+	for _, r := range required {
+		if r != name {
+			kept = append(kept, r)
+		}
+	}
+	if len(kept) == 0 {
+		delete(schema, "required")
+		return
+	}
+	schema["required"] = kept
 }
 
 // draftBody returns a copy of body whose entry allows only draftEntryKeys,
