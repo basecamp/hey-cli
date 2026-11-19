@@ -25,9 +25,9 @@ type replyRecipients = mail.ReplyRecipients
 // either: HEY never derives one,
 // so a reply sent without it saves drafts that read "No subject" in Drafts.
 // ActingSenderID is the identity the reply goes out as: the sender HEY resolved for
-// the thread (or an explicit --from override), which on a shared or alternate address
-// is not the account default; zero
-// (the prefill named none, or was unreachable) leaves the SDK on the account default.
+// the thread, else the acting user's own contact (or an explicit --from override),
+// which on a shared or alternate address is not the account default; zero (the
+// prefill was unreachable) leaves the SDK on the account default.
 type threadReplyTarget struct {
 	EntryID            int64
 	AccountID          int64

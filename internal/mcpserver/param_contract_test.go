@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/basecamp/mcp/catalog"
@@ -217,7 +218,13 @@ type reachFunc func(in, name string, value any) bool
 func send(t *testing.T, domain *catalog.Domain, op *catalog.Operation, params map[string]any) (reachFunc, string) {
 	t.Helper()
 	api := &fakeAPI{}
-	res, err := dispatcher{api: api}.handle(context.Background(), domain, gateway.Operation{Action: op.Action}, params)
+	var client API = api
+	if op.ID == "UpdateMessage" {
+		// An update without acting_sender_id first reads the draft's
+		// sender (keepSavedSender); that read isn't the request checked.
+		client = savedSenderAPI{api}
+	}
+	res, err := dispatcher{api: client}.handle(context.Background(), domain, gateway.Operation{Action: op.Action}, params)
 	if err != nil {
 		t.Fatalf("%s: %v", op.Action, err)
 	}
@@ -338,4 +345,16 @@ func decoded(t *testing.T, body any) map[string]any {
 	}
 	m, _ := roundTrip(t, body).(map[string]any)
 	return m
+}
+
+// savedSenderAPI answers a draft's edit state, as the draft the path names,
+// with the sender it was saved as, unrecorded, and passes every other
+// request to the fake.
+type savedSenderAPI struct{ *fakeAPI }
+
+func (a savedSenderAPI) Get(ctx context.Context, path string) (*hey.Response, error) {
+	if id, ok := strings.CutSuffix(strings.TrimPrefix(path, "/messages/"), "/edit.json"); ok {
+		return &hey.Response{StatusCode: 200, Data: []byte(`{"id":` + id + `,"creator":{"id":1}}`)}, nil
+	}
+	return a.fakeAPI.Get(ctx, path)
 }

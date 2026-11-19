@@ -70,6 +70,14 @@ func (d dispatcher) handle(ctx context.Context, dom gateway.Domain, op gateway.O
 		return gateway.ErrorResult("%v", err), nil
 	}
 
+	if full.ID == "UpdateMessage" {
+		kept, err := keepSavedSender(ctx, d.api, full.Action, params)
+		if err != nil {
+			return gateway.ErrorResult("%v", err), nil
+		}
+		params = kept
+	}
+
 	path, body, err := buildRequest(full, params)
 	if err != nil {
 		return gateway.ErrorResult("%v", err), nil

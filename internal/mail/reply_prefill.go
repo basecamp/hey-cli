@@ -37,8 +37,8 @@ type ReplyPrefill struct {
 // ReplyPrefillFromServer asks HEY how a reply to the entry starts out
 // (GET /entries/{id}/replies/new): the "Re: …" subject the reply carries; the sender
 // it goes out as — resolved from the entry's own to and from addresses, so a thread on
-// a shared or alternate address answers as that address, not the account default, and
-// named only when it differs from the acting user; and its recipients — the entry's
+// a shared or alternate address answers as that address, not the account default, or
+// else the acting user's own contact; and its recipients — the entry's
 // sender moved onto the To line and the acting user's own addresses, aliases and
 // catch-alls excluded — the exclusion no client can compute locally, and the reason
 // a reply used to be able to CC its writer back to themselves. A false answer sends
@@ -52,13 +52,17 @@ func ReplyPrefillFromServer(ctx context.Context, client *hey.Client, entryID int
 	if err != nil || prefilled == nil {
 		return ReplyPrefill{}, false
 	}
+	// HEY names the prefill's sender only when it differs from the acting user's
+	// own contact, the creator; zero would leave the SDK on the account's default
+	// sender, which need not be that address.
+	sentAs := hey.ReplySentAs(prefilled)
 	prefill := ReplyPrefill{
 		Subject:        prefilled.Subject,
-		ActingSenderID: prefilled.Sender.Id,
+		ActingSenderID: sentAs.Id,
 		Sender: ReplySender{
-			ID:           prefilled.Sender.Id,
-			Name:         prefilled.Sender.Name,
-			EmailAddress: prefilled.Sender.EmailAddress,
+			ID:           sentAs.Id,
+			Name:         sentAs.Name,
+			EmailAddress: sentAs.EmailAddress,
 		},
 		Addressed: ReplyRecipients{
 			To:  contactEmails(prefilled.Addressed.Directly),

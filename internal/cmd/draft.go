@@ -38,7 +38,7 @@ type draftOutput struct {
 
 func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 	out := draftOutput{
-		From:    edit.Sender.EmailAddress,
+		From:    hey.DraftSentAs(edit).EmailAddress,
 		ID:      id,
 		Subject: edit.Subject,
 		Body:    htmlutil.ToMarkdown(edit.Content),
@@ -47,9 +47,6 @@ func draftOutputFor(id int64, edit *generated.MessageEditState) draftOutput {
 		BCC:     addressEmails(edit.Addressed.Blindcopied),
 		IsReply: edit.IsReply,
 		AppURL:  draftAppURL(id),
-	}
-	if edit.Sender.Id == 0 {
-		out.From = edit.Creator.EmailAddress
 	}
 	if !edit.ScheduledDeliveryAt.IsZero() {
 		at := edit.ScheduledDeliveryAt
@@ -78,37 +75,6 @@ func parseDraftID(arg string) (int64, error) {
 		return 0, apierr.ErrUsage(fmt.Sprintf("invalid draft ID: %s", arg))
 	}
 	return id, nil
-}
-
-// draftContentFrom is the edit state as the full DraftContent an update resends. HEY
-// revises a draft from the whole request, so every verb that writes one starts here.
-func draftContentFrom(edit *generated.MessageEditState) hey.DraftContent {
-	content := hey.DraftContent{
-		Subject: edit.Subject,
-		Content: edit.Content,
-		To:      addressEmails(edit.Addressed.Directly),
-		CC:      addressEmails(edit.Addressed.Copied),
-		BCC:     addressEmails(edit.Addressed.Blindcopied),
-
-		// The identity the draft was saved as rides every rewrite, or a draft
-		// composed from a shared or alternate address would be handed back to
-		// the account default by its first edit or the final send.
-		ActingSenderID: edit.Sender.Id,
-	}
-	if content.ActingSenderID == 0 {
-		// HEY omits sender when the draft is sent as its creator contact.
-		content.ActingSenderID = edit.Creator.Id
-	}
-	if !edit.ScheduledDeliveryAt.IsZero() {
-		// HEY's API reads a schedule's date and hour in UTC (ApiRequest sets
-		// Time.zone to UTC for every JSON request), so the served UTC moment is
-		// said back as its own UTC date and hour — the exact round-trip, whatever
-		// clock the host or the identity keeps. Proven live: an identity-zone
-		// conversion here moved a 09:00Z delivery to 04:00Z on the first edit.
-		at := edit.ScheduledDeliveryAt.UTC()
-		content.Schedule = &hey.DraftSchedule{Date: at.Format("2006-01-02"), Hour: at.Hour()}
-	}
-	return content
 }
 
 // preservableSchedule refuses an edit that could not keep the draft's scheduled
@@ -262,7 +228,7 @@ func (c *draftEditCommand) run(cmd *cobra.Command, args []string) error {
 	if scheduleErr := preservableSchedule(edit); scheduleErr != nil {
 		return scheduleErr
 	}
-	content := draftContentFrom(edit)
+	content := hey.DraftContentFromEdit(edit)
 
 	flags := cmd.Flags()
 	fieldFlagged := flags.Changed("from")
@@ -402,7 +368,7 @@ func (c *draftSendCommand) run(cmd *cobra.Command, args []string) error {
 	if edit == nil {
 		return apierr.ErrNotFound("draft", args[0])
 	}
-	content := draftContentFrom(edit)
+	content := hey.DraftContentFromEdit(edit)
 	if len(content.To)+len(content.CC)+len(content.BCC) == 0 {
 		return apierr.ErrUsageHint("the draft has no recipients", fmt.Sprintf("hey draft edit %d --to <email>", draftID))
 	}

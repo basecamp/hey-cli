@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,8 +10,10 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
+	"github.com/basecamp/hey-sdk/go/pkg/generated"
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/mcp/catalog"
@@ -80,6 +83,56 @@ func draftOnly(action string, params map[string]any) (map[string]any, error) {
 		out = map[string]any{}
 	}
 	out["entry"] = entry
+	return out, nil
+}
+
+// draftEditPath is GetMessageEdit's path, where keepSavedSender reads the
+// identity a draft was saved as. TestDraftEditPathIsTheModels holds it to the
+// catalog.
+const draftEditPath = "/messages/{messageId}/edit.json"
+
+// keepSavedSender gives an update_message that leaves out acting_sender_id the
+// identity the draft was saved as: its sender, else its creator
+// (hey.DraftSentAs). HEY revises a draft from the whole request, and a revision
+// without acting_sender_id drops the draft's sender, so a draft saved from a
+// shared or alternate address would quietly move to the account's own. A
+// sender the caller chose is left as it is. params is not modified.
+func keepSavedSender(ctx context.Context, api API, action string, params map[string]any) (map[string]any, error) {
+	if given, ok := params["acting_sender_id"]; ok && given != nil {
+		return params, nil
+	}
+	id, err := scalarString(params["messageId"])
+	if _, given := params["messageId"]; !given || err != nil {
+		// buildRequest names the missing or unusable path parameter.
+		return params, nil //nolint:nilerr // reported by buildRequest instead
+	}
+	unread := func(why string) error {
+		return fmt.Errorf("%s keeps the address a draft sends from, and couldn't read draft %s's: %s. Nothing was changed. Pass acting_sender_id to choose it",
+			action, id, why)
+	}
+	resp, err := api.Get(ctx, strings.ReplaceAll(draftEditPath, "{messageId}", url.PathEscape(id)))
+	if err != nil {
+		return nil, unread(err.Error())
+	}
+	var edit generated.MessageEditState
+	var page struct {
+		Postings any `json:"postings"`
+	}
+	if json.Unmarshal(resp.Data, &edit) != nil || json.Unmarshal(resp.Data, &page) != nil {
+		return nil, unread("HEY's answer was unreadable")
+	}
+	// HEY answers the edit page of a sent or deleted draft by redirecting to
+	// the Imbox, which the client follows; only the draft's own answer names
+	// the identity it was saved as.
+	if strconv.FormatInt(edit.Id, 10) != id || page.Postings != nil {
+		return nil, unread("it isn't a draft any more: it was sent or deleted")
+	}
+	sentAs := hey.DraftSentAs(&edit).Id
+	if sentAs == 0 {
+		return nil, unread("HEY named no sender for it")
+	}
+	out := maps.Clone(params)
+	out["acting_sender_id"] = sentAs
 	return out, nil
 }
 
@@ -185,7 +238,7 @@ func draftResult(resp *hey.Response, sendable bool) map[string]any {
 
 // draftDoc leads the description of each draft-first operation, so describe
 // tells the caller what this server does rather than what the wire can do.
-const draftDoc = "Through hey mcp this only saves a draft: entry.status is always \"drafted\", and entry takes only addressed. It never delivers or schedules mail, and a request to send, schedule or triage is refused before HEY is contacted. Updating a scheduled draft clears its schedule. To deliver, " + howToSend + ". HEY's description of the endpoint follows; its delivery and scheduling paths aren't reachable here.\n\n"
+const draftDoc = "Through hey mcp this only saves a draft: entry.status is always \"drafted\", and entry takes only addressed. It never delivers or schedules mail, and a request to send, schedule or triage is refused before HEY is contacted. Updating a scheduled draft clears its schedule. Updating a draft without acting_sender_id keeps the address it sends from. To deliver, " + howToSend + ". HEY's description of the endpoint follows; its delivery and scheduling paths aren't reachable here.\n\n"
 
 // holdToDrafts rewrites each draft-first operation in the catalog to
 // describe the draft-only contract: its summary (which the tool description
@@ -203,12 +256,34 @@ func holdToDrafts(cat *catalog.Catalog) error {
 			if err != nil {
 				return fmt.Errorf("%s: %w", op.ID, err)
 			}
+			if op.ID == "UpdateMessage" {
+				// The model reuses CreateMessage's body, which requires
+				// acting_sender_id; an update may leave it out to keep the
+				// address the draft sends from (keepSavedSender).
+				dropRequired(body, "acting_sender_id")
+			}
 			op.Body = body
 			op.Summary = strings.TrimSuffix(op.Summary, ".") + " (saved as a draft, never sent)"
 			op.Doc = draftDoc + op.Doc
 		}
 	}
 	return nil
+}
+
+// dropRequired takes name out of a JSON schema's required list.
+func dropRequired(schema map[string]any, name string) {
+	required, _ := schema["required"].([]any)
+	kept := make([]any, 0, len(required))
+	for _, r := range required {
+		if r != name {
+			kept = append(kept, r)
+		}
+	}
+	if len(kept) == 0 {
+		delete(schema, "required")
+		return
+	}
+	schema["required"] = kept
 }
 
 // draftBody returns a copy of body whose entry allows only draftEntryKeys,

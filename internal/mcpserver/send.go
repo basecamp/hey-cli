@@ -443,7 +443,7 @@ func snapshotOf(edit *generated.MessageEditState) (*draftSnapshot, error) {
 	}
 	snap := &draftSnapshot{
 		id:        edit.Id,
-		from:      edit.Sender,
+		from:      hey.DraftSentAs(edit),
 		to:        edit.Addressed.Directly,
 		cc:        edit.Addressed.Copied,
 		bcc:       edit.Addressed.Blindcopied,
@@ -451,11 +451,8 @@ func snapshotOf(edit *generated.MessageEditState) (*draftSnapshot, error) {
 		body:      body,
 		scheduled: edit.ScheduledDeliveryAt,
 	}
-	// HEY omits sender when the draft is sent as its creator contact, and the identity
-	// the draft was saved as rides the send (cmd's draftContentFrom does the same).
-	if snap.from.Id == 0 {
-		snap.from = edit.Creator
-	}
+	// The identity the draft was saved as rides the send: its sender, else its
+	// creator, which HEY names alone when the draft is sent as the creator contact.
 	snap.actingSenderID = snap.from.Id
 
 	sorted := func(contacts []generated.Contact) []string {

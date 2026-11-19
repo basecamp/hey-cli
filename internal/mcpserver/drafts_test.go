@@ -372,6 +372,7 @@ func TestDescribeServesTheDraftOnlyContract(t *testing.T) {
 				Summary string `json:"summary"`
 				Doc     string `json:"doc"`
 				Body    struct {
+					Required   []string `json:"required"`
 					Properties struct {
 						Entry struct {
 							Properties           map[string]map[string]any `json:"properties"`
@@ -398,6 +399,11 @@ func TestDescribeServesTheDraftOnlyContract(t *testing.T) {
 			}
 			if entry.AdditionalProperties == nil || *entry.AdditionalProperties {
 				t.Error("entry schema admits other properties")
+			}
+			// An update may leave acting_sender_id out to keep the draft's
+			// sender; a new draft still names one.
+			if requires := slices.Contains(op.Body.Required, "acting_sender_id"); requires == (action == "update_message") {
+				t.Errorf("%s body required = %v", action, op.Body.Required)
 			}
 		})
 	}
@@ -533,4 +539,124 @@ func TestDescribeServesNoWireMechanics(t *testing.T) {
 			})
 		}
 	}
+}
+
+// routedAPI answers each request by method and path, and records every one.
+type routedAPI struct {
+	fakeAPI
+	routes map[string]*hey.Response
+	calls  []string
+}
+
+func (r *routedAPI) answer(method, path string, body any) (*hey.Response, error) {
+	r.calls = append(r.calls, method+" "+path)
+	if method != "GET" {
+		r.method, r.path, r.body = method, path, body
+	}
+	if resp, ok := r.routes[method+" "+path]; ok {
+		return resp, nil
+	}
+	return nil, &hey.Error{HTTPStatus: http.StatusNotFound, Message: "not found"}
+}
+
+func (r *routedAPI) Get(_ context.Context, path string) (*hey.Response, error) {
+	return r.answer("GET", path, nil)
+}
+func (r *routedAPI) Put(_ context.Context, path string, body any) (*hey.Response, error) {
+	return r.answer("PUT", path, body)
+}
+
+func editState(json string) *hey.Response {
+	return &hey.Response{StatusCode: http.StatusOK, Data: []byte(json)}
+}
+
+// An update_message without acting_sender_id keeps the identity the draft was
+// saved as: HEY drops a draft's sender from a revision that names none, so a
+// draft from a shared or alternate address would move to the account's own.
+func TestUpdateMessageKeepsTheSavedSender(t *testing.T) {
+	cases := map[string]struct {
+		edit string
+		want float64
+	}{
+		"saved from an alternate address": {`{"id":5,"sender":{"id":215},"creator":{"id":11}}`, 215},
+		"saved from the person's own":     {`{"id":5,"creator":{"id":11}}`, 11},
+		"with null postings":              {`{"id":5,"postings":null,"creator":{"id":11}}`, 11},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			api := &routedAPI{routes: map[string]*hey.Response{
+				"GET /messages/5/edit.json": editState(tc.edit),
+				"PUT /messages/5":           draftSaved("/messages/5"),
+			}}
+			params := paramsFor("update_message", nil)
+			delete(params, "acting_sender_id")
+			if text, isError := callThreads(t, api, "update_message", params); isError {
+				t.Fatalf("update refused: %s", text)
+			}
+			if got := sentBody(t, &api.fakeAPI)["acting_sender_id"]; got != tc.want {
+				t.Errorf("acting_sender_id = %v, want %v", got, tc.want)
+			}
+			if _, given := params["acting_sender_id"]; given {
+				t.Error("the caller's params were modified")
+			}
+		})
+	}
+}
+
+// A sender the caller chose is theirs: no read, no override.
+func TestUpdateMessageWithASenderSendsIt(t *testing.T) {
+	api := &routedAPI{routes: map[string]*hey.Response{"PUT /messages/5": draftSaved("/messages/5")}}
+	if text, isError := callThreads(t, api, "update_message", paramsFor("update_message", nil)); isError {
+		t.Fatalf("update refused: %s", text)
+	}
+	if !reflect.DeepEqual(api.calls, []string{"PUT /messages/5"}) {
+		t.Errorf("calls = %v, want the update alone", api.calls)
+	}
+	if got := sentBody(t, &api.fakeAPI)["acting_sender_id"]; got != float64(1) {
+		t.Errorf("acting_sender_id = %v, want the caller's 1", got)
+	}
+}
+
+// When the draft's identity can't be read, nothing is changed: an update
+// without it is the one that moves the draft.
+func TestUpdateMessageRefusesWhenTheSavedSenderIsUnknown(t *testing.T) {
+	cases := map[string]map[string]*hey.Response{
+		"edit unreadable":  {},
+		"names no sender":  {"GET /messages/5/edit.json": editState(`{"id":5}`)},
+		"garbled response": {"GET /messages/5/edit.json": editState(`not json`)},
+		// A sent or deleted draft's edit page redirects to a box, which the
+		// client follows: its identity isn't the draft's.
+		"another message's": {"GET /messages/5/edit.json": editState(`{"id":6,"sender":{"id":215}}`)},
+		"a box's postings":  {"GET /messages/5/edit.json": editState(`{"id":5,"postings":[],"creator":{"id":11}}`)},
+	}
+	for name, routes := range cases {
+		t.Run(name, func(t *testing.T) {
+			routes["PUT /messages/5"] = draftSaved("/messages/5")
+			api := &routedAPI{routes: routes}
+			params := paramsFor("update_message", nil)
+			delete(params, "acting_sender_id")
+			text, isError := callThreads(t, api, "update_message", params)
+			if !isError || !strings.Contains(text, "Nothing was changed") || !strings.Contains(text, "acting_sender_id") {
+				t.Errorf("result = %q (error %v), want a refusal naming acting_sender_id", text, isError)
+			}
+			if slices.Contains(api.calls, "PUT /messages/5") {
+				t.Error("the draft was revised anyway")
+			}
+		})
+	}
+}
+
+func TestDraftEditPathIsTheModels(t *testing.T) {
+	cat := loadForTest(t)
+	for _, d := range cat.Domains {
+		for _, op := range d.Operations {
+			if op.ID == "GetMessageEdit" {
+				if op.Path != draftEditPath {
+					t.Errorf("GetMessageEdit path = %q, draftEditPath = %q", op.Path, draftEditPath)
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("GetMessageEdit isn't in the catalog")
 }
