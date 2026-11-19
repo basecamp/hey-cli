@@ -62,6 +62,29 @@ func TestReplyPrefillFromServer(t *testing.T) {
 	}
 }
 
+// HEY names the prefill's sender only when it differs from the acting user's own
+// contact, so a reply from the person's own address carries the creator alone. That
+// creator is the identity it goes out as: zero would leave the SDK on the account's
+// default sender, which need not be the person's own address.
+func TestReplyPrefillFromServerGoesOutAsTheCreatorWithoutASender(t *testing.T) {
+	client := replyPrefillClient(t, `{
+		"subject": "Re: Weekly sync", "is_reply": true,
+		"creator": {"id": 77, "name": "Maria", "email_address": "maria@hey.com"},
+		"addressed": {"directly": [{"id": 31, "email_address": "rick@example.com"}]}
+	}`)
+
+	prefill, ok := ReplyPrefillFromServer(context.Background(), client, 12)
+	if !ok {
+		t.Fatal("an addressed prefill answers; no fallback is needed")
+	}
+	if prefill.ActingSenderID != 77 {
+		t.Errorf("acting sender = %d, want the creator's 77", prefill.ActingSenderID)
+	}
+	if want := (ReplySender{ID: 77, Name: "Maria", EmailAddress: "maria@hey.com"}); prefill.Sender != want {
+		t.Errorf("sender = %+v, want %+v", prefill.Sender, want)
+	}
+}
+
 // The subject and sender are answered even when the recipients are not: on a thread
 // with yourself, everyone HEY excludes is everyone there is, and only the recipients
 // need the caller's local fallback.

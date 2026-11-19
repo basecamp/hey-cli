@@ -15782,11 +15782,11 @@
           },
           "scheduled_delivery_at_date": {
             "type": "string",
-            "description": "The delivery date: YYYY-MM-DD, \"today\" or \"tomorrow\", read in the identity's\ntime zone."
+            "description": "The delivery date: YYYY-MM-DD, \"today\" or \"tomorrow\", read in UTC, as HEY's\nAPI reads every JSON request's times."
           },
           "scheduled_delivery_at_hour": {
             "type": "string",
-            "description": "The delivery hour, \"0\" through \"23\" — a string so that midnight survives\nomitempty. HEY schedules to the hour."
+            "description": "The delivery hour, \"0\" through \"23\", in UTC like the date — a string so that\nmidnight survives omitempty. HEY schedules to the hour."
           }
         }
       },
