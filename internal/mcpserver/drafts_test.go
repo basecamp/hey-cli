@@ -498,3 +498,39 @@ func TestEveryServedOpenWorldOperationIsDraftFirst(t *testing.T) {
 		}
 	}
 }
+
+// describe serves what a client can use. A paged read answers its next page as
+// a cursor in the result, not the Link or X-Total-Count headers HEY's wire
+// uses, and writes go out once, so neither HTTP pagination nor a retry policy
+// is described.
+func TestDescribeServesNoWireMechanics(t *testing.T) {
+	_, session := connect(t, &fakeAPI{}, Config{})
+	for tool, actions := range map[string][]string{
+		"hey_contacts": {"list_contacts"},
+		"hey_threads":  {"create_message", "update_message"},
+		"hey_calendar": {"toggle_calendar"},
+	} {
+		for _, action := range actions {
+			t.Run(action, func(t *testing.T) {
+				text, isError := mcptest.CallText(t, session, tool, map[string]any{
+					"action": "describe", "params": map[string]any{"action": action},
+				})
+				if isError {
+					t.Fatal(text)
+				}
+				var op map[string]any
+				if err := json.Unmarshal([]byte(text), &op); err != nil {
+					t.Fatalf("describe %s: %v", action, err)
+				}
+				for _, key := range []string{"pagination", "retry"} {
+					if _, ok := op[key]; ok {
+						t.Errorf("describe %s serves %s: %v", action, key, op[key])
+					}
+				}
+				if strings.Contains(text, "X-Total-Count") {
+					t.Errorf("describe %s names a header the result never carries", action)
+				}
+			})
+		}
+	}
+}

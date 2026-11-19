@@ -30,9 +30,30 @@ func loadCatalog(readOnly bool) (*catalog.Catalog, error) {
 	if err != nil {
 		return nil, fmt.Errorf("embedded model: %w", err)
 	}
-	return catalog.Load(catalog.Spec{
+	cat, err := catalog.Load(catalog.Spec{
 		ToolPrefix: "hey_",
 		Domains:    domainSpecs(readOnly),
 		Model:      model,
 	})
+	if err != nil {
+		return nil, err
+	}
+	hideWireMechanics(cat)
+	return cat, nil
+}
+
+// hideWireMechanics drops each operation's HTTP pagination and retry policy
+// from what describe serves. They are how this server talks to HEY, not how a
+// client talks to it: a paged read answers its next page as a cursor in the
+// result (dispatch.go), never as the Link or X-Total-Count headers the model
+// describes, and every write goes out once (the CLI's single-shot client), so
+// a client that followed a write's retry policy could save or toggle twice.
+// Paginated stays: it says a read has more pages.
+func hideWireMechanics(cat *catalog.Catalog) {
+	for _, d := range cat.Domains {
+		for _, op := range d.Operations {
+			op.Pagination = nil
+			op.Retry = nil
+		}
+	}
 }
