@@ -574,6 +574,7 @@ func TestUpdateMessageKeepsTheSavedSender(t *testing.T) {
 	}{
 		"saved from an alternate address": {`{"id":5,"sender":{"id":215},"creator":{"id":11}}`, 215},
 		"saved from the person's own":     {`{"id":5,"creator":{"id":11}}`, 11},
+		"with null postings":              {`{"id":5,"postings":null,"creator":{"id":11}}`, 11},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -617,6 +618,10 @@ func TestUpdateMessageRefusesWhenTheSavedSenderIsUnknown(t *testing.T) {
 		"edit unreadable":  {},
 		"names no sender":  {"GET /messages/5/edit.json": editState(`{"id":5}`)},
 		"garbled response": {"GET /messages/5/edit.json": editState(`not json`)},
+		// A sent or deleted draft's edit page redirects to a box, which the
+		// client follows: its identity isn't the draft's.
+		"another message's": {"GET /messages/5/edit.json": editState(`{"id":6,"sender":{"id":215}}`)},
+		"a box's postings":  {"GET /messages/5/edit.json": editState(`{"id":5,"postings":[],"creator":{"id":11}}`)},
 	}
 	for name, routes := range cases {
 		t.Run(name, func(t *testing.T) {

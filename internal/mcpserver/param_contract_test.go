@@ -347,13 +347,14 @@ func decoded(t *testing.T, body any) map[string]any {
 	return m
 }
 
-// savedSenderAPI answers a draft's edit state with the sender it was saved
-// as, unrecorded, and passes every other request to the fake.
+// savedSenderAPI answers a draft's edit state, as the draft the path names,
+// with the sender it was saved as, unrecorded, and passes every other
+// request to the fake.
 type savedSenderAPI struct{ *fakeAPI }
 
 func (a savedSenderAPI) Get(ctx context.Context, path string) (*hey.Response, error) {
-	if strings.HasSuffix(path, "/edit.json") {
-		return &hey.Response{StatusCode: 200, Data: []byte(`{"creator":{"id":1}}`)}, nil
+	if id, ok := strings.CutSuffix(strings.TrimPrefix(path, "/messages/"), "/edit.json"); ok {
+		return &hey.Response{StatusCode: 200, Data: []byte(`{"id":` + id + `,"creator":{"id":1}}`)}, nil
 	}
 	return a.fakeAPI.Get(ctx, path)
 }

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
@@ -114,8 +115,17 @@ func keepSavedSender(ctx context.Context, api API, action string, params map[str
 		return nil, unread(err.Error())
 	}
 	var edit generated.MessageEditState
-	if err := json.Unmarshal(resp.Data, &edit); err != nil {
+	var page struct {
+		Postings any `json:"postings"`
+	}
+	if json.Unmarshal(resp.Data, &edit) != nil || json.Unmarshal(resp.Data, &page) != nil {
 		return nil, unread("HEY's answer was unreadable")
+	}
+	// HEY answers the edit page of a sent or deleted draft by redirecting to
+	// the Imbox, which the client follows; only the draft's own answer names
+	// the identity it was saved as.
+	if strconv.FormatInt(edit.Id, 10) != id || page.Postings != nil {
+		return nil, unread("it isn't a draft any more: it was sent or deleted")
 	}
 	sentAs := hey.DraftSentAs(&edit).Id
 	if sentAs == 0 {
