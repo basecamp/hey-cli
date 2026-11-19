@@ -93,8 +93,8 @@ github.com/basecamp/actioncable-client/go/v2 v2.0.2 h1:h2Sl15gj2lI/EX5E0EUxjyYgf
 github.com/basecamp/actioncable-client/go/v2 v2.0.2/go.mod h1:3Y0N9V5LXclT5nQWcPhq/+6rj4eKXgKAX8dx15X8yB8=
 github.com/basecamp/hey-sdk/go v0.35.0 h1:gV9Y8JweijV8vKeIQvkYj1Kk+liq3iuJNoOnUgVD4BA=
 github.com/basecamp/hey-sdk/go v0.35.0/go.mod h1:ILC2upnVketSzbZTcN1iICeCpjCqvYpIflYcEVrgigw=
-github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d h1:zEQVGq1x1nhKMZ2TudFAcSJ32CHT8richI1vQakIKz4=
-github.com/basecamp/mcp v0.0.0-20260828100356-2d6f44b51e9d/go.mod h1:Ee2c/q1/pg+5T5741PIuA3s6VJMQC7I0XBNXIHIujzA=
+github.com/basecamp/mcp v0.0.0-20261118214004-663b2e5d2836 h1:ND4te8b+HVFFrgcm7+n8P83MKKPqBpIyoJ63tT9liRU=
+github.com/basecamp/mcp v0.0.0-20261118214004-663b2e5d2836/go.mod h1:K3sgTH90CIR6Ed0XPnivIBqNIpw6aeOlcXThBrZ+2gc=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
 github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
@@ -287,8 +287,8 @@ github.com/mitchellh/go-homedir v1.1.0 h1:lukF9ziXFxDFPkA1vsr5zpc1XuPDn/wFntq5mG
 github.com/mitchellh/go-homedir v1.1.0/go.mod h1:SfyaCUpYCn1Vlf4IUYiD9fPX4A5wJrkLzIz1N1q0pr0=
 github.com/mitchellh/mapstructure v1.5.0 h1:jeMsZIYE/09sWLaz43PL7Gy6RuMjD2eJVyuac5Z2hdY=
 github.com/mitchellh/mapstructure v1.5.0/go.mod h1:bFUtVrKA4DC2yAKiSyO/QUcy7e+RRV2QTWOzhPopBRo=
-github.com/modelcontextprotocol/go-sdk v1.8.0 h1:KIvahhYqwtbeniWVPs3TcXEA7b8jEtwfBpOTAI+Urx4=
-github.com/modelcontextprotocol/go-sdk v1.8.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
+github.com/modelcontextprotocol/go-sdk v1.8.1-0.20261014132652-7c486efa8223 h1:THyv0oM2i7h3ezGwwXWCOqwsh/C2rUTabh+ukQCiClE=
+github.com/modelcontextprotocol/go-sdk v1.8.1-0.20261014132652-7c486efa8223/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
 github.com/muesli/cancelreader v0.2.2 h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELUXHmA=
 github.com/muesli/cancelreader v0.2.2/go.mod h1:3XuTXfFS2VjM+HTLZY9Ak0l6eUKfijIfMUZ4EgX0QYo=
 github.com/natefinch/atomic v1.0.1 h1:ZPYKxkqQOx3KZ+RsbnP/YsgvxWQPGxjC0oBt2AhwV0A=
