@@ -8,6 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/basecamp/mcp/confirm"
 	"github.com/basecamp/mcp/gateway"
 
 	"github.com/basecamp/hey-cli/internal/version"
@@ -94,30 +95,31 @@ func (s *Server) BuildMCPServer(logger *slog.Logger) *mcp.Server {
 	server := s.gw.BuildMCPServer(&mcp.Implementation{Name: Name, Version: version.Version}, logger)
 	if s.sender != nil {
 		server.AddTool(s.sender.tool(), s.sender.handle)
-		server.AddReceivingMiddleware(offerSendToClientsThatCanAsk)
+		server.AddReceivingMiddleware(markSendable, confirm.FilterTools(listSendToClientsThatCanAsk))
 	}
 	return server
 }
 
-// offerSendToClientsThatCanAsk lists hey_send only to a client that can be asked,
+// listSendToClientsThatCanAsk lists hey_send only to a client that can be asked,
 // since send_draft sends only on the person's answer to its confirmation: a client
 // that can't answer one isn't offered a tool it can't complete, and its draft saves
-// name the draft's page in HEY instead. It also tells each tool call whether its
-// client is offered hey_send (sendable), so a draft save's note says the same.
+// name the draft's page in HEY instead.
 //
 // Only the list changes. A call from a client whose list is cached still runs, and
 // gets the draft's link with nothing sent (sending-safety D3).
-func offerSendToClientsThatCanAsk(next mcp.MethodHandler) mcp.MethodHandler {
+func listSendToClientsThatCanAsk(req *mcp.ListToolsRequest) func(name string) bool {
+	asks := canElicitForm(req)
+	return func(name string) bool { return asks || name != sendToolName }
+}
+
+// markSendable tells each tool call whether its client is offered hey_send
+// (sendable), so a draft save's note says what tools/list does.
+func markSendable(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-		asks := canElicitForm(req)
 		if method == "tools/call" {
-			ctx = context.WithValue(ctx, sendableKey{}, asks)
+			ctx = context.WithValue(ctx, sendableKey{}, canElicitForm(req))
 		}
-		res, err := next(ctx, method, req)
-		if list, ok := res.(*mcp.ListToolsResult); ok && err == nil && !asks {
-			list.Tools = slices.DeleteFunc(slices.Clone(list.Tools), func(t *mcp.Tool) bool { return t.Name == sendToolName })
-		}
-		return res, err
+		return next(ctx, method, req)
 	}
 }
 
