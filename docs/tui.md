@@ -118,8 +118,11 @@ Escape again closes it without changing the thread.
 For scheduled or already bubbled-up threads, the menu also offers Cancel bubble-up.
 HEY returns a canceled thread to the Imbox, marked seen. A successful action closes
 the open thread and refreshes its list. A failed action keeps the menu open for retry.
-Bubble up acts on one thread at a time; clear a bulk selection first, and open a
-bundle to choose an individual thread.
+From search, the menu first checks whether the thread has a bubble-up to cancel.
+Escape cancels the lookup; if it fails, Ctrl+R retries it.
+
+Bubble up acts on one thread at a time; clear a bulk selection in the visible list
+first, and open a bundle to choose an individual thread.
 
 While reading a thread, links can be selected without a mouse. Tab selects the next link in document order and Shift+Tab selects the previous one; both wrap at the ends. A fixed row above the shortcut bar shows the selected destination without moving the thread. A destination too long for one row wraps onto as many rows as it needs, so you always see all of it. Press Enter to open it; opening stays unavailable until the terminal is tall enough to show the whole destination. Press Escape once to clear the selection, and Escape again to leave the thread. A thread with no selectable links keeps the normal global Tab focus behavior. Existing OSC 8 mouse links remain available.
 
