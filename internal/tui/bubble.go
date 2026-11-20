@@ -261,11 +261,7 @@ func (p *bubblePicker) draw(v *mailView) string {
 	if p.problem != "" {
 		body += "\n\n" + p.problem
 	}
-	base := v.listView()
-	if v.inThread {
-		base = v.topicViewport.View()
-	}
-	return overlayModal(base, modalFrame("Bubble up", body, v.vc.width), v.vc.width, v.vc.height)
+	return overlayModal(v.contentView(), modalFrame("Bubble up", body, v.vc.width), v.vc.width, v.vc.height)
 }
 
 func (p *bubblePicker) helpBindings() []helpBinding {

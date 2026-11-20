@@ -249,3 +249,49 @@ func TestBubbleCustomTodayUsesEveningSlot(t *testing.T) {
 		t.Fatal("accepted today's elapsed evening slot")
 	}
 }
+
+func TestBubblePickerPreservesItsOpeningScreen(t *testing.T) {
+	for _, screen := range []string{"inbox", "search", "bundle", "seen", "thread"} {
+		t.Run(screen, func(t *testing.T) {
+			v := modalViewWithPostings(t)
+			rows := []mail.Posting{{ID: 987, TopicID: 654, BoxID: 1, Name: "Hotel reservation search result"}}
+			switch screen {
+			case "search":
+				v.searchActive = true
+				v.searchList.setPostings(rows)
+			case "bundle":
+				v.bundleActive = true
+				v.bundleList.setPostings(rows)
+			case "seen":
+				v.seenActive = true
+				v.seenList.setPostings(rows)
+			case "thread":
+				v.inThread = true
+				v.threadPosting = rows[0]
+				v.threadNotice = "Some messages could not be loaded"
+				v.topicViewport.SetContent(strings.Repeat("Hotel reservation details\n", 80))
+			}
+			v.vc.width, v.vc.height = 100, 30
+			v.Resize(100, 30)
+			if screen == "thread" {
+				v.topicViewport.SetYOffset(7)
+			}
+			before := v.View()
+			offset := v.topicViewport.YOffset()
+			v.HandleContentKey(keyPress("w"))
+			if modalOf[*bubblePicker](v) == nil {
+				t.Fatal("picker did not open")
+			}
+			// The centered picker leaves the first rows visible. They must belong to
+			// the screen that opened it, including a thread's partial-read notice.
+			first := strings.TrimRight(strings.Split(stripANSI(before), "\n")[0], " ")
+			if !strings.HasPrefix(stripANSI(v.View()), first) {
+				t.Fatalf("%s background replaced: %q", screen, stripANSI(v.View()))
+			}
+			v.HandleContentKey(keyPress("esc"))
+			if v.modal != nil || v.View() != before || v.topicViewport.YOffset() != offset {
+				t.Fatal("dismissing picker changed the underlying screen or scroll position")
+			}
+		})
+	}
+}
