@@ -209,6 +209,17 @@ The Screener keeps up too. When a first-time sender writes, the count above the 
 changes on its own, and if you have The Screener open the new sender appears in the queue
 without moving your place in it.
 
+## Trash
+
+Press `0` or select **Trash** at the end of the mail tab row. The list grows as you
+scroll. Enter reads a trashed thread; `i` restores the selected or open thread through
+HEY's normal restore action. A successful restore removes it from the Trash list and
+closes its open reader. A failed restore leaves it available to retry.
+
+Restore acts on one thread at a time. Trashed threads can be read and their attachments
+opened or saved, but filing, replies, labels, bulk selection and trashing again are
+unavailable until they are restored. Permanent deletion and Empty Trash are not exposed.
+
 ## The Screener
 
 Press Ctrl+S from the mail list to open The Screener. When senders are waiting, the mail
