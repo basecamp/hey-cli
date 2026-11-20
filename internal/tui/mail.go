@@ -787,6 +787,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return notify("Opened attachment " + msg.filename), true
 
+	case bubbleDoneMsg:
+		return v.bubbleDone(msg), true
+
 	case postingActionDoneMsg:
 		v.finishMutation()
 		// A move of the open thread leaves it on screen in its new box, so later
@@ -1065,6 +1068,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 			}
 			bindings = append(bindings,
 				helpBinding{"v", "move"},
+				helpBinding{"w", "bubble up"},
 				folderBinding,
 				helpBinding{"u", "unseen"},
 				helpBinding{"i", "imbox"},
@@ -1153,6 +1157,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		{"r", "reply"},
 		{"f", "forward"},
 		{"v", "move"},
+		{"w", "bubble up"},
 		folderBinding,
 		collectionBinding,
 		{"e", "seen"},
@@ -1383,6 +1388,10 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		return cmd
 	}
 
+	if !v.inThread && (msg.String() == "w" || msg.String() == "W") {
+		return v.startBubblePicker()
+	}
+
 	if v.inThread {
 		if cmd, handled := v.handleLinkKey(msg); handled {
 			return cmd
@@ -1394,6 +1403,8 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 
 		switch msg.String() {
+		case "w", "W":
+			return v.startBubblePicker()
 		case "r", "R":
 			if v.topicID != 0 {
 				return v.loadReplyContext(v.topicID, v.topicName)
