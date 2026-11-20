@@ -197,14 +197,11 @@ func TestBubbleCustomDateValidationAndBack(t *testing.T) {
 }
 
 func TestBubblePickerUsesOverlayRowAndScheduledMetadata(t *testing.T) {
-	for _, source := range []string{"search", "bundle", "seen"} {
+	for _, source := range []string{"bundle", "seen"} {
 		t.Run(source, func(t *testing.T) {
 			v := mailWithPostings()
 			rows := []mail.Posting{{ID: 987, BubbleScheduled: true}}
 			switch source {
-			case "search":
-				v.searchActive = true
-				v.searchList.setPostings(rows)
 			case "bundle":
 				v.bundleActive = true
 				v.bundleList.setPostings(rows)

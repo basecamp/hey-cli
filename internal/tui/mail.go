@@ -787,6 +787,10 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 		return notify("Opened attachment " + msg.filename), true
 
+	case bubbleStateLoadedMsg:
+		v.bubbleStateLoaded(msg)
+		return nil, true
+
 	case bubbleDoneMsg:
 		return v.bubbleDone(msg), true
 

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -28,14 +29,17 @@ type bubbleChoice struct {
 
 type bubblePicker struct {
 	plainModal
-	postingID int64
-	choices   []bubbleChoice
-	cursor    int
-	date      *dateTimePicker
-	busy      bool
-	problem   string
-	now       func() time.Time
-	openedDay string
+	postingID    int64
+	choices      []bubbleChoice
+	cursor       int
+	date         *dateTimePicker
+	busy         bool
+	loading      bool
+	unknownState bool
+	lookupCancel context.CancelFunc
+	problem      string
+	now          func() time.Time
+	openedDay    string
 }
 
 type bubbleDoneMsg struct {
@@ -67,7 +71,7 @@ func newBubblePicker(posting mail.Posting, scheduled bool, now func() time.Time)
 func nextBubbleDay(from, to time.Weekday) int { return (int(to)-int(from)+6)%7 + 1 }
 
 func (v *mailView) startBubblePicker() tea.Cmd {
-	if !v.inThread && v.refuseForSelection() {
+	if !v.inThread && !v.searchActive && !v.bundleActive && v.refuseForSelection() {
 		return nil
 	}
 	if v.requests.loading {
@@ -90,11 +94,27 @@ func (v *mailView) startBubblePicker() tea.Cmd {
 			scheduled = true
 		}
 	}
-	v.openModal(newBubblePicker(*posting, scheduled, time.Now))
+	picker := newBubblePicker(*posting, scheduled, time.Now)
+	v.openModal(picker)
+	if v.searchActive && posting.BoxID == 0 && !posting.BubbledUp && !posting.BubbleScheduled {
+		return v.loadBubbleState(picker)
+	}
 	return nil
 }
 
 func (p *bubblePicker) handleKey(v *mailView, msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	if p.unknownState {
+		if msg.Key().Code == tea.KeyEscape {
+			if p.lookupCancel != nil {
+				p.lookupCancel()
+			}
+			return nil, false
+		}
+		if !p.loading && msg.String() == "ctrl+r" {
+			return v.loadBubbleState(p), true
+		}
+		return nil, true
+	}
 	if p.busy {
 		return nil, true
 	}
@@ -219,7 +239,11 @@ func (p *bubblePicker) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
 
 func (p *bubblePicker) draw(v *mailView) string {
 	var body string
-	if p.date != nil {
+	if p.loading {
+		body = "Loading Bubble Up…"
+	} else if p.unknownState {
+		body = "Press Ctrl+R to retry, or Esc to cancel."
+	} else if p.date != nil {
 		body = "Date (YYYY-MM-DD, on HEY's UTC calendar)\n" + p.date.view() + "\n\n08:00 UTC; today's date uses 18:00 UTC."
 	} else {
 		names := make([]string, len(p.choices))
@@ -245,6 +269,12 @@ func (p *bubblePicker) draw(v *mailView) string {
 }
 
 func (p *bubblePicker) helpBindings() []helpBinding {
+	if p.loading {
+		return []helpBinding{{"esc", "cancel"}}
+	}
+	if p.unknownState {
+		return []helpBinding{{"ctrl+r", "retry"}, {"esc", "cancel"}}
+	}
 	if p.busy {
 		return []helpBinding{{"", "saving bubble-up…"}}
 	}
