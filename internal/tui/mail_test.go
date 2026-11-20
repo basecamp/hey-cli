@@ -210,8 +210,8 @@ func TestMailViewHandlesBoxesLoaded(t *testing.T) {
 	if !consumed {
 		t.Error("boxesLoadedMsg should be consumed")
 	}
-	if len(v.boxes) != 3 {
-		t.Errorf("expected 3 boxes, got %d", len(v.boxes))
+	if len(v.boxes) != 4 {
+		t.Errorf("expected 3 boxes plus Trash, got %d sources", len(v.boxes))
 	}
 }
 
@@ -1445,7 +1445,7 @@ func TestMailViewLoadsFolderSourcesAndPostings(t *testing.T) {
 	if !consumed || postingsCmd == nil {
 		t.Fatal("folder sources should be loaded and start the first mailbox request")
 	}
-	if len(v.boxes) != 2 || v.boxes[1].Kind != mail.KindFolder || v.boxes[1].Name != "Receipts" {
+	if len(v.boxes) != 3 || v.boxes[1].Kind != mail.KindFolder || v.boxes[1].Name != "Receipts" {
 		t.Fatalf("mail sources = %+v", v.boxes)
 	}
 
@@ -1699,7 +1699,7 @@ func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
 
 	failed := runCmd(v.Init()).(mailSourcesLoadedMsg)
 	firstPostings, consumed := v.Update(failed)
-	if !consumed || firstPostings == nil || len(v.boxes) != 1 || v.folderDiscoveryErr == "" {
+	if !consumed || firstPostings == nil || len(v.boxes) != 2 || v.folderDiscoveryErr == "" {
 		t.Fatalf("folder failure state = consumed:%v command:%v sources:%+v error:%q", consumed, firstPostings != nil, v.boxes, v.folderDiscoveryErr)
 	}
 	if !strings.Contains(v.notice, "press b to retry") {
@@ -1713,7 +1713,7 @@ func TestMailViewFolderDiscoveryFailurePreservesMailAndRetries(t *testing.T) {
 	}
 	recovered := runCmd(retry).(mailSourcesLoadedMsg)
 	v.Update(recovered)
-	if v.folderDiscoveryErr != "" || len(v.boxes) != 2 || v.boxes[1].Name != "Receipts" {
+	if v.folderDiscoveryErr != "" || len(v.boxes) != 3 || v.boxes[1].Name != "Receipts" {
 		t.Errorf("recovered sources = %+v error=%q", v.boxes, v.folderDiscoveryErr)
 	}
 	if v.notice != "" {
