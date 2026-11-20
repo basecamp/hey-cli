@@ -2045,6 +2045,24 @@
       "unsigned": false,
       "untrusted_content": false
     },
+    "RestoreEntry": {
+      "destructive": false,
+      "idempotent": true,
+      "no_redirect": false,
+      "open_world": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 2,
+        "retry_on": [
+          429,
+          503
+        ]
+      },
+      "unsigned": false,
+      "untrusted_content": false
+    },
     "RestoreTopic": {
       "destructive": false,
       "idempotent": true,
@@ -2275,6 +2293,21 @@
           429,
           503
         ]
+      },
+      "unsigned": false,
+      "untrusted_content": false
+    },
+    "UndoTopicSend": {
+      "destructive": false,
+      "idempotent": false,
+      "no_redirect": false,
+      "open_world": false,
+      "readonly": false,
+      "retry": {
+        "backoff": "exponential",
+        "base_delay_ms": 1000,
+        "max": 1,
+        "retry_on": []
       },
       "unsigned": false,
       "untrusted_content": false
