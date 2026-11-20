@@ -83,7 +83,8 @@ Sending a reply or a forward from a thread closes the thread and returns you to 
 While reading a thread, the From header shows the actual send-as address when HEY records one separately from the account user.
 
 Move (`v`), labels (`b`), and collection membership (`n`) open compact menus over
-the current mail screen. Use the arrow keys and Enter to choose an action, or Escape
+the current mail screen. The thread subject wraps above the choices when there
+is room; an excerpt is used only when the subject is absent. Use the arrow keys and Enter to choose an action, or Escape
 to dismiss it. In labels and collections, type to filter names, Backspace to edit
 the filter, and Ctrl+U to clear it. Current memberships have an `[x]` mark. Long
 lists scroll within the menu. Creating a label opens a name field in the same

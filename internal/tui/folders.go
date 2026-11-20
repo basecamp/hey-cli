@@ -214,7 +214,7 @@ func (p *folderPicker) view(_ styles, width int) string {
 			names[i] = "Remove all labels"
 		}
 	}
-	return actionPickerFrame("Label thread", p.posting.Summary, p.filter, "Type to filter · Backspace to edit · Ctrl+U to clear", names, p.cursor, width, p.height)
+	return actionPickerFrame("Label thread", pickerThreadSubject(p.posting), p.filter, "Type to filter · Backspace to edit · Ctrl+U to clear", names, p.cursor, width, p.height)
 }
 
 func (p *folderPicker) helpBindings() []helpBinding {

@@ -163,7 +163,7 @@ func (p *collectionMembershipPicker) view(_ styles, width int) string {
 		}
 		names[i] = mark + terminal.SanitizeLine(collection.Name)
 	}
-	return actionPickerFrame("Thread collections", p.posting.Summary, p.filter, "Type to filter · Backspace to edit · Ctrl+U to clear", names, p.cursor, width, p.height)
+	return actionPickerFrame("Thread collections", pickerThreadSubject(p.posting), p.filter, "Type to filter · Backspace to edit · Ctrl+U to clear", names, p.cursor, width, p.height)
 }
 
 func (p *collectionMembershipPicker) helpBindings() []helpBinding {

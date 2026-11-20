@@ -13,7 +13,7 @@ type movePicker struct {
 	plainModal
 
 	postingID    int64
-	summary      string
+	subject      string
 	destinations []mail.Source
 	cursor       int
 	height       int
@@ -33,7 +33,7 @@ func newMovePicker(posting mail.Posting, boxes []mail.Source, currentSource mail
 	}
 	return &movePicker{
 		postingID:    posting.ID,
-		summary:      posting.Summary,
+		subject:      pickerThreadSubject(posting),
 		destinations: destinations,
 	}
 }
@@ -83,7 +83,7 @@ func (p *movePicker) view(_ styles, width int) string {
 	for i, box := range p.destinations {
 		names[i] = terminal.SanitizeLine(box.Name)
 	}
-	return actionPickerFrame("Move thread", p.summary, "", "Outside Imbox, moving marks the thread as seen.", names, p.cursor, width, p.height)
+	return actionPickerFrame("Move thread", p.subject, "", "Outside Imbox, moving marks the thread as seen.", names, p.cursor, width, p.height)
 }
 
 func (p *movePicker) helpBindings() []helpBinding {

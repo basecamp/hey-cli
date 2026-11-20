@@ -6,23 +6,29 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
 
 // Keep short choices compact, but let a small terminal use all the space it has.
-func actionPickerFrame(title, summary, filter, hint string, names []string, cursor, width, height int) string {
+func actionPickerFrame(title, subject, filter, hint string, names []string, cursor, width, height int) string {
 	width = min(width, 64)
 	rows := modalContentRows(min(height, 18))
 	contentWidth := modalContentWidth(width)
 	var before, after []string
-	if summary != "" && rows >= 5 {
-		before = append(before, truncateToWidth(terminal.SanitizeLine(summary), contentWidth))
-	}
 	if filter != "" && rows >= 2 {
 		before = append(before, truncateToWidth("Filter: "+terminal.SanitizeLine(filter), contentWidth))
 	}
 	if hint != "" && rows >= 5 {
 		after = append(after, truncateToWidth(hint, contentWidth))
+	}
+	// Keep the complete subject when it fits; on a tiny terminal the choices take
+	// priority over a fragment that cannot identify the thread.
+	if subject != "" && rows >= 5 {
+		lines := wrapText(terminal.SanitizeLine(subject), contentWidth)
+		if len(lines) <= rows-len(before)-len(after)-1 {
+			before = append(lines, before...)
+		}
 	}
 	visible := min(8, max(rows-len(before)-len(after), 1))
 	list := modalListRows(names, cursor, contentWidth, visible)
@@ -32,6 +38,15 @@ func actionPickerFrame(title, summary, filter, hint string, names []string, curs
 	body := append(before, list...)
 	body = append(body, after...)
 	return modalFrame(title, strings.Join(body, "\n"), width)
+}
+
+// HEY's Name is the thread subject; Summary is only a message excerpt.
+func pickerThreadSubject(posting mail.Posting) string {
+	subject := strings.TrimSpace(terminal.SanitizeLine(posting.Name))
+	if subject == "" {
+		return terminal.SanitizeLine(posting.Summary)
+	}
+	return subject
 }
 
 func pickerNameMatches(name, filter string) bool {

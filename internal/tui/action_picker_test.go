@@ -203,3 +203,43 @@ func TestActionPickerFitsSmallScreensAndScrollsAfterResize(t *testing.T) {
 		}
 	}
 }
+
+func TestActionPickersShowTheWrappedSubject(t *testing.T) {
+	const subject = "Your updated travel itinerary and hotel reservation for the long weekend in New Orleans"
+	posting := mail.Posting{ID: 100, Name: subject, Summary: "Plus, agent controls, single-use cards, and a clearer view of your spending"}
+	sources := []mail.Source{{ID: 12, Kind: mail.KindFolder, Name: "Travel plans"}, {ID: 24, Kind: mail.KindCollection, Name: "Receipts"}}
+	folders := newFolderPicker(posting, sources)
+	collections := newCollectionMembershipPicker(posting, sources)
+	move := newMovePicker(posting, []mail.Source{{ID: 2, Kind: mail.KindBox, Name: "The Feed"}}, mail.Source{ID: 1, Kind: mail.KindBox})
+	for _, picker := range []interface {
+		resize(int, int)
+		view(styles, int) string
+	}{folders, collections, move} {
+		picker.resize(80, 24)
+		frame := picker.view(newStyles(), 80)
+		text := strings.Join(strings.Fields(stripANSI(frame)), " ")
+		for _, line := range wrapText(subject, modalContentWidth(64)) {
+			if !strings.Contains(text, line) {
+				t.Fatalf("subject was clipped: %q", text)
+			}
+		}
+		if strings.Contains(text, "agent controls") || strings.Contains(text, "...") {
+			t.Fatalf("picker used a clipped message excerpt: %q", text)
+		}
+		if lipgloss.Width(frame) > 64 || lipgloss.Height(frame) > 24 {
+			t.Fatal("wrapping overflowed the menu")
+		}
+	}
+	if got := pickerThreadSubject(mail.Posting{Summary: "Hotel reservation confirmed"}); got != "Hotel reservation confirmed" {
+		t.Fatalf("missing subject fallback: %q", got)
+	}
+}
+
+func TestActionPickerLongContextLeavesChoicesUsable(t *testing.T) {
+	for _, height := range []int{8, 12, 24} {
+		frame := actionPickerFrame("Label thread", strings.Repeat("A very long subject ", 100), "travel", "Type to filter", []string{"Travel plans"}, 0, 40, height)
+		if lipgloss.Height(frame) > height || !strings.Contains(stripANSI(frame), "Travel plans") {
+			t.Fatal("long subject crowded out the selected action")
+		}
+	}
+}
