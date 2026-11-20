@@ -159,7 +159,7 @@ func TestBubbleRequestsAndFailureRetry(t *testing.T) {
 					t.Fatalf("slot = %s want %s", body.Slot, want)
 				}
 			}
-			status = http.StatusNoContent
+			status = http.StatusOK
 			cmd = v.HandleContentKey(keyPress("enter"))
 			refresh, _ := v.Update(cmd())
 			if calls != 2 || v.modal != nil || v.pendingMutations != 0 || refresh == nil {
@@ -232,7 +232,7 @@ func TestBubbleCustomTodayUsesEveningSlot(t *testing.T) {
 			t.Error(err)
 		}
 		slot, date = body.Slot, body.Date
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 	v := mailWithPostings()
