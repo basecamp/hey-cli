@@ -1,11 +1,7 @@
 package tui
 
 import (
-	"fmt"
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/basecamp/hey-cli/internal/mail"
 	"github.com/basecamp/hey-cli/internal/terminal"
@@ -79,7 +75,7 @@ type collectionMembershipPicker struct {
 	posting     mail.Posting
 	collections []mail.Collection
 	cursor      int
-	offset      int
+	filter      string
 	height      int
 }
 
@@ -94,10 +90,11 @@ func newCollectionMembershipPicker(posting mail.Posting, sources []mail.Source) 
 }
 
 func (p *collectionMembershipPicker) selected() *mail.Collection {
-	if p.cursor < 0 || p.cursor >= len(p.collections) {
+	choices := p.choices()
+	if p.cursor < 0 || p.cursor >= len(choices) {
 		return nil
 	}
-	return &p.collections[p.cursor]
+	return &choices[p.cursor]
 }
 
 func (p *collectionMembershipPicker) postingHasCollection(collectionID int64) bool {
@@ -133,73 +130,42 @@ func (p *collectionMembershipPicker) handleKey(view *mailView, msg tea.KeyPressM
 }
 
 func (p *collectionMembershipPicker) draw(view *mailView) string {
-	return p.view(view.vc.styles, view.vc.width)
+	return overlayModal(view.contentView(), p.view(view.vc.styles, view.vc.width), view.vc.width, view.vc.height)
+}
+
+func (p *collectionMembershipPicker) choices() []mail.Collection {
+	var choices []mail.Collection
+	for _, collection := range p.collections {
+		if pickerNameMatches(collection.Name, p.filter) {
+			choices = append(choices, collection)
+		}
+	}
+	return choices
 }
 
 func (p *collectionMembershipPicker) update(msg tea.KeyPressMsg) {
-	switch msg.Key().Code {
-	case tea.KeyUp:
-		if p.cursor > 0 {
-			p.cursor--
-		}
-	case tea.KeyDown:
-		if p.cursor < len(p.collections)-1 {
-			p.cursor++
-		}
+	if editPickerFilter(&p.filter, msg) {
+		p.cursor = 0
+		return
 	}
-	p.ensureVisible()
+	p.cursor = stepListCursor(p.cursor, len(p.choices()), msg)
 }
 
-// resize takes the height alone: the rows are laid out against the width it is drawn
-// with rather than a width it has to keep.
-func (p *collectionMembershipPicker) resize(_, height int) {
-	p.height = height
-	p.ensureVisible()
-}
+func (p *collectionMembershipPicker) resize(_, height int) { p.height = height }
 
-func (p *collectionMembershipPicker) visibleRows() int {
-	return max(p.height-5, 1)
-}
-
-func (p *collectionMembershipPicker) ensureVisible() {
-	if p.cursor < p.offset {
-		p.offset = p.cursor
-	}
-	rows := p.visibleRows()
-	if p.cursor >= p.offset+rows {
-		p.offset = p.cursor - rows + 1
-	}
-}
-
-func (p *collectionMembershipPicker) view(styles styles, width int) string {
-	contentWidth := max(width-4, 1)
-	var body strings.Builder
-	body.WriteString(styles.title.Render("Thread collections"))
-	if p.posting.Summary != "" {
-		fmt.Fprintf(&body, "\n%s", truncateStr(terminal.SanitizeLine(p.posting.Summary), contentWidth))
-	}
-	body.WriteString("\n\n")
-	end := min(p.offset+p.visibleRows(), len(p.collections))
-	for i := p.offset; i < end; i++ {
-		collection := p.collections[i]
-		prefix := "  "
-		if i == p.cursor {
-			prefix = "› "
-		}
-		mark := "[ ]"
+func (p *collectionMembershipPicker) view(_ styles, width int) string {
+	choices := p.choices()
+	names := make([]string, len(choices))
+	for i, collection := range choices {
+		mark := "[ ] "
 		if p.postingHasCollection(collection.ID) {
-			mark = "[x]"
+			mark = "[x] "
 		}
-		label := mark + " " + terminal.SanitizeLine(collection.Name)
-		label = truncateStr(label, max(contentWidth-lipgloss.Width(prefix), 1))
-		if i == p.cursor {
-			label = styles.title.Render(label)
-		}
-		fmt.Fprintf(&body, "%s%s\n", prefix, label)
+		names[i] = mark + terminal.SanitizeLine(collection.Name)
 	}
-	return body.String()
+	return actionPickerFrame("Thread collections", p.posting.Summary, p.filter, "Type to filter · Backspace to edit · Ctrl+U to clear", names, p.cursor, width, p.height)
 }
 
 func (p *collectionMembershipPicker) helpBindings() []helpBinding {
-	return []helpBinding{{"↑↓", "select"}, {"enter", "toggle"}, {"esc", "cancel"}}
+	return []helpBinding{{"type", "filter"}, {"↑↓", "select"}, {"enter", "toggle"}, {"esc", "cancel"}}
 }

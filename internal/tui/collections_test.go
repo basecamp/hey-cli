@@ -603,7 +603,7 @@ func TestMailViewCollectionNavigationHelp(t *testing.T) {
 func TestMailViewCollectionMembershipHelp(t *testing.T) {
 	picker := newCollectionMembershipPicker(mail.Posting{}, nil)
 	bindings := picker.helpBindings()
-	if len(bindings) != 3 || bindings[1].desc != "toggle" {
+	if len(bindings) != 4 || bindings[0].desc != "filter" || bindings[2].desc != "toggle" {
 		t.Errorf("bindings = %+v", bindings)
 	}
 }

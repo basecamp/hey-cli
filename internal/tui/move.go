@@ -1,9 +1,6 @@
 package tui
 
 import (
-	"fmt"
-	"strings"
-
 	tea "charm.land/bubbletea/v2"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -19,6 +16,7 @@ type movePicker struct {
 	summary      string
 	destinations []mail.Source
 	cursor       int
+	height       int
 }
 
 // newMovePicker offers the boxes a thread can be moved to: not where it already is, not
@@ -62,7 +60,7 @@ func (p *movePicker) handleKey(view *mailView, msg tea.KeyPressMsg) (tea.Cmd, bo
 }
 
 func (p *movePicker) draw(view *mailView) string {
-	return p.view(view.vc.styles, view.vc.width)
+	return overlayModal(view.contentView(), p.view(view.vc.styles, view.vc.width), view.vc.width, view.vc.height)
 }
 
 func (p *movePicker) update(msg tea.KeyPressMsg) {
@@ -78,26 +76,14 @@ func (p *movePicker) update(msg tea.KeyPressMsg) {
 	}
 }
 
-func (p *movePicker) view(styles styles, width int) string {
-	contentWidth := max(width-4, 1)
-	var b strings.Builder
-	b.WriteString(styles.title.Render("Move thread"))
-	if p.summary != "" {
-		fmt.Fprintf(&b, "\n%s", truncateStr(p.summary, contentWidth))
-	}
-	b.WriteString("\n\n")
+func (p *movePicker) resize(_, height int) { p.height = height }
+
+func (p *movePicker) view(_ styles, width int) string {
+	names := make([]string, len(p.destinations))
 	for i, box := range p.destinations {
-		prefix := "  "
-		name := terminal.SanitizeLine(box.Name)
-		if i == p.cursor {
-			prefix = "› "
-			name = styles.title.Render(name)
-		}
-		fmt.Fprintf(&b, "%s%s\n", prefix, name)
+		names[i] = terminal.SanitizeLine(box.Name)
 	}
-	b.WriteString("\n")
-	b.WriteString(strings.Join(wrapText("Moving to a box other than Imbox marks the thread as seen.", contentWidth), "\n"))
-	return b.String()
+	return actionPickerFrame("Move thread", p.summary, "", "Outside Imbox, moving marks the thread as seen.", names, p.cursor, width, p.height)
 }
 
 func (p *movePicker) helpBindings() []helpBinding {
