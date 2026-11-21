@@ -126,4 +126,4 @@ require (
 	k8s.io/klog/v2 v2.140.0 // indirect
 )
 
-replace github.com/basecamp/hey-sdk/go => /home/ers/Work/hey-sdk/go
+replace github.com/basecamp/hey-sdk/go => github.com/WhiskeyTuesday/hey-sdk/go v0.36.1-0.20261121014628-998231a1a7ee
