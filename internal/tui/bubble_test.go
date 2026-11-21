@@ -295,3 +295,7 @@ func TestBubblePickerPreservesItsOpeningScreen(t *testing.T) {
 		})
 	}
 }
+
+func TestBubblePickerPreservesScrollThroughModel(t *testing.T) {
+	testPickerScrollThroughModel(t, "w")
+}
