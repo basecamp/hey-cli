@@ -30,6 +30,7 @@ type Posting struct {
 	// from the posting's kind — HEY's `bundled` flag means filed *inside* a bundle.
 	IsBundle          bool
 	BubbledUp         bool
+	BubbleScheduled   bool
 	Muted             bool
 	VisibleEntryCount int32
 	Creator           Contact
@@ -86,6 +87,7 @@ func NewPosting(posting generated.Posting) Posting {
 		Seen:                  posting.Seen,
 		IsBundle:              posting.Kind == "bundle",
 		BubbledUp:             posting.BubbledUp,
+		BubbleScheduled:       !posting.BubbleUpSchedule.BubbleUpAt.IsZero() || posting.BubbleUpSchedule.SurpriseMe,
 		Muted:                 posting.Muted,
 		VisibleEntryCount:     posting.VisibleEntryCount,
 		Creator:               contactOf(posting.Creator),

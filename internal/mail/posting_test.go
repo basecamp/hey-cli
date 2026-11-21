@@ -161,3 +161,17 @@ func TestPostingsDescribesAPage(t *testing.T) {
 		t.Error("an empty page should describe as an empty slice, not nil")
 	}
 }
+
+func TestNewPostingKeepsBubbleSchedulePresence(t *testing.T) {
+	for _, schedule := range []generated.BubbleUpSchedule{
+		{BubbleUpAt: time.Date(2026, 12, 4, 8, 0, 0, 0, time.UTC)},
+		{SurpriseMe: true},
+	} {
+		if !NewPosting(generated.Posting{BubbleUpSchedule: schedule}).BubbleScheduled {
+			t.Fatal("lost scheduled bubble-up")
+		}
+	}
+	if NewPosting(generated.Posting{}).BubbleScheduled {
+		t.Fatal("empty schedule should not offer cancellation")
+	}
+}
