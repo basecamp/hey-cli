@@ -82,6 +82,14 @@ Sending a reply or a forward from a thread closes the thread and returns you to 
 
 While reading a thread, the From header shows the actual send-as address when HEY records one separately from the account user.
 
+Move (`v`), labels (`b`), and collection membership (`n`) open compact menus over
+the current mail screen. The thread subject wraps above the choices when there
+is room; an excerpt is used only when the subject is absent. Use the arrow keys and Enter to choose an action, or Escape
+to dismiss it. In labels and collections, type to filter names, Backspace to edit
+the filter, and Ctrl+U to clear it. Current memberships have an `[x]` mark. Long
+lists scroll within the menu. Creating a label opens a name field in the same
+menu; Escape returns to the choices.
+
 While reading a thread, links can be selected without a mouse. Tab selects the next link in document order and Shift+Tab selects the previous one; both wrap at the ends. A fixed row above the shortcut bar shows the selected destination without moving the thread. A destination too long for one row wraps onto as many rows as it needs, so you always see all of it. Press Enter to open it; opening stays unavailable until the terminal is tall enough to show the whole destination. Press Escape once to clear the selection, and Escape again to leave the thread. A thread with no selectable links keeps the normal global Tab focus behavior. Existing OSC 8 mouse links remain available.
 
 Most of those keep working while you are reading a thread, the way the web app's topic

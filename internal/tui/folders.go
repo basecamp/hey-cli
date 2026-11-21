@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -38,7 +37,7 @@ type folderPicker struct {
 	posting  mail.Posting
 	folders  []mail.Source
 	cursor   int
-	offset   int
+	filter   string
 	height   int
 	creating bool
 	input    textinput.Model
@@ -61,7 +60,9 @@ func newFolderPicker(posting mail.Posting, sources []mail.Source) *folderPicker 
 func (p *folderPicker) choices() []folderPickerSelection {
 	choices := make([]folderPickerSelection, 0, len(p.folders)+2)
 	for _, folder := range p.folders {
-		choices = append(choices, folderPickerSelection{kind: folderPickerExisting, folder: folder})
+		if pickerNameMatches(folder.Name, p.filter) {
+			choices = append(choices, folderPickerSelection{kind: folderPickerExisting, folder: folder})
+		}
 	}
 	choices = append(choices, folderPickerSelection{kind: folderPickerCreate})
 	if len(p.posting.Folders) > 0 {
@@ -159,7 +160,7 @@ func (p *folderPicker) handleMsg(msg tea.Msg) (tea.Cmd, bool) {
 }
 
 func (p *folderPicker) draw(view *mailView) string {
-	return p.view(view.vc.styles, view.vc.width)
+	return overlayModal(view.contentView(), p.view(view.vc.styles, view.vc.width), view.vc.width, view.vc.height)
 }
 
 func (p *folderPicker) update(msg tea.Msg) tea.Cmd {
@@ -172,92 +173,53 @@ func (p *folderPicker) update(msg tea.Msg) tea.Cmd {
 }
 
 func (p *folderPicker) moveCursor(msg tea.KeyPressMsg) {
-	switch msg.Key().Code {
-	case tea.KeyUp:
-		if p.cursor > 0 {
-			p.cursor--
-		}
-	case tea.KeyDown:
-		if p.cursor < len(p.choices())-1 {
-			p.cursor++
-		}
+	if editPickerFilter(&p.filter, msg) {
+		p.cursor = 0
+		return
 	}
-	p.ensureVisible()
+	p.cursor = stepListCursor(p.cursor, len(p.choices()), msg)
 }
 
 func (p *folderPicker) resize(width, height int) {
 	p.height = height
-	p.input.SetWidth(max(width-16, 10))
-	p.ensureVisible()
+	p.input.SetWidth(max(modalContentWidth(min(width, 64))-7, 1))
+	// SetWidth does not recompute the text input's horizontal window. Walk to the
+	// end and back so resizing also works with the cursor inside a long name.
+	position := p.input.Position()
+	p.input.CursorEnd()
+	p.input.SetCursor(position)
 }
 
-func (p *folderPicker) visibleRows() int {
-	return max(p.height-5, 1)
-}
-
-func (p *folderPicker) ensureVisible() {
-	if p.cursor < p.offset {
-		p.offset = p.cursor
-	}
-	rows := p.visibleRows()
-	if p.cursor >= p.offset+rows {
-		p.offset = p.cursor - rows + 1
-	}
-}
-
-func (p *folderPicker) view(styles styles, width int) string {
-	contentWidth := max(width-4, 1)
-	var b strings.Builder
+func (p *folderPicker) view(_ styles, width int) string {
 	if p.creating {
-		b.WriteString(styles.title.Render("Create label"))
-		b.WriteString("\n\n")
-		b.WriteString(styleMuted.Render("Name: "))
-		b.WriteString(p.input.View())
+		body := "Name: " + p.input.View()
 		if p.status != "" {
-			b.WriteString("\n\n")
-			b.WriteString(lipgloss.NewStyle().Foreground(colorError).Render(p.status))
+			body += "\n" + lipgloss.NewStyle().Foreground(colorError).Render(truncateToWidth(p.status, modalContentWidth(min(width, 64))))
 		}
-		return b.String()
+		return modalFrame("Create label", body, min(width, 64))
 	}
-
-	b.WriteString(styles.title.Render("Label thread"))
-	if p.posting.Summary != "" {
-		fmt.Fprintf(&b, "\n%s", truncateStr(terminal.SanitizeLine(p.posting.Summary), contentWidth))
-	}
-	b.WriteString("\n\n")
 	choices := p.choices()
-	end := min(p.offset+p.visibleRows(), len(choices))
-	for i := p.offset; i < end; i++ {
-		choice := choices[i]
-		prefix := "  "
-		if i == p.cursor {
-			prefix = "› "
-		}
-		label := ""
+	names := make([]string, len(choices))
+	for i, choice := range choices {
 		switch choice.kind {
 		case folderPickerExisting:
-			mark := "[ ]"
+			mark := "[ ] "
 			if p.postingHasFolder(choice.folder.ID) {
-				mark = "[x]"
+				mark = "[x] "
 			}
-			label = mark + " " + terminal.SanitizeLine(choice.folder.Name)
+			names[i] = mark + terminal.SanitizeLine(choice.folder.Name)
 		case folderPickerCreate:
-			label = "+ Create a new label…"
+			names[i] = "Create a new label…"
 		case folderPickerRemoveAll:
-			label = "− Remove all labels"
+			names[i] = "Remove all labels"
 		}
-		label = truncateStr(label, max(contentWidth-lipgloss.Width(prefix), 1))
-		if i == p.cursor {
-			label = styles.title.Render(label)
-		}
-		fmt.Fprintf(&b, "%s%s\n", prefix, label)
 	}
-	return b.String()
+	return actionPickerFrame("Label thread", pickerThreadSubject(p.posting), p.filter, "Type to filter · Backspace to edit · Ctrl+U to clear", names, p.cursor, width, p.height)
 }
 
 func (p *folderPicker) helpBindings() []helpBinding {
 	if p.creating {
 		return []helpBinding{{"enter", "create"}, {"esc", "back"}}
 	}
-	return []helpBinding{{"↑↓", "select"}, {"enter", "toggle"}, {"esc", "cancel"}}
+	return []helpBinding{{"type", "filter"}, {"↑↓", "select"}, {"enter", "toggle"}, {"esc", "cancel"}}
 }
