@@ -270,12 +270,14 @@ type mailLink struct {
 	body        int
 	occurrence  int
 	key         string
+	textRuns    []markdown.LinkTextRun
 }
 
 type mailLinkBody struct {
-	entry int
-	start int
-	lines []string
+	entry    int
+	start    int
+	lines    []string
+	linkRuns []markdown.LinkTextRun
 }
 
 type mailView struct {
@@ -302,6 +304,8 @@ type mailView struct {
 	links            []mailLink
 	linkBodies       []mailLinkBody
 	selectedLink     int
+	bodyFind         bodyFind
+	followFind       bool // the most recent navigation selected a find result
 	selectedLinkKey  string
 	inThread         bool
 	threadNotice     string // what the open thread's read did not get; stays until the thread is left
@@ -562,6 +566,8 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if cmd, ok := v.requests.settle(newRequestResult(msg.requestID, msg.err)); !ok {
 			return cmd, true
 		}
+		v.bodyFind = bodyFind{}
+		v.followFind = false
 		v.inThread = true
 		v.topicID = msg.topicID
 		// The posting the thread was opened from, snapshotted rather than looked up
@@ -930,7 +936,10 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		}
 	}
 
-	// Pass through to viewport if in thread
+	// Pass through to the find prompt or viewport if in thread.
+	if v.inThread && v.bodyFind.editing {
+		return v.bodyFind.update(msg), true
+	}
 	if v.inThread {
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
@@ -1045,7 +1054,7 @@ func (v *mailView) updateSourceDiscoveryNotice() {
 
 // CapturingInput reports whether a form or picker is open and wants every key.
 func (v *mailView) CapturingInput() bool {
-	return v.modal != nil
+	return v.modal != nil || (v.inThread && v.bodyFind.editing)
 }
 
 func (v *mailView) AccountSwitchBlocked() bool {
@@ -1053,11 +1062,14 @@ func (v *mailView) AccountSwitchBlocked() bool {
 }
 
 func (v *mailView) HelpBindings() []helpBinding {
+	if v.inThread && v.bodyFind.editing {
+		return v.bodyFind.helpBindings()
+	}
 	if v.modal != nil {
 		return v.modal.helpBindings()
 	}
 	if v.inThread {
-		bindings := []helpBinding{{"r", "reply"}, {"f", "forward"}}
+		bindings := append(v.bodyFind.helpBindings(), helpBinding{"r", "reply"}, helpBinding{"f", "forward"})
 		if v.fileablePosting() != nil {
 			folderBinding := helpBinding{"b", "labels"}
 			if v.folderDiscoveryErr != "" {
@@ -1384,6 +1396,9 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	if v.inThread {
+		if cmd, handled := v.handleFindKey(msg); handled {
+			return cmd
+		}
 		if cmd, handled := v.handleLinkKey(msg); handled {
 			return cmd
 		}
@@ -1608,6 +1623,10 @@ func (v *mailView) LinkSelectionActive() bool {
 }
 
 func (v *mailView) ExitDetail(key string) {
+	if v.inThread && key != "q" && v.bodyFind.active() {
+		v.clearBodyFind()
+		return
+	}
 	if v.inThread && key != "q" && v.selectedLink >= 0 {
 		v.clearLinkSelection()
 		return
@@ -1634,6 +1653,8 @@ func (v *mailView) ExitThread() {
 		return
 	}
 	if v.inThread {
+		v.bodyFind = bodyFind{}
+		v.followFind = false
 		v.inThread = false
 		v.threadNotice = ""
 		v.threadPosting = mail.Posting{}
@@ -1745,7 +1766,7 @@ func (v *mailView) Restyle() {
 		v.rebuildTopicContent()
 		v.topicViewport.SetYOffset(offset)
 		v.fitThreadViewport()
-		v.revealLink()
+		v.revealThreadSelection()
 	}
 	if v.modal != nil {
 		v.modal.restyle(v.vc.styles)
@@ -1767,7 +1788,7 @@ func (v *mailView) Resize(width, height int) {
 		v.rebuildTopicContent()
 	}
 	v.fitThreadViewport()
-	v.revealLink()
+	v.revealThreadSelection()
 }
 
 // threadNotices is what is shown above an open thread's viewport: the partial-read
@@ -1791,6 +1812,14 @@ func (v *mailView) threadNotices() []string {
 // row, so moving between such links never changes the viewport's height. A longer
 // one wraps onto the rows it needs to be shown in full.
 func (v *mailView) LinkFooter() (text string, visible bool) {
+	if v.inThread && v.modal == nil && v.bodyFind.active() {
+		text = v.bodyFind.footer(v.vc.width)
+		if !v.bodyFind.editing && v.LinkSelectionActive() {
+			link, _ := v.linkDestinationFooter()
+			text += "\n" + link
+		}
+		return text, true
+	}
 	if !v.inThread || v.modal != nil || len(v.links) == 0 {
 		return "", false
 	}
@@ -1890,6 +1919,8 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 // closeOverlays puts away everything a box's list can have open over it — a thread, a
 // search, a bundle, the Previously Seen screen — leaving the list itself.
 func (v *mailView) closeOverlays() {
+	v.bodyFind = bodyFind{}
+	v.followFind = false
 	v.inThread = false
 	v.threadNotice = ""
 	v.threadPosting = mail.Posting{}
@@ -1914,6 +1945,8 @@ func (v *mailView) openPreviouslySeen() tea.Cmd {
 		v.ExitThread()
 		return func() tea.Msg { return nil }
 	}
+	v.bodyFind = bodyFind{}
+	v.followFind = false
 	v.inThread = false
 	v.threadNotice = ""
 	v.threadPosting = mail.Posting{}
@@ -2339,6 +2372,9 @@ func (v *mailView) clearLinkSelection() {
 	v.restoreLinkBody(v.selectedLink)
 	v.selectedLink = -1
 	v.selectedLinkKey = ""
+	if v.bodyFind.query != "" {
+		v.topicViewport.SetContentLines(v.bodyFind.highlight(v.topicLines))
+	}
 }
 
 func (v *mailView) handleLinkKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
@@ -2346,6 +2382,7 @@ func (v *mailView) handleLinkKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		return nil, false
 	}
 	if msg.Key().Code == tea.KeyTab {
+		v.followFind = false
 		delta := 1
 		if msg.Key().Mod.Contains(tea.ModShift) {
 			delta = -1
@@ -2409,12 +2446,17 @@ func (v *mailView) rebuildTopicContent() {
 			break
 		}
 	}
-	if v.selectedLink < 0 {
-		v.selectedLinkKey = ""
-	} else {
-		v.selectLinkBody(v.selectedLink)
+	if v.bodyFind.query != "" {
+		v.scanBodyFind()
 	}
-	v.topicViewport.SetContentLines(v.topicLines)
+	if v.followFind {
+		v.selectFindLink()
+	} else if v.selectedLink >= 0 {
+		v.selectLinkBody(v.selectedLink)
+	} else {
+		v.selectedLinkKey = ""
+	}
+	v.topicViewport.SetContentLines(v.bodyFind.highlight(v.topicLines))
 }
 
 func (v *mailView) updateLinkSelection(previous, selected int) {
@@ -2422,6 +2464,9 @@ func (v *mailView) updateLinkSelection(previous, selected int) {
 		v.restoreLinkBody(previous)
 	}
 	v.selectLinkBody(selected)
+	if v.bodyFind.query != "" {
+		v.topicViewport.SetContentLines(v.bodyFind.highlight(v.topicLines))
+	}
 }
 
 func (v *mailView) restoreLinkBody(linkIndex int) {
@@ -3746,7 +3791,11 @@ func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, 
 			bodyStartLine := lineCount + 1
 			bodyText := v.vc.styles.entryBody.Render(linked.Text)
 			bodyIndex := len(bodies)
-			bodies = append(bodies, mailLinkBody{entry: i, start: bodyStartLine, lines: strings.Split(bodyText, "\n")})
+			var runs []markdown.LinkTextRun
+			for _, link := range linked.Links {
+				runs = append(runs, link.TextRuns...)
+			}
+			bodies = append(bodies, mailLinkBody{entry: i, start: bodyStartLine, lines: strings.Split(bodyText, "\n"), linkRuns: runs})
 			for i, occurrence := range linked.Links {
 				key := fmt.Sprintf("%d\x00%d\x00%s", e.ID, i, occurrence.Destination)
 				links = append(links, mailLink{
@@ -3755,6 +3804,7 @@ func (v *mailView) renderEntriesWithLinks(entries []mail.Entry) (string, []int, 
 					endLine:     bodyStartLine + occurrence.EndLine,
 					body:        bodyIndex,
 					occurrence:  i,
+					textRuns:    occurrence.TextRuns,
 					key:         key,
 				})
 			}

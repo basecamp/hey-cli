@@ -1016,7 +1016,7 @@ func (m model) canToggleHelp() bool {
 		return false
 	}
 	if m.activeView == m.screenerView {
-		return true
+		return m.screenerView.preview == nil || !m.screenerView.preview.find.editing
 	}
 	capturer, ok := m.activeView.(inputCapturer)
 	return !ok || !capturer.CapturingInput()
