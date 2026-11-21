@@ -243,3 +243,35 @@ func TestActionPickerLongContextLeavesChoicesUsable(t *testing.T) {
 		}
 	}
 }
+
+func TestActionPickersPreserveScrollThroughModel(t *testing.T) {
+	for _, key := range []string{"v", "b"} {
+		t.Run(key, func(t *testing.T) {
+			testPickerScrollThroughModel(t, key)
+		})
+	}
+}
+
+func TestActionPickersPreserveListThroughModel(t *testing.T) {
+	for _, key := range []string{"v", "b", "n"} {
+		t.Run(key, func(t *testing.T) {
+			m := modelWithBoxes()
+			v := m.mailView
+			v.boxes = append(v.boxes, mail.Source{ID: 12, Kind: mail.KindFolder, Name: "Travel plans"}, mail.Source{ID: 24, Kind: mail.KindCollection, Name: "Hotel receipts"})
+			updated, _ := m.Update(keyPress("down"))
+			m = updated.(model)
+			posting := v.postingList.selectedPosting().ID
+			before := m.View().Content
+			updated, _ = m.Update(keyPress(key))
+			m = updated.(model)
+			if v.modal == nil {
+				t.Fatal("picker did not open")
+			}
+			updated, _ = m.Update(keyPress("esc"))
+			m = updated.(model)
+			if v.modal != nil || v.postingList.selectedPosting().ID != posting || m.View().Content != before {
+				t.Fatal("dismissal changed the list or cursor")
+			}
+		})
+	}
+}
