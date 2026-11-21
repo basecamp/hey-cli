@@ -43,6 +43,8 @@ github.com/MakeNowJust/heredoc v1.0.0/go.mod h1:mG5amYoWBHf8vpLOuehzbGGw0EHxpZZ6
 github.com/ProtonMail/go-crypto v1.4.1 h1:9RfcZHqEQUvP8RzecWEUafnZVtEvrBVL9BiF67IQOfM=
 github.com/ProtonMail/go-crypto v1.4.1/go.mod h1:e1OaTyu5SYVrO9gKOEhTc+5UcXtTUa+P3uLudwcgPqo=
 github.com/RaveNoX/go-jsoncommentstrip v1.0.0/go.mod h1:78ihd09MekBnJnxpICcwzCMzGrKSKYe4AqU6PDYYpjk=
+github.com/WhiskeyTuesday/hey-sdk/go v0.36.1-0.20261121014628-998231a1a7ee h1:8h7QOWcDXFIMrNOVS8DvZwafFoZVDaj7xpfxen8CxdY=
+github.com/WhiskeyTuesday/hey-sdk/go v0.36.1-0.20261121014628-998231a1a7ee/go.mod h1:g4+w+Htmntp03iF9L7afzWyPVYeQzxFUYONlw9r4R+s=
 github.com/alecthomas/assert/v2 v2.11.0 h1:2Q9r3ki8+JYXvGsDyBXwH3LcJ+WK5D0gc5E8vS6K3D0=
 github.com/alecthomas/assert/v2 v2.11.0/go.mod h1:Bze95FyfUr7x34QZrjL+XP+0qgp/zg8yS+TtBj1WA3k=
 github.com/alecthomas/chroma/v2 v2.20.0 h1:sfIHpxPyR07/Oylvmcai3X/exDlE8+FA820NTz+9sGw=
@@ -91,8 +93,6 @@ github.com/aymerick/douceur v0.2.0 h1:Mv+mAeH1Q+n9Fr+oyamOlAkUNPWPlA8PPGR0QAaYuP
 github.com/aymerick/douceur v0.2.0/go.mod h1:wlT5vV2O3h55X9m7iVYN0TBM0NH/MmbLnd30/FjWUq4=
 github.com/basecamp/actioncable-client/go/v2 v2.0.2 h1:h2Sl15gj2lI/EX5E0EUxjyYgf0LF9Gn1zqEUInSrUpc=
 github.com/basecamp/actioncable-client/go/v2 v2.0.2/go.mod h1:3Y0N9V5LXclT5nQWcPhq/+6rj4eKXgKAX8dx15X8yB8=
-github.com/basecamp/hey-sdk/go v0.35.1 h1:azrn9JoilQaQ3QDBtZb4hiROmQFUyEIWWVWFq65wSTw=
-github.com/basecamp/hey-sdk/go v0.35.1/go.mod h1:g4+w+Htmntp03iF9L7afzWyPVYeQzxFUYONlw9r4R+s=
 github.com/basecamp/mcp v0.0.0-20261119020105-1a6d02c5380a h1:5SI0hmC3B5wLusmAG917J9HGWnU2JLV+S2Ek8A0ABxk=
 github.com/basecamp/mcp v0.0.0-20261119020105-1a6d02c5380a/go.mod h1:K3sgTH90CIR6Ed0XPnivIBqNIpw6aeOlcXThBrZ+2gc=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=

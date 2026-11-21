@@ -84,7 +84,7 @@ func TestMailViewLoadsAndPagesCollections(t *testing.T) {
 
 	loaded := runCmd(v.Init()).(mailSourcesLoadedMsg)
 	v.Update(loaded)
-	if len(v.boxes) != 2 || v.boxes[1].Kind != mail.KindCollection {
+	if len(v.boxes) != 3 || v.boxes[1].Kind != mail.KindCollection {
 		t.Fatalf("sources = %+v", v.boxes)
 	}
 	if cmd := v.SubnavRight(); cmd == nil || !v.seenActive {

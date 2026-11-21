@@ -125,3 +125,14 @@ and never carries the cursor back to the top.
 All four sections wait on a `requestLane` — the journal's is one kind deep, since its whole
 question is which day is selected — so "is this answer still the one the reader asked for"
 has one answer in the TUI rather than one per section.
+
+## Trash is a topic source
+
+The TUI adds a virtual `KindTrash` source with no box ID. `mail.ReadPage` reads it
+through the SDK's `Topics.GetTrashPage`, preserving the opaque `Link` cursor. The
+adapter supplies topic IDs as row identities and `readPostingsPage` keeps those as
+`TopicID`; they are never posting IDs. Trash rows are already seen so opening one
+cannot send a posting observation. All posting mutations are blocked in Trash.
+Restoring calls `Topics.Restore` with the topic ID, and removes the row only after
+success. A restore response received after switching sources cannot remove a row
+from the new source. Trash is excluded from box move destinations.

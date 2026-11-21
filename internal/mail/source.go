@@ -1,5 +1,5 @@
 // Package mail reads the places HEY keeps postings — a box, a label, a collection, a
-// bundle's unseen threads, a contact's threads — through one Source type and one page
+// bundle's unseen threads, a contact's threads, or Trash — through one Source type and one page
 // read, so a caller never has to know which endpoint a source is served by.
 package mail
 
@@ -19,11 +19,12 @@ const (
 	KindCollection Kind = "collection"
 	KindBundle     Kind = "bundle"
 	KindContact    Kind = "contact"
+	KindTrash      Kind = "trash"
 )
 
 // Source is a place postings are read from. BoxKind carries HEY's own kind for a box
 // (hey.BoxKindImbox and friends), which is what tells the named box routes apart; it is
-// empty for a label or a collection.
+// empty for the other source kinds.
 type Source struct {
 	Kind      Kind
 	ID        int64
