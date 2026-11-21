@@ -75,13 +75,14 @@ func (v *mailView) trashRestored(msg trashRestoredMsg) tea.Cmd {
 	if v.inThread && v.threadFromTrash && v.topicID == msg.topicID {
 		v.ExitThread()
 	}
+	// A live read begun before the restore may still contain this topic, even
+	// if the reader switched away and returns to Trash before the read arrives.
+	v.liveRequestID++
 	if v.currentSourceKind() != mail.KindTrash {
 		return notify("Thread restored")
 	}
-	// A page or live head read begun before the restore may still contain this
-	// topic. Ignore those answers so they cannot resurrect the restored row.
+	// Navigation already invalidates pages; only cancel paging here in Trash.
 	v.moreRequestID++
-	v.liveRequestID++
 	v.postingPaging.loading = false
 	if index := postingIndexIn(v.postingList.postings, msg.topicID); index >= 0 {
 		v.removePostingAt(index)

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
@@ -255,5 +256,76 @@ func TestPostingActionCannotRemoveTrashTopicWithSameNumericID(t *testing.T) {
 	v.Update(postingActionDoneMsg{boxID: 0, sourceKind: mail.KindTrash, postingID: 701, effect: postingActionRemove})
 	if len(v.postingList.postings) != 1 || len(v.searchList.postings) != 0 {
 		t.Fatal("posting completion affected the Trash topic instead of only the search result")
+	}
+}
+
+func TestRestoreAwayFromTrashInvalidatesEarlierLiveRefresh(t *testing.T) {
+	var restored atomic.Bool
+	v := trashView(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/topics/701/status/active.json":
+			restored.Store(true)
+			w.WriteHeader(http.StatusOK)
+		case r.Method == http.MethodGet && r.URL.Path == "/topics/trash.json":
+			w.Header().Set("Content-Type", "application/json")
+			topics := []map[string]any{{"id": 702, "name": "Hotel receipt"}}
+			if !restored.Load() {
+				topics = append(topics, map[string]any{"id": 701, "name": "Conference travel plans"})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"topics": topics})
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	})
+
+	// Hold the old response until after a restore and a round trip through the Imbox.
+	refresh := v.refreshBox(AnyBoxChanged)
+	if refresh == nil {
+		t.Fatal("Trash refresh did not start")
+	}
+	stale := refresh()
+	restore := v.HandleContentKey(keyPress("i"))
+	if restore == nil {
+		t.Fatal("restore did not start")
+	}
+	v.switchBox(0)
+	v.Update(currentPostingsLoaded(v, []mail.Posting{{ID: 701, TopicID: 900, Name: "Dinner reservation"}}))
+	moreRequest := v.moreRequestID
+	v.Update(restore())
+	if len(v.postingList.postings) != 1 || v.postingList.postings[0].TopicID != 900 {
+		t.Fatal("restore changed the Imbox row with the same numeric ID")
+	}
+	if v.moreRequestID != moreRequest {
+		t.Fatal("restore invalidated paging for the other source")
+	}
+	read := v.switchBox(v.trashIndex())
+	v.Update(read())
+	if got := postingIDs(v.postingList.postings); len(got) != 1 || postingIndexIn(v.postingList.postings, 702) < 0 {
+		t.Fatalf("fresh Trash read = %v, want only the remaining topic", got)
+	}
+	v.Update(stale)
+	if got := postingIDs(v.postingList.postings); len(got) != 1 || postingIndexIn(v.postingList.postings, 702) < 0 {
+		t.Fatalf("stale refresh reinserted the restored topic: %v", got)
+	}
+}
+
+func TestFailedRestoreAwayFromTrashKeepsLiveRefreshValid(t *testing.T) {
+	v := trashView(t, func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusForbidden) })
+	restore := v.HandleContentKey(keyPress("i"))
+	oldLive := v.liveRequestID
+	v.switchBox(0)
+	v.Update(restore())
+	if v.liveRequestID != oldLive || v.pendingMutations != 0 || v.trashRestoreID != 0 {
+		t.Fatal("failed restore invalidated the refresh or left the mutation pending")
+	}
+	v.switchBox(v.trashIndex())
+	v.Update(currentPostingsLoaded(v, []mail.Posting{{ID: 701, TopicID: 701}}))
+	v.Update(postingsRefreshedMsg{
+		requestID: oldLive, sourceKind: mail.KindTrash,
+		postings: []mail.Posting{{ID: 701, TopicID: 701}, {ID: 702, TopicID: 702}},
+	})
+	if len(v.postingList.postings) != 2 {
+		t.Fatal("failed restore prevented an otherwise valid refresh")
 	}
 }
