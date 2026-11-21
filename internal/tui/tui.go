@@ -72,6 +72,9 @@ type model struct {
 	calendarView *calendarView
 	journalView  *journalView
 
+	// Keep the reading position while modal help changes the thread viewport.
+	mailModalScroll *int
+
 	// The Screener, opened over the mail section with ctrl+s
 	screenerView *screenerView
 
@@ -311,6 +314,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return opened, tea.Batch(initCmd, openCmd)
 
 	case tea.WindowSizeMsg:
+		// A terminal resize lays out the selected link at its new dimensions.
+		m.mailModalScroll = nil
 		m.width = msg.Width
 		m.height = msg.Height
 		m.vc.width = msg.Width
@@ -802,11 +807,25 @@ func (m *model) updateHelpBindings() {
 			bindings = append(bindings, helpBinding{"ctrl+a", description})
 		}
 	}
+	// Opening a modal removes the link footer and changes the help height.
+	// Save the offset before that resize can reveal an old link or clamp the
+	// viewport near the bottom; restore it again when the modal closes.
+	mailThread := m.activeView == m.mailView && m.mailView.inThread
+	if mailThread && m.mailView.modal != nil && m.mailModalScroll == nil {
+		offset := m.mailView.topicViewport.YOffset()
+		m.mailModalScroll = &offset
+	}
 	m.help.setBindings(bindings)
 	contentHeight := m.contentHeight()
 	if contentHeight != m.vc.height {
 		m.vc.height = contentHeight
 		m.activeView.Resize(m.vc.width, contentHeight)
+	}
+	if mailThread && m.mailModalScroll != nil {
+		m.mailView.topicViewport.SetYOffset(*m.mailModalScroll)
+	}
+	if !mailThread || m.mailView.modal == nil {
+		m.mailModalScroll = nil
 	}
 }
 
