@@ -34,8 +34,9 @@ func newScreenerListCommand() *screenerListCommand {
 	listCommand.cmd = &cobra.Command{
 		Use:   "list",
 		Short: "List the senders waiting to be screened",
+		Long:  "List the senders still waiting in The Screener. Senders already approved or denied are listed by `hey screener history`.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns clearance IDs with the sender and the subject of what they sent. Feed the ID to `hey screener approve` or `hey screener deny`, and topic_id to `hey thread read` to read the thread first. Use --count for the number alone, which is a much cheaper request. --page continues from the next_page cursor of an earlier listing.",
+			"agent_notes": "Only senders still waiting — those already decided on, including any just approved or denied, are listed by `hey screener history`, the place to verify a decision. Returns clearance IDs with the sender and the subject of what they sent. Feed the ID to `hey screener approve` or `hey screener deny`, and topic_id to `hey thread read` to read the thread first. Use --count for the number alone, which is a much cheaper request. --page continues from the next_page cursor of an earlier listing.",
 		},
 		Example: `  hey screener list
   hey screener list --json
