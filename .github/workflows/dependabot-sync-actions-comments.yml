@@ -21,7 +21,7 @@ permissions: {}
 
 jobs:
   sync:
-    uses: basecamp/.github/.github/workflows/dependabot-sync-actions-comments.yml@d7a98882c52e021fa0d4ae31e92e56d03dcce774
+    uses: basecamp/.github/.github/workflows/dependabot-sync-actions-comments.yml@7f89ca5c8847c428244320be371f07bf96b6d226
     permissions:
       contents: write
       actions: write
@@ -29,4 +29,4 @@ jobs:
     # The deploy key is scoped to this repo's dependabot-sync environment
     # (deployment branches: default branch only); environment secrets cannot
     # be forwarded explicitly to a reusable workflow, so inherit is required.
-    secrets: inherit # zizmor: ignore[secrets-inherit] -- see above; the called workflow is SHA-pinned and reads only SYNC_ACTIONS_DEPLOY_KEY, gated by the dependabot-sync environment
+    secrets: inherit # zizmor: ignore[secrets-inherit] -- see above; the called workflow is SHA-pinned and reads SYNC_ACTIONS_DEPLOY_KEY, gated by the dependabot-sync environment, and the org PR bot key PR_BOT_PRIVATE_KEY
