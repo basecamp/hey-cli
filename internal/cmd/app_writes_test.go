@@ -92,6 +92,9 @@ func TestAppScreenerApproveBySenderID(t *testing.T) {
 	if len(decided) != 1 || decided[0].ID != 51 || decided[0].Status != "approved" {
 		t.Errorf("decided = %+v", decided)
 	}
+	if !appBreadcrumb(response, "hey -P this-computer screener history") {
+		t.Errorf("breadcrumbs = %+v", response.Breadcrumbs)
+	}
 	calls := appCalls(t, door)
 	if len(calls) != 1 || calls[0].Name != "screener.decide" ||
 		fmt.Sprint(calls[0].Arguments["sender"]) != "51" || calls[0].Arguments["decision"] != "in" {

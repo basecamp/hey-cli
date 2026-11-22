@@ -89,6 +89,10 @@ func screenInApp(cmd *cobra.Command, args []string, decision string) error {
 			Action:      opposite,
 			Command:     appCommandLine(fmt.Sprintf("screener %s %d", opposite, sender.ID)),
 			Description: undo,
+		}, output.Breadcrumb{
+			Action:      screenerHistoryBreadcrumb.Action,
+			Command:     appCommandLine("screener history"),
+			Description: screenerHistoryBreadcrumb.Description,
 		}),
 		appIDKind("sender"),
 	)

@@ -191,6 +191,28 @@ func TestScreenerListCarriesTheSenderAndWhatTheySent(t *testing.T) {
 	}
 }
 
+// A sender just approved or denied leaves the queue, so an agent reading the queue back
+// to check a decision finds nothing there: the list's help sends it to the history.
+func TestScreenerListHelpPointsToTheHistoryForDecisions(t *testing.T) {
+	cmd := newScreenerListCommand().cmd
+
+	if !strings.Contains(cmd.Long, "Senders already approved or denied are listed by `hey screener history`") {
+		t.Errorf("long help does not name the history: %q", cmd.Long)
+	}
+	if !strings.Contains(cmd.Annotations["agent_notes"], "including any just approved or denied, are listed by `hey screener history`, the place to verify a decision") {
+		t.Errorf("agent notes do not name the history: %q", cmd.Annotations["agent_notes"])
+	}
+}
+
+func screenerBreadcrumb(resp output.Response, command string) bool {
+	for _, crumb := range resp.Breadcrumbs {
+		if crumb.Command == command {
+			return true
+		}
+	}
+	return false
+}
+
 // The queue costs the server real work, so asking only for the number must not drag it
 // along -- and --count means a bare number here as it does everywhere else, so that
 // `n=$(hey screener list --count)` is that number.
@@ -324,6 +346,9 @@ func TestScreenerApprove(t *testing.T) {
 	if resp.Summary != "1 sender approved" {
 		t.Errorf("summary = %q", resp.Summary)
 	}
+	if !screenerBreadcrumb(resp, "hey screener history") {
+		t.Errorf("breadcrumbs = %+v", resp.Breadcrumbs)
+	}
 
 	requests := recorded.snapshot()
 	if len(requests) != 1 || requests[0].Method != http.MethodPatch || requests[0].Path != "/clearances/91.json" {
@@ -390,6 +415,9 @@ func TestScreenerDenySeveralSendersGoesThroughBulk(t *testing.T) {
 	}
 	if resp.Summary != "2 senders denied" {
 		t.Errorf("summary = %q", resp.Summary)
+	}
+	if !screenerBreadcrumb(resp, "hey screener history") {
+		t.Errorf("breadcrumbs = %+v", resp.Breadcrumbs)
 	}
 
 	requests := recorded.snapshot()

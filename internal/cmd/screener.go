@@ -221,8 +221,16 @@ func reportScreened(cmd *cobra.Command, clearances []generated.Clearance, status
 	}
 	return writeOK(results,
 		output.WithSummary(fmt.Sprintf("%d %s %s", len(results), senderNoun(len(results)), verb)),
-		output.WithBreadcrumbs(reverse),
+		output.WithBreadcrumbs(reverse, screenerHistoryBreadcrumb),
 	)
+}
+
+// screenerHistoryBreadcrumb follows a decision: a sender just approved or denied leaves
+// `hey screener list`, so the history is where the decision can be checked.
+var screenerHistoryBreadcrumb = output.Breadcrumb{
+	Action:      "history",
+	Command:     "hey screener history",
+	Description: "Check the decision among the senders already screened",
 }
 
 func describeSender(clearance generated.Clearance) string {
