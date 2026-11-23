@@ -527,6 +527,7 @@ func TestMCPCommandDoesntClaimWhenTheTokenCantBeRenewed(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/oauth/tokens":
 			refreshes.Add(1)
 			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`<html>private upstream trace at oauth_controller.rb:12</html>`))
 		case r.Method == http.MethodPut:
 			puts.Add(1)
 			_, _ = w.Write([]byte(`{"id":5,"topic_id":900}`))
@@ -568,8 +569,13 @@ func TestMCPCommandDoesntClaimWhenTheTokenCantBeRenewed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range []*mcp.CallToolResult{result, again} {
-		if strings.Contains(r.Content[0].(*mcp.TextContent).Text, "already sent") {
+		text := r.Content[0].(*mcp.TextContent).Text
+		if strings.Contains(text, "already sent") {
 			t.Errorf("the draft was claimed: %v", r.Content)
+		}
+		// The renewal's failure is named by its status, never the endpoint's body.
+		if !strings.Contains(text, "couldn't renew its sign-in") || strings.Contains(text, "private") || strings.Contains(text, "oauth_controller") {
+			t.Errorf("%q: want the renewal named without the endpoint's body", text)
 		}
 	}
 	if puts.Load() != 0 {

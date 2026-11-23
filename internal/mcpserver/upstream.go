@@ -75,7 +75,8 @@ func refreshReason(err error) (string, bool) {
 	case status != 0:
 		return fmt.Sprintf("hey mcp couldn't renew its sign-in: HEY answered HTTP %d", status), true
 	default:
-		return "hey mcp couldn't renew its sign-in: HEY didn't answer", true
+		// No status: HEY didn't answer, or its answer couldn't be used.
+		return "hey mcp couldn't renew its sign-in with HEY", true
 	}
 }
 

@@ -338,6 +338,11 @@ func (s *sender) checkGrant(ctx context.Context) error {
 	}
 	current, err := s.cfg.CurrentGrant(ctx)
 	if err != nil {
+		// A renewal that failed is named by its status, never the token
+		// endpoint's body.
+		if reason, failed := refreshReason(err); failed {
+			return errors.New(reason)
+		}
 		return fmt.Errorf("hey mcp couldn't read its sign-in (%w)", err)
 	}
 	if current != s.cfg.GrantKey {
