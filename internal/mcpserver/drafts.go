@@ -3,7 +3,6 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -17,6 +16,7 @@ import (
 	hey "github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/mcp/catalog"
+	"github.com/basecamp/mcp/gateway"
 )
 
 // Draft-first: every served operation that can deliver mail saves a draft
@@ -112,7 +112,7 @@ func keepSavedSender(ctx context.Context, api API, action string, params map[str
 	}
 	resp, err := api.Get(ctx, strings.ReplaceAll(draftEditPath, "{messageId}", url.PathEscape(id)))
 	if err != nil {
-		return nil, unread(err.Error())
+		return nil, unread(heyReason(err))
 	}
 	var edit generated.MessageEditState
 	var page struct {
@@ -159,16 +159,20 @@ func unconfirmedDraft(action string, resp *hey.Response) string {
 // else (a transport failure, a timeout, a 5xx) leaves open whether the save
 // landed.
 func refusedByHEY(err error) bool {
-	var apiErr *hey.Error
-	return errors.As(err, &apiErr) && apiErr.HTTPStatus >= 400 && apiErr.HTTPStatus < 500 && apiErr.HTTPStatus != http.StatusRequestTimeout
+	status := heyUpstream(err, gateway.KindWrite, "").Status
+	return status >= 400 && status < 500 && status != http.StatusRequestTimeout
 }
 
 // unsettledDraft is the error for a draft save whose outcome is unknown: the
 // request may have reached HEY, but no answer says whether it acted.
 func unsettledDraft(action string, err error) string {
-	return fmt.Sprintf("%s may have saved a draft: %v. HEY may have acted before the request failed, so check the thread and Drafts in HEY before trying again; a retry could save a second copy.",
-		action, err)
+	return fmt.Sprintf("%s may have saved a draft: %s. HEY may have acted before the request failed. %s",
+		action, heyReason(err), unsettledDraftNext)
 }
+
+// unsettledDraftNext is what to do after a draft save whose outcome is
+// unknown.
+const unsettledDraftNext = "Check the thread and Drafts in HEY before trying again; a retry could save a second copy."
 
 // draftPath is a draft save's Location path, …/messages/{entry_id}, as the
 // SDK's own draft calls read it.

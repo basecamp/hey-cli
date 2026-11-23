@@ -527,6 +527,7 @@ func TestMCPCommandDoesntClaimWhenTheTokenCantBeRenewed(t *testing.T) {
 		case r.Method == http.MethodPost && r.URL.Path == "/oauth/tokens":
 			refreshes.Add(1)
 			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`<html>private upstream trace at oauth_controller.rb:12</html>`))
 		case r.Method == http.MethodPut:
 			puts.Add(1)
 			_, _ = w.Write([]byte(`{"id":5,"topic_id":900}`))
@@ -568,12 +569,60 @@ func TestMCPCommandDoesntClaimWhenTheTokenCantBeRenewed(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, r := range []*mcp.CallToolResult{result, again} {
-		if strings.Contains(r.Content[0].(*mcp.TextContent).Text, "already sent") {
+		text := r.Content[0].(*mcp.TextContent).Text
+		if strings.Contains(text, "already sent") {
 			t.Errorf("the draft was claimed: %v", r.Content)
+		}
+		// The renewal's failure is named by its status, never the endpoint's body.
+		if !strings.Contains(text, "couldn't renew its sign-in") || strings.Contains(text, "private") || strings.Contains(text, "oauth_controller") {
+			t.Errorf("%q: want the renewal named without the endpoint's body", text)
 		}
 	}
 	if puts.Load() != 0 {
 		t.Errorf("sent (%d PUTs) on a token that couldn't be renewed", puts.Load())
+	}
+}
+
+// A renewal HEY's token endpoint fails (a 502 with a body of its own) is said in hey
+// mcp's words: the status, and that the request wasn't sent, never the endpoint's body.
+func TestMCPCommandWordsAFailedRenewalWithoutItsBody(t *testing.T) {
+	var refreshes atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/oauth/tokens":
+			refreshes.Add(1)
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`<html>private upstream trace at oauth_controller.rb:12</html>`))
+		default:
+			t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	orig := mcpTokenExpiresIn
+	mcpTokenExpiresIn = -time.Minute // expired: every use asks for a renewal
+	t.Cleanup(func() { mcpTokenExpiresIn = orig })
+	session := runMCPCommand(t, upstream)
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "hey_todos",
+		Arguments: map[string]any{"action": "create_calendar_todo", "params": map[string]any{"calendar_todo": map[string]any{"title": "Ship it"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refreshes.Load() == 0 {
+		t.Fatal("the renewal was never tried, so this doesn't test a failed one")
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	want := "Error: hey mcp couldn't renew its sign-in: HEY answered HTTP 502, so this request wasn't sent\nNext: Try again later."
+	if !result.IsError || text != want {
+		t.Errorf("got  %q\nwant %q", text, want)
+	}
+	for _, leak := range []string{"private", "oauth_controller", "<html>", "token refresh failed"} {
+		if strings.Contains(text, leak) {
+			t.Errorf("%q carries %q", text, leak)
+		}
 	}
 }
 

@@ -11,7 +11,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/basecamp/actioncable-client/go/v2 v2.0.2
 	github.com/basecamp/hey-sdk/go v0.35.1
-	github.com/basecamp/mcp v0.0.0-20261119020105-1a6d02c5380a
+	github.com/basecamp/mcp v0.1.0
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.2

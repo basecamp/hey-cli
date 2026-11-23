@@ -263,6 +263,7 @@ func TestDraftSaveWithAnUnknownOutcomeSaysToCheckHEY(t *testing.T) {
 		"server error":       &hey.Error{Message: "server error", HTTPStatus: http.StatusBadGateway},
 		"request timeout":    &hey.Error{Message: "timeout", HTTPStatus: http.StatusRequestTimeout},
 	}
+	upstream := map[string]bool{"timeout": true, "server error": true}
 	for name, callErr := range unknown {
 		for _, action := range []string{"create_message", "create_reply", "update_message"} {
 			t.Run(name+"/"+action, func(t *testing.T) {
@@ -270,8 +271,15 @@ func TestDraftSaveWithAnUnknownOutcomeSaysToCheckHEY(t *testing.T) {
 				if !isError {
 					t.Fatalf("failed save reported as a success: %s", text)
 				}
-				if !strings.Contains(text, action+" may have saved a draft") || !strings.Contains(text, "before trying again") || !strings.Contains(text, callErr.Error()) {
-					t.Errorf("error = %q, want the cause and a warning to check HEY before retrying", text)
+				if !strings.Contains(text, "may have saved a draft") && !strings.Contains(text, "may or may not have been made") {
+					t.Errorf("error = %q, want that the save may have landed", text)
+				}
+				if !strings.Contains(text, "Check the thread and Drafts in HEY before trying again; a retry could save a second copy.") {
+					t.Errorf("error = %q, want a warning to check HEY before retrying", text)
+				}
+				// HEY failing or not answering is said in hey mcp's words, not the error's.
+				if upstream[name] && strings.Contains(text, callErr.Error()) {
+					t.Errorf("error = %q, want no %q", text, callErr.Error())
 				}
 			})
 		}

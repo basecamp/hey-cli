@@ -250,6 +250,9 @@ func (s *sender) asked(draftID int64) confirm.State {
 	}
 }
 
+// sentNext is what a send that may have gone out says to do next.
+const sentNext = "Check Sent in HEY before doing anything else; hey mcp won't send this draft again."
+
 func alreadySent() *mcp.CallToolResult {
 	return gateway.ErrorResult("not sent: hey mcp already sent this draft, or a send of it is in progress or failed; it won't send it again for 24 hours. Check Sent in HEY")
 }
@@ -297,9 +300,12 @@ func (s *sender) confirmAndSend(ctx context.Context, draftID int64, rawState str
 	sent, err := s.cfg.Drafts.SendDraft(ctx, draftID, snap.content())
 	if err != nil {
 		if refusedByHEY(err) {
-			return gateway.ErrorResult("HEY refused the send: %v. The draft is still a draft, and hey mcp won't send it again for 24 hours; send it from HEY: %s", err, s.editURL(draftID)), nil
+			return gateway.ErrorResult("HEY refused the send: %s. The draft is still a draft, and hey mcp won't send it again for 24 hours; send it from HEY: %s", heyReason(err), s.editURL(draftID)), nil
 		}
-		return gateway.ErrorResult("the send may have gone out: %v. Check Sent in HEY before doing anything else; hey mcp won't send this draft again", err), nil
+		if answer := heyUpstreamFailure(err, gateway.KindSend, sentNext); answer != nil {
+			return answer, nil
+		}
+		return gateway.ErrorResult("the send may have gone out: %s. %s", heyReason(err), sentNext), nil
 	}
 
 	// HEY refuses a delivery it won't make (usually the account's sending limit) by
@@ -332,6 +338,11 @@ func (s *sender) checkGrant(ctx context.Context) error {
 	}
 	current, err := s.cfg.CurrentGrant(ctx)
 	if err != nil {
+		// A renewal that failed is named by its status, never the token
+		// endpoint's body.
+		if reason, failed := refreshReason(err); failed {
+			return errors.New(reason)
+		}
 		return fmt.Errorf("hey mcp couldn't read its sign-in (%w)", err)
 	}
 	if current != s.cfg.GrantKey {
@@ -500,7 +511,7 @@ func (s *sender) review(ctx context.Context, draftID int64) (*draftSnapshot, *mc
 		if errors.As(err, &apiErr) && (apiErr.HTTPStatus == http.StatusNotFound || apiErr.HTTPStatus == http.StatusUnprocessableEntity) {
 			return refuse("not sent: %d isn't a draft HEY can send (it may have been sent, trashed or deleted)", draftID)
 		}
-		return refuse("not sent: couldn't read draft %d: %v", draftID, err)
+		return refuse("not sent: couldn't read draft %d: %s", draftID, heyReason(err))
 	}
 	// HEY serves a message's edit state only while it's a live draft (haystack
 	// MessagesController#ensure_revisable_entry: drafted and not delayed), so reading it
