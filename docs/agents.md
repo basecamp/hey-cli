@@ -127,6 +127,16 @@ mail may have been sent, so check HEY before trying again. A save that fails wit
 answer from HEY (a dropped connection, a timeout, a 5xx) may still have been saved, and
 its error says to check Drafts before retrying.
 
+`hey_attach`'s `attach_file` attaches a file to a saved draft, after its body, and sends
+nothing. It takes the file's name, media type and bytes as `content_base64`, up to 18 MB,
+with an optional `sha256` of the bytes that must match or nothing is attached; HEY is asked
+nothing until the bytes check out. `hey mcp` reads a call of up to 32 MiB from its client,
+room for the largest file; a client that writes a larger one ends the session. The file goes to HEY as a direct upload, then into the
+draft with the rest of the draft as it was. A draft scheduled to send is refused (change it
+in HEY), and HEY itself refuses one in its undo window. An agent with a shell attaches a file on disk
+with `hey compose --draft --attach <path>` or `hey reply <thread-id> --draft --attach <path>`
+instead. `hey_attach` is served whenever `hey mcp` can write, never under `--read-only`.
+
 Delivery is one action in a tool of its own: `hey_send`'s `send_draft`, with the draft's
 id. Each call asks you to confirm the email in your MCP client (an MCP elicitation),
 showing the sending address, To, Cc and Bcc (a dash when empty), the subject, attachments,

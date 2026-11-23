@@ -31,13 +31,17 @@ type Config struct {
 	// tool (send.go) when the threads domain is served and the server isn't read-only.
 	// Nil serves no way to send.
 	Send *SendConfig
+	// Attach serves attach_file in its own hey_attach tool (attach.go) when the threads
+	// domain is served and the server isn't read-only. Nil serves none.
+	Attach *AttachConfig
 }
 
 // Server wraps the toolkit gateway serving hey's derived catalog, dispatching
 // through the CLI's authenticated SDK client.
 type Server struct {
-	gw     *gateway.Server
-	sender *sender
+	gw       *gateway.Server
+	sender   *sender
+	attacher *attacher
 }
 
 // New derives the catalog and hands it to the gateway, which applies the
@@ -62,6 +66,13 @@ func New(api API, cfg Config) (*Server, error) {
 		}
 	}
 
+	var attach *attacher
+	if cfg.Attach != nil && !cfg.ReadOnly && servesDomain(cfg.Domains, "threads") {
+		if attach, err = newAttacher(*cfg.Attach); err != nil {
+			return nil, fmt.Errorf("serve attach_file: %w", err)
+		}
+	}
+
 	gw, err := gateway.New(cat.GatewayDomains(), gateway.Config{
 		ReadOnly: cfg.ReadOnly,
 		Domains:  cfg.Domains,
@@ -71,12 +82,17 @@ func New(api API, cfg Config) (*Server, error) {
 		return nil, err
 	}
 
-	return &Server{gw: gw, sender: send}, nil
+	return &Server{gw: gw, sender: send, attacher: attach}, nil
 }
 
 // servesDomain reports whether a domain selection includes key; empty selects all.
 func servesDomain(selected []string, key string) bool {
 	return len(selected) == 0 || slices.Contains(selected, key)
+}
+
+// ServesAttach reports whether attach_file is served.
+func (s *Server) ServesAttach() bool {
+	return s.attacher != nil
 }
 
 // ServesSend reports whether send_draft is served.
@@ -90,9 +106,13 @@ func (s *Server) Domains() []gateway.Domain {
 }
 
 // BuildMCPServer constructs the SDK MCP server with one gateway tool per
-// served domain, and hey_send when send_draft is served.
+// served domain, hey_attach when attach_file is served, and hey_send when
+// send_draft is served.
 func (s *Server) BuildMCPServer(logger *slog.Logger) *mcp.Server {
 	server := s.gw.BuildMCPServer(&mcp.Implementation{Name: Name, Version: version.Version}, logger)
+	if s.attacher != nil {
+		server.AddTool(s.attacher.tool(), s.attacher.handle)
+	}
 	if s.sender != nil {
 		server.AddTool(s.sender.tool(), s.sender.handle)
 		server.AddReceivingMiddleware(markSendable, confirm.FilterTools(listSendToClientsThatCanAsk))
