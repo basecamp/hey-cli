@@ -658,7 +658,7 @@ func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) e
 	var refusal *tokenEndpointError
 	if !errors.As(err, &refusal) {
 		// No answer from the server, so no verdict on the grant.
-		return fmt.Errorf("token refresh failed: %w", err)
+		return &refreshFailedError{err: err}
 	}
 
 	if refusal.rateLimited() {
@@ -667,7 +667,7 @@ func (m *Manager) accountForRefreshFailure(err error, sentRefreshToken string) e
 	}
 
 	if !refusal.grantRefused() {
-		return fmt.Errorf("token refresh failed: %w", err)
+		return &refreshFailedError{err: err, status: refusal.StatusCode}
 	}
 
 	// Forget it under the lock that already spans this load-refresh-save, so the
@@ -787,6 +787,29 @@ func errNotAuthenticated(cause error) *apierr.Error {
 
 // errRefusedGrant reports a refresh token the server answered invalid_grant for.
 // cleanupErr is the failure to clear it from the store, when there was one.
+// refreshFailedError is a token refresh that failed without a verdict on the grant:
+// the token endpoint didn't answer, or answered something other than a refusal
+// of it (a 5xx, say). Its text carries the endpoint's answer, for the CLI.
+type refreshFailedError struct {
+	err    error
+	status int // the token endpoint's status, 0 when it didn't answer
+}
+
+func (e *refreshFailedError) Error() string { return "token refresh failed: " + e.err.Error() }
+
+func (e *refreshFailedError) Unwrap() error { return e.err }
+
+// RefreshFailed reports whether err is a token refresh that failed without a
+// verdict on the grant, with the token endpoint's status (0 when it didn't
+// answer). The request that needed the refresh was never sent.
+func RefreshFailed(err error) (status int, failed bool) {
+	var refresh *refreshFailedError
+	if !errors.As(err, &refresh) {
+		return 0, false
+	}
+	return refresh.status, true
+}
+
 func errRefusedGrant(cleanupErr error) *apierr.Error {
 	if cleanupErr != nil {
 		err := errNoCredential(fmt.Sprintf("HEY refused the stored refresh token: the session has expired or was revoked. The stored credentials could not be cleared: %v", cleanupErr), cleanupErr)

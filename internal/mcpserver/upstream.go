@@ -8,6 +8,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/basecamp/mcp/gateway"
+
+	"github.com/basecamp/hey-cli/internal/auth"
 )
 
 // A failed HEY call is answered in hey mcp's words, never in the text the
@@ -45,12 +47,36 @@ func heyUpstream(err error, kind gateway.Kind, next string) gateway.Upstream {
 }
 
 // heyUpstreamFailure answers err in the toolkit's words when it is HEY
-// failing, not answering, or a 404, and is nil otherwise.
+// failing, not answering, or a 404, and is nil otherwise. A sign-in renewal
+// that failed is answered in hey mcp's words for it: the request was never
+// sent.
 func heyUpstreamFailure(err error, kind gateway.Kind, next string) *mcp.CallToolResult {
 	if err == nil {
 		return nil
 	}
+	if reason, failed := refreshReason(err); failed {
+		// Nothing reached HEY, so a write's or a draft's check-first step
+		// doesn't apply; a send keeps its own, since the draft stays claimed.
+		if kind != gateway.KindSend || next == "" {
+			next = "Try again later."
+		}
+		return gateway.ErrorResult("Error: %s, so this request wasn't sent\nNext: %s", reason, next)
+	}
 	return gateway.UpstreamFailure(err, heyUpstream(err, kind, next))
+}
+
+// refreshReason says why renewing hey mcp's sign-in failed, when it did, by
+// the token endpoint's status alone: its body is never shown.
+func refreshReason(err error) (string, bool) {
+	status, failed := auth.RefreshFailed(err)
+	switch {
+	case !failed:
+		return "", false
+	case status != 0:
+		return fmt.Sprintf("hey mcp couldn't renew its sign-in: HEY answered HTTP %d", status), true
+	default:
+		return "hey mcp couldn't renew its sign-in: HEY didn't answer", true
+	}
 }
 
 // heyFailure answers a failed HEY call.
@@ -65,6 +91,9 @@ func heyFailure(err error, kind gateway.Kind) *mcp.CallToolResult {
 // says what became of the request: the status HEY answered, or that it
 // didn't answer, never the client's text for an upstream failure or a 404.
 func heyReason(err error) string {
+	if reason, failed := refreshReason(err); failed {
+		return reason
+	}
 	call := heyUpstream(err, gateway.KindRead, "")
 	switch {
 	case call.Status >= 500 || call.Status == http.StatusNotFound:
