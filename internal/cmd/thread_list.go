@@ -64,7 +64,7 @@ func newThreadListCommand() *threadListCommand {
 		Short: "List threads in a system view",
 		Long:  "List thread IDs from HEY's Sent, Spam, Trash, or Everything view.",
 		Annotations: map[string]string{
-			"agent_notes": "Returns thread IDs, not box item IDs. Use topic_id with hey thread read, reply, forward, share, and attachment list. --page continues from the opaque next_page cursor of an earlier listing of the same view.",
+			"agent_notes": "Returns thread IDs, not box item IDs. Use topic_id with hey thread read, reply, forward, share, attachment list, and restore (a trashed thread has no box item ID). --page continues from the opaque next_page cursor of an earlier listing of the same view.",
 		},
 		Example: `  hey thread list --in sent
   hey thread list --in trash --limit 10
