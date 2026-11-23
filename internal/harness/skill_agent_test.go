@@ -3,8 +3,18 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+// executableName is the name an installer gives binary on this platform:
+// grok.exe on Windows, grok elsewhere.
+func executableName(binary string) string {
+	if runtime.GOOS == "windows" {
+		return binary + ".exe"
+	}
+	return binary
+}
 
 // Every shared-skill agent is one row of the same table, so every test here
 // runs once per row: a behavior Codex has that Grok lacks is a bug in the
@@ -87,7 +97,7 @@ func TestSkillAgentFindBinaryOffPath(t *testing.T) {
 				if got := agent.FindBinary(); got != "" {
 					t.Fatalf("FindBinary() = %q before any install, want none", got)
 				}
-				stub := filepath.Join(binDir(t, home), agent.Binary)
+				stub := filepath.Join(binDir(t, home), executableName(agent.Binary))
 				if err := os.MkdirAll(filepath.Dir(stub), 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -98,6 +108,32 @@ func TestSkillAgentFindBinaryOffPath(t *testing.T) {
 					t.Errorf("FindBinary() = %q, want %q", got, stub)
 				}
 			})
+		}
+	})
+}
+
+// Off PATH, something named after the binary that cannot run is not the
+// agent: a directory, or a file without the executable bit.
+func TestSkillAgentFindBinaryOffPathSkipsNonExecutables(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no executable bit; PATHEXT decides there")
+	}
+	forEachSkillAgent(t, func(t *testing.T, agent SkillAgent) {
+		home := tempHome(t)
+		t.Setenv("PATH", t.TempDir())
+		t.Setenv(agent.HomeEnv, "")
+		if err := os.MkdirAll(filepath.Join(home, ".local", "bin", agent.Binary), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		homeBin := filepath.Join(home, agent.HomeDir, "bin")
+		if err := os.MkdirAll(homeBin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(homeBin, agent.Binary), []byte("not a program"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := agent.FindBinary(); got != "" {
+			t.Errorf("FindBinary() = %q, want none for a directory and a non-executable file", got)
 		}
 	})
 }

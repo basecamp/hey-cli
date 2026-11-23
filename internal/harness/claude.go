@@ -69,9 +69,10 @@ func FindClaudeBinary() string {
 	if err != nil || home == "" {
 		return ""
 	}
-	candidate := filepath.Join(filepath.Clean(home), ".local", "bin", "claude")
-	if _, err := os.Stat(candidate); err == nil {
-		return candidate
+	// LookPath, the probe SkillAgent.FindBinary uses too: it requires an
+	// executable, and tries PATHEXT on Windows.
+	if p, err := exec.LookPath(filepath.Join(filepath.Clean(home), ".local", "bin", "claude")); err == nil {
+		return p
 	}
 	return ""
 }

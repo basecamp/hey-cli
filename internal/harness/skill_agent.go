@@ -80,9 +80,12 @@ func (a SkillAgent) FindBinary() string {
 	if agentHome := a.Home(); agentHome != "" {
 		candidates = append(candidates, filepath.Join(agentHome, "bin", a.Binary))
 	}
+	// LookPath, not Stat: it skips a directory or a file that is not
+	// executable, and on Windows tries PATHEXT, so ~/.grok/bin/grok finds
+	// grok.exe.
 	for _, candidate := range candidates {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path
 		}
 	}
 	return ""
