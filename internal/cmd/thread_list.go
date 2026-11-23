@@ -3,15 +3,12 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"net/http"
-	"net/url"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/basecamp/hey-sdk/go/pkg/generated"
+	"github.com/basecamp/hey-sdk/go/pkg/hey"
 
 	"github.com/basecamp/hey-cli/internal/apierr"
 	"github.com/basecamp/hey-cli/internal/output"
@@ -30,7 +27,7 @@ type threadListCommand struct {
 
 type threadListView struct {
 	title string
-	path  string
+	read  func(context.Context, string) (*hey.TopicListPage, error)
 }
 
 type threadListPage struct {
@@ -51,10 +48,16 @@ type threadListRow struct {
 }
 
 var threadListViews = map[string]threadListView{
-	"sent":       {title: "Sent", path: "/topics/sent.json"},
-	"spam":       {title: "Spam", path: "/topics/spam.json"},
-	"trash":      {title: "Trash", path: "/topics/trash.json"},
-	"everything": {title: "Everything", path: "/topics/everything.json"},
+	"sent": {title: "Sent", read: readSentPage},
+	"spam": {title: "Spam", read: func(ctx context.Context, cursor string) (*hey.TopicListPage, error) {
+		return sdk.Topics().GetSpamPage(ctx, cursor)
+	}},
+	"trash": {title: "Trash", read: func(ctx context.Context, cursor string) (*hey.TopicListPage, error) {
+		return sdk.Topics().GetTrashPage(ctx, cursor)
+	}},
+	"everything": {title: "Everything", read: func(ctx context.Context, cursor string) (*hey.TopicListPage, error) {
+		return sdk.Topics().GetEverythingPage(ctx, cursor)
+	}},
 }
 
 func newThreadListCommand() *threadListCommand {
@@ -200,75 +203,38 @@ func writeThreadListMarkdown(cmd *cobra.Command, title string, topics []generate
 	return nil
 }
 
-// The typed topic-list helpers return the JSON body but not the geared_pagination Link
-// header. Read the same fixed route through the SDK document client so the command can
-// carry its opaque cursor forward, then decode the generated response shape.
 func readThreadListPage(ctx context.Context, view threadListView, cursor string) (threadListPage, error) {
-	response, err := sdk.Get(ctx, threadListPagePath(view.path, cursor))
+	page, err := view.read(ctx, cursor)
 	if err != nil {
 		return threadListPage{}, apierr.FromSDK(err)
 	}
-	if response == nil {
-		return threadListPage{}, apierr.ErrAPI(0, fmt.Sprintf("HEY returned no %s thread list", view.title))
-	}
-
-	var result generated.TopicListResponse
-	if err := response.UnmarshalData(&result); err != nil {
-		return threadListPage{}, apierr.ErrAPI(response.StatusCode, fmt.Sprintf("could not read the %s thread list: %v", view.title, err))
-	}
-	topics := result.Topics
+	topics := page.Topics
 	if topics == nil {
 		topics = []generated.Topic{}
 	}
-	total, _ := strconv.Atoi(response.Headers.Get("X-Total-Count"))
 	return threadListPage{
 		page: pageResult[generated.Topic]{
 			Items:  topics,
-			Cursor: threadListNextPage(response.Headers),
-			Total:  total,
+			Cursor: page.NextPage,
+			Total:  page.TotalCount,
 		},
-		title: result.Title,
+		title: page.Title,
 	}, nil
 }
 
-func threadListPagePath(path, cursor string) string {
-	if cursor == "" {
-		return path
+// readSentPage reads Sent into the shape of the other views. Sent pages by offset in HEY
+// and sends no total, so its TotalCount stays zero.
+func readSentPage(ctx context.Context, cursor string) (*hey.TopicListPage, error) {
+	page, err := sdk.Topics().GetSentPage(ctx, cursor)
+	if err != nil || page == nil {
+		return nil, err
 	}
-	query := url.Values{"page": {cursor}}
-	return path + "?" + query.Encode()
-}
-
-func threadListNextPage(headers http.Header) string {
-	for _, value := range headers.Values("Link") {
-		for part := range strings.SplitSeq(value, ",") {
-			start := strings.IndexByte(part, '<')
-			end := strings.IndexByte(part, '>')
-			if start < 0 || end <= start+1 || !threadListLinkIsNext(part[end+1:]) {
-				continue
-			}
-			target, err := url.Parse(part[start+1 : end])
-			if err == nil {
-				return target.Query().Get("page")
-			}
-		}
-	}
-	return ""
-}
-
-func threadListLinkIsNext(parameters string) bool {
-	for _, parameter := range strings.Split(parameters, ";") {
-		parts := strings.SplitN(strings.TrimSpace(parameter), "=", 2)
-		if len(parts) != 2 || !strings.EqualFold(parts[0], "rel") {
-			continue
-		}
-		for _, relation := range strings.Fields(strings.Trim(parts[1], `"`)) {
-			if strings.EqualFold(relation, "next") {
-				return true
-			}
-		}
-	}
-	return false
+	return &hey.TopicListPage{
+		Title:       page.Title,
+		Description: page.Description,
+		Topics:      page.Topics,
+		NextPage:    page.NextPage,
+	}, nil
 }
 
 func makeThreadListTopics(topics []generated.Topic) []threadListTopic {

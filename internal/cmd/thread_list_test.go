@@ -21,14 +21,19 @@ const threadListFixture = `{
 }`
 
 func TestThreadListViews(t *testing.T) {
+	// HEY sends X-Total-Count on every view but Sent, which pages by offset and counts
+	// nothing; Sent's total is what was read.
 	tests := []struct {
-		view string
-		path string
+		view       string
+		path       string
+		total      string
+		wantTotal  float64
+		wantNotice string
 	}{
-		{view: "sent", path: "/topics/sent.json"},
-		{view: "spam", path: "/topics/spam.json"},
-		{view: "trash", path: "/topics/trash.json"},
-		{view: "everything", path: "/topics/everything.json"},
+		{view: "sent", path: "/topics/sent.json", wantTotal: 1, wantNotice: "Showing 1 results. More available; use --all to fetch all."},
+		{view: "spam", path: "/topics/spam.json", total: "2", wantTotal: 2, wantNotice: "Showing 1 of 2 results. Use --all to see everything."},
+		{view: "trash", path: "/topics/trash.json", total: "2", wantTotal: 2, wantNotice: "Showing 1 of 2 results. Use --all to see everything."},
+		{view: "everything", path: "/topics/everything.json", total: "2", wantTotal: 2, wantNotice: "Showing 1 of 2 results. Use --all to see everything."},
 	}
 
 	for _, test := range tests {
@@ -45,7 +50,9 @@ func TestThreadListViews(t *testing.T) {
 					t.Errorf("page = %q, want current/cursor", got)
 				}
 				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Total-Count", "2")
+				if test.total != "" {
+					w.Header().Set("X-Total-Count", test.total)
+				}
 				w.Header().Set("Link", `<https://example.test`+test.path+`?page=next%2Fcursor>; rel="next"`)
 				_, _ = io.WriteString(w, threadListFixture)
 			}), "thread", "list", "--in", test.view, "--page", "current/cursor")
@@ -58,14 +65,14 @@ func TestThreadListViews(t *testing.T) {
 			if response.Summary != "1 thread in Served view" {
 				t.Errorf("summary = %q", response.Summary)
 			}
-			if response.Notice != "Showing 1 of 2 results. Use --all to see everything." {
-				t.Errorf("notice = %q", response.Notice)
+			if response.Notice != test.wantNotice {
+				t.Errorf("notice = %q, want %q", response.Notice, test.wantNotice)
 			}
 			if got := response.Meta["next_page"]; got != "next/cursor" {
 				t.Errorf("next_page = %#v, want next/cursor", got)
 			}
-			if got := response.Meta["total_count"]; got != float64(2) {
-				t.Errorf("total_count = %#v, want 2", got)
+			if got := response.Meta["total_count"]; got != test.wantTotal {
+				t.Errorf("total_count = %#v, want %v", got, test.wantTotal)
 			}
 			if got := response.Meta["pages_fetched"]; got != float64(1) {
 				t.Errorf("pages_fetched = %#v, want 1", got)
@@ -228,7 +235,7 @@ func TestThreadListOutputFormats(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("X-Total-Count", "2")
-		w.Header().Set("Link", `</topics/sent.json?page=next%2Fcursor>; rel="next"`)
+		w.Header().Set("Link", `</topics/trash.json?page=next%2Fcursor>; rel="next"`)
 		_, _ = io.WriteString(w, threadListFixture)
 	})
 
@@ -246,7 +253,7 @@ func TestThreadListOutputFormats(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			stdout, stderr, err := runFormattedCommandWithStderr(t, handler, test.formatArgs, "thread", "list", "--in", "sent")
+			stdout, stderr, err := runFormattedCommandWithStderr(t, handler, test.formatArgs, "thread", "list", "--in", "trash")
 			if err != nil {
 				t.Fatalf("execute: %v", err)
 			}
