@@ -3,6 +3,7 @@ package harness
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/basecamp/hey-cli/internal/version"
@@ -147,5 +148,31 @@ func TestCheckClaudePluginRejectsMalformedRegistry(t *testing.T) {
 	writeInstalledPlugins(t, home, `{"version": 2, "plugins": {"hey@37signals": [{"version"`)
 	if check := CheckClaudePlugin(); check.Status != "fail" {
 		t.Errorf("malformed registry: %+v", check)
+	}
+}
+
+// Off PATH, ~/.local/bin/claude counts only when it can run.
+func TestFindClaudeBinaryOffPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no executable bit; PATHEXT decides there")
+	}
+	home := tempHome(t)
+	t.Setenv("PATH", t.TempDir())
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stub := filepath.Join(bin, "claude")
+	if err := os.WriteFile(stub, []byte("not a program"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindClaudeBinary(); got != "" {
+		t.Errorf("FindClaudeBinary() = %q, want none for a non-executable file", got)
+	}
+	if err := os.Chmod(stub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := FindClaudeBinary(); got != stub {
+		t.Errorf("FindClaudeBinary() = %q, want %q", got, stub)
 	}
 }

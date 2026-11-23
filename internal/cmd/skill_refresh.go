@@ -48,9 +48,12 @@ func refreshSkillsIfVersionChanged() bool {
 	}
 	sentinelPath := filepath.Join(configDir, ".last-run-version")
 
-	// Legacy cleanup still depends on the active Codex home, so switching
-	// CODEX_HOME gets one migration pass per release.
-	sentinelState := version.Version + "\n" + harness.CodexHome() + "\n"
+	// Legacy cleanup still depends on each agent's active home, so switching
+	// CODEX_HOME or GROK_HOME gets one migration pass per release.
+	sentinelState := version.Version + "\n"
+	for _, agent := range harness.SkillAgents() {
+		sentinelState += agent.Home() + "\n"
+	}
 	data, err := os.ReadFile(sentinelPath) // #nosec G304 -- fixed path under the user config dir
 	if err == nil && string(data) == sentinelState {
 		return false
@@ -128,11 +131,14 @@ func refreshInstalledSkills() (updated, failed int) {
 		}
 	}
 
-	// Current Codex reads the shared ~/.agents skill. A copy from an older
+	// Shared-skill agents read ~/.agents directly. A copy from an older
 	// release would produce a duplicate entry, so migrate it away when its
 	// ownership marker proves hey-cli created it.
-	if failed == 0 {
-		if removed, err := migrateLegacyCodexSkill(); err != nil {
+	for _, agent := range harness.SkillAgents() {
+		if failed != 0 {
+			break
+		}
+		if removed, err := migrateLegacySkill(agent); err != nil {
 			failed++
 		} else if removed {
 			updated++

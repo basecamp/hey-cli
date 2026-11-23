@@ -14,7 +14,7 @@ import (
 )
 
 // agentSetupEnv selects which coding agents `setup agents` targets.
-// Values: claude | codex | all | none. Empty (unset) means auto-detect.
+// Values: claude | codex | grok | all | none. Empty (unset) means auto-detect.
 const agentSetupEnv = "HEY_SETUP_AGENT"
 
 // newSetupAgentsCommand builds `hey setup agents`. It always runs
@@ -28,7 +28,7 @@ func newSetupAgentsCommand() *cobra.Command {
 		Use:   "agents",
 		Short: "Install or remove HEY coding-agent integrations",
 		Long: "Install the baseline HEY agent skill and attempt to connect coding agents.\n\n" +
-			"Selection is controlled by " + agentSetupEnv + ": claude, codex, all, or none. When\n" +
+			"Selection is controlled by " + agentSetupEnv + ": claude, codex, grok, all, or none. When\n" +
 			"unset, a single detected agent is connected; when several are detected none is\n" +
 			"guessed — the per-agent `hey setup <id>` commands are surfaced instead. Use\n" +
 			"--remove to uninstall the HEY integrations and managed skill files.",
@@ -36,7 +36,7 @@ func newSetupAgentsCommand() *cobra.Command {
 		// or confusion with `setup <id>`). Reject them rather than silently ignore.
 		Args: cobra.NoArgs,
 		Annotations: map[string]string{
-			"agent_notes": "Never prompts. Set " + agentSetupEnv + "=claude|codex|all|none to choose; unset auto-detects a single agent. --remove uninstalls HEY's managed agent integrations.",
+			"agent_notes": "Never prompts. Set " + agentSetupEnv + "=claude|codex|grok|all|none to choose; unset auto-detects a single agent. --remove uninstalls HEY's managed agent integrations.",
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if remove {
@@ -102,13 +102,13 @@ func runNonInteractiveAgentSetup(cmd *cobra.Command) error {
 		targets = harness.AllAgents()
 	case "none":
 		// baseline skill only
-	case "claude", "codex":
+	case "claude", "codex", "grok":
 		if a := harness.FindAgent(selector); a != nil {
 			targets = []harness.AgentInfo{*a}
 		}
 	default:
 		selector = "invalid"
-		warnings = append(warnings, fmt.Sprintf("Unknown %s value %q; installed the baseline skill only (expected claude, codex, all, or none)", agentSetupEnv, selectorRaw))
+		warnings = append(warnings, fmt.Sprintf("Unknown %s value %q; installed the baseline skill only (expected claude, codex, grok, all, or none)", agentSetupEnv, selectorRaw))
 	}
 
 	// Run handlers in id order so aggregation is deterministic.
@@ -213,7 +213,7 @@ func runAgentSetupHandler(cmd *cobra.Command, agent harness.AgentInfo) agentSetu
 		id:             agent.ID,
 		name:           agent.Name,
 		detectedBefore: agent.Detect != nil && agent.Detect(),
-		binaryAbsent:   !agentBinaryPresent(agent.ID),
+		binaryAbsent:   !agentBinaryPresent(agent),
 	}
 
 	if handler, ok := agentSetupHandlers[agent.ID]; ok && handler.RunNonInteractive != nil {
@@ -235,17 +235,11 @@ func runAgentSetupHandler(cmd *cobra.Command, agent harness.AgentInfo) agentSetu
 	return rec
 }
 
-// agentBinaryPresent reports whether the agent's executable is on disk.
-// Unknown agents are assumed present so no bogus remediation is synthesized.
-func agentBinaryPresent(id string) bool {
-	switch id {
-	case "claude":
-		return harness.FindClaudeBinary() != ""
-	case "codex":
-		return harness.FindCodexBinary() != ""
-	default:
-		return true
-	}
+// agentBinaryPresent reports whether the agent's executable is on disk. An
+// agent with no executable to look for is assumed present so no bogus
+// remediation is synthesized.
+func agentBinaryPresent(agent harness.AgentInfo) bool {
+	return agent.FindBinary == nil || agent.FindBinary() != ""
 }
 
 // detectedAgentIDs returns the ids of currently detected agents, sorted.

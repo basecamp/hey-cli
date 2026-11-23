@@ -27,7 +27,7 @@ hey help linked-accounts   # account selection and precedence
 ## Setup
 
 `hey setup` runs the first-run wizard again at any time: browser sign-in, a check of who
-you are signed in as, and connecting the coding agents it detects (Claude Code, Codex).
+you are signed in as, and connecting the coding agents it detects (Claude Code, Codex, Grok).
 `--skip-agents` leaves agent integrations unchanged and `--skip-omarchy` leaves the
 Omarchy integration unchanged. `--silent-success` keeps any required sign-in visible,
 shows an installation spinner, and ends a successful run with `SETUP COMPLETE`; failure
