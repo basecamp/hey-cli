@@ -20,7 +20,6 @@ triggers:
   - hey search
   - hey contact
   - hey bundle
-  - hey thread list
   - hey thread read
   - hey thread comment
   - hey thread update
@@ -182,9 +181,7 @@ Every email thread has two IDs: `id`, its **box item ID** (one posting in one bo
 - **Entry ID**: an entry's `id` from `hey thread read`; `hey clip create` takes it, and the passage must appear in that message's text.
 - **Contact ID** from `hey contact list` or contact data, **clearance ID** from `hey screener list` (which also gives the `topic_id` of the thread to read before deciding; `hey screener approve|deny` also take the sender's email address), **box ID** from `hey box list`, **label ID** from `hey label list`. Never substitute one kind for another, or an email address for a contact ID.
 
-Thread listings (`hey box view`, `label view`, `collection view`, `bundle view`, `contact threads`, `search`) carry both IDs, with two exceptions: a bundle row can omit `topic_id`, and a search result omits `id` when you have no box item for its thread.
-
-`hey thread list --in sent|spam|trash|everything` is the read-only listing of Sent, Spam, Trash and Everything. Its rows are topics, not box items: `id` and `topic_id` are the same thread ID, so never pass either to a command that takes a box item ID. Trashed threads have no box item ID; `hey restore` takes the `topic_id` from `hey thread list --in trash`.
+Thread listings (`hey box view`, `thread list`, `label view`, `collection view`, `bundle view`, `contact threads`, `search`) carry both IDs, with two exceptions: a bundle row can omit `topic_id`, and a search result omits `id` when you have no box item for its thread.
 
 Passing the wrong kind is not redirected. **Unmatched IDs are not reported**: HEY checks only that *some* box item ID in a call is yours, and changes every one that matches. `hey trash`, `spam`, `label add|remove|create` and `bubble up|pop` answer `not_found` only when none match; `hey seen`, `unseen`, `move`, `ignore`, `stop-ignoring` and `set-aside group create|add|remove` never check (`group create` with no matching ID leaves an empty group). So a mixed batch is a partial success reported as a whole one, a typo is silently skipped, and a `topic_id` that happens to equal one of your box item IDs acts on an unrelated thread; likewise a box item ID given to `hey thread read` can read an unrelated thread. Confirm rather than trust the envelope:
 
