@@ -14,25 +14,8 @@ import (
 )
 
 // agentSetupEnv selects which coding agents `setup agents` targets.
-// Values: an agent id (claude | codex | grok) | all | none. Empty (unset)
-// means auto-detect.
+// Values: claude | codex | grok | all | none. Empty (unset) means auto-detect.
 const agentSetupEnv = "HEY_SETUP_AGENT"
-
-// agentSelectorValues lists what agentSetupEnv accepts, for help and
-// diagnostics: every registered agent id, then all and none.
-func agentSelectorValues() []string {
-	var values []string
-	for _, agent := range harness.AllAgents() {
-		values = append(values, agent.ID)
-	}
-	return append(values, "all", "none")
-}
-
-// agentSelectorProse renders agentSelectorValues as "claude, codex, grok, all, or none".
-func agentSelectorProse() string {
-	values := agentSelectorValues()
-	return strings.Join(values[:len(values)-1], ", ") + ", or " + values[len(values)-1]
-}
 
 // newSetupAgentsCommand builds `hey setup agents`. It always runs
 // non-interactively: it installs the baseline skill, connects agents per the
@@ -45,7 +28,7 @@ func newSetupAgentsCommand() *cobra.Command {
 		Use:   "agents",
 		Short: "Install or remove HEY coding-agent integrations",
 		Long: "Install the baseline HEY agent skill and attempt to connect coding agents.\n\n" +
-			"Selection is controlled by " + agentSetupEnv + ": " + agentSelectorProse() + ". When\n" +
+			"Selection is controlled by " + agentSetupEnv + ": claude, codex, grok, all, or none. When\n" +
 			"unset, a single detected agent is connected; when several are detected none is\n" +
 			"guessed — the per-agent `hey setup <id>` commands are surfaced instead. Use\n" +
 			"--remove to uninstall the HEY integrations and managed skill files.",
@@ -53,7 +36,7 @@ func newSetupAgentsCommand() *cobra.Command {
 		// or confusion with `setup <id>`). Reject them rather than silently ignore.
 		Args: cobra.NoArgs,
 		Annotations: map[string]string{
-			"agent_notes": "Never prompts. Set " + agentSetupEnv + "=" + strings.Join(agentSelectorValues(), "|") + " to choose; unset auto-detects a single agent. --remove uninstalls HEY's managed agent integrations.",
+			"agent_notes": "Never prompts. Set " + agentSetupEnv + "=claude|codex|grok|all|none to choose; unset auto-detects a single agent. --remove uninstalls HEY's managed agent integrations.",
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if remove {
@@ -119,13 +102,13 @@ func runNonInteractiveAgentSetup(cmd *cobra.Command) error {
 		targets = harness.AllAgents()
 	case "none":
 		// baseline skill only
-	default:
+	case "claude", "codex", "grok":
 		if a := harness.FindAgent(selector); a != nil {
 			targets = []harness.AgentInfo{*a}
-		} else {
-			selector = "invalid"
-			warnings = append(warnings, fmt.Sprintf("Unknown %s value %q; installed the baseline skill only (expected %s)", agentSetupEnv, selectorRaw, agentSelectorProse()))
 		}
+	default:
+		selector = "invalid"
+		warnings = append(warnings, fmt.Sprintf("Unknown %s value %q; installed the baseline skill only (expected claude, codex, grok, all, or none)", agentSetupEnv, selectorRaw))
 	}
 
 	// Run handlers in id order so aggregation is deterministic.
