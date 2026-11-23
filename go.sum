@@ -93,8 +93,8 @@ github.com/basecamp/actioncable-client/go/v2 v2.0.2 h1:h2Sl15gj2lI/EX5E0EUxjyYgf
 github.com/basecamp/actioncable-client/go/v2 v2.0.2/go.mod h1:3Y0N9V5LXclT5nQWcPhq/+6rj4eKXgKAX8dx15X8yB8=
 github.com/basecamp/hey-sdk/go v0.35.1 h1:azrn9JoilQaQ3QDBtZb4hiROmQFUyEIWWVWFq65wSTw=
 github.com/basecamp/hey-sdk/go v0.35.1/go.mod h1:g4+w+Htmntp03iF9L7afzWyPVYeQzxFUYONlw9r4R+s=
-github.com/basecamp/mcp v0.0.0-20261119020105-1a6d02c5380a h1:5SI0hmC3B5wLusmAG917J9HGWnU2JLV+S2Ek8A0ABxk=
-github.com/basecamp/mcp v0.0.0-20261119020105-1a6d02c5380a/go.mod h1:K3sgTH90CIR6Ed0XPnivIBqNIpw6aeOlcXThBrZ+2gc=
+github.com/basecamp/mcp v0.1.0 h1:bP3XuyQe3zZgV9tYkIkirHUW+Ckofc5AiHDmuhIOX6g=
+github.com/basecamp/mcp v0.1.0/go.mod h1:K3sgTH90CIR6Ed0XPnivIBqNIpw6aeOlcXThBrZ+2gc=
 github.com/bmatcuk/doublestar v1.1.1/go.mod h1:UD6OnuiIn0yFxxA2le/rnRU1G4RaI4UvFv1sNto9p6w=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
 github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
