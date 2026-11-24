@@ -147,3 +147,73 @@ func TestCollectPagesReturnsAFailedRead(t *testing.T) {
 		t.Errorf("collected = %+v, want nothing", collected)
 	}
 }
+
+// A list that follows empty pages reads on past one while it carries a new cursor, and
+// ends when the cursor does.
+func TestCollectPagesFollowsEmptyPagesWhenAsked(t *testing.T) {
+	var read []string
+	pages := map[string]pageResult[int]{
+		"2": {Cursor: "3"},
+		"3": {Items: []int{3}, Cursor: "4"},
+		"4": {},
+	}
+	first := pageResult[int]{Items: []int{1}, Cursor: "2"}
+
+	collected, err := collectPages(t.Context(), first, pageRequest{All: true, MaxPages: 10, FollowEmptyPages: true},
+		func(_ context.Context, cursor string) (pageResult[int], error) {
+			read = append(read, cursor)
+			return pages[cursor], nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(read); got != "[2 3 4]" {
+		t.Errorf("read %s, want every page up to the one without a cursor", got)
+	}
+	if fmt.Sprint(collected.Items) != "[1 3]" || collected.Read != 4 || collected.Cursor != "" || collected.Truncated {
+		t.Errorf("collected = %+v", collected)
+	}
+}
+
+// Following empty pages never reads a cursor twice, so an empty page whose cursor points
+// back at one already read ends the list rather than going round it.
+func TestCollectPagesFollowingEmptyPagesStopsOnARepeatedCursor(t *testing.T) {
+	var read []string
+	pages := map[string]pageResult[int]{
+		"2": {Items: []int{2}, Cursor: "3"},
+		"3": {Cursor: "2"},
+	}
+	first := pageResult[int]{Items: []int{1}, Cursor: "2"}
+
+	collected, err := collectPages(t.Context(), first, pageRequest{All: true, MaxPages: 10, FollowEmptyPages: true},
+		func(_ context.Context, cursor string) (pageResult[int], error) {
+			read = append(read, cursor)
+			return pages[cursor], nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(read); got != "[2 3]" {
+		t.Errorf("read %s, want each cursor once", got)
+	}
+	if fmt.Sprint(collected.Items) != "[1 2]" {
+		t.Errorf("items = %v, want each page's items once", collected.Items)
+	}
+}
+
+// Following empty pages still stops at the page cap.
+func TestCollectPagesFollowingEmptyPagesStopsAtTheCap(t *testing.T) {
+	var read []string
+	first := pageResult[int]{Items: []int{0}, Cursor: "1"}
+
+	collected, err := collectPages(t.Context(), first, pageRequest{All: true, MaxPages: 4, FollowEmptyPages: true}, numberedPages(0, &read))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprint(read); got != "[1 2 3]" {
+		t.Errorf("read %s", got)
+	}
+	if collected.Read != 4 || !collected.Truncated || collected.Cursor != "4" {
+		t.Errorf("collected = %+v, want the cap reached with the next cursor kept", collected)
+	}
+}

@@ -7539,6 +7539,104 @@
         "x-hey-untrusted-content": true
       }
     },
+    "/entries/{entryId}/status/active.json": {
+      "put": {
+        "description": "Restore an entry from the trash (Entries::StatusController#active): a trashed draft\nbecomes a draft again, and a trashed message that had been sent or received returns to\nits thread. An entry that is not in the trash is left as it is, so asking twice is\nharmless. HEY first delivers an entry Undo Send still holds, as its other status changes\ndo, so this is not a way to call a send back (UndoTopicSend is).\n\nThe entry alone is restored, never its topic. A draft that was the only entry of its\ntopic took the topic to the trash with it (DeleteDraft), and restoring just the entry\nleaves a draft on a trashed topic, which HEY empties from the trash with the rest:\nrestore that one with RestoreTopic, which brings back the topic and the draft together.\nThis operation is for a draft trashed out of a thread that stayed, which RestoreTopic\nleaves in the trash.\n\nHEY answers with a redirect and no body, 303 to the entry's topic. A generated client\nfollows it and reads the thread; Go's wrapper takes the redirect as the answer.\nTypeScript's client follows no redirect: there the 303 arrives as an error whose status\nis 303, and that status is the restore having gone through. A scoped token needs write,\nand send as well when the draft is scheduled to send, since a draft keeps its schedule\nin the trash.",
+        "operationId": "RestoreEntry",
+        "parameters": [
+          {
+            "name": "entryId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          },
+          {
+            "name": "filtered_account_id",
+            "in": "query",
+            "description": "Optional account filter, an id from GetIdentity's accounts[].id. Reads that filter by account narrow to that account. Omit it to leave the filter unset, and what an unfiltered request returns depends on the operation. Some operations ignore it. To choose a sending address, use an operation's explicit sender-selection fields rather than relying on this filter. GetIdentity also lists accounts the filter does not accept, and an id HEY does not recognize or cannot use for this identity can leave the filter unset instead of returning an error.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "x-hey-account-scope": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "RestoreEntry 200 response"
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ServiceUnavailableError 503 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Entries"
+        ],
+        "x-hey-destructive": false,
+        "x-hey-open-world": false,
+        "x-hey-retry": {
+          "maxAttempts": 2,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": [
+            429,
+            503
+          ]
+        },
+        "x-hey-untrusted-content": false
+      }
+    },
     "/entries/{entryId}/status/spam.json": {
       "put": {
         "description": "Mark an entry as spam. Denies the sender when every thread from them is already spam.",
@@ -12787,6 +12885,111 @@
         "x-hey-untrusted-content": false
       }
     },
+    "/topics/{topicId}/undo_send.json": {
+      "post": {
+        "description": "Call back the last message the caller sent on a topic, while Undo Send still holds it\n(Topics::UndoSendsController#create). The message returns to Drafts, unsent. HEY picks\nthe message: the caller's last delayed entry on the topic, which need not be the one a\ncaller has in mind when two were sent to one thread within the delay. A reply that broke\nout into a thread of its own is called back on that thread, the one SentMessage's\ntopic_id names, and returns to the thread it answered.\n\nHEY answers a success with a redirect and no body, 303 to the draft: /messages/{entryId}/edit\nfor a new message, /topics/{topicId}?expanded_draft={entryId} for a reply. That Location\nis the only place HEY names the entry it called back. A generated client follows the\nredirect and reads the draft or its thread, which says the undo went through and not\nwhich entry it was; the Go, Rust, Kotlin and Swift conveniences send it without\nfollowing and answer the entry. TypeScript's client follows no redirect: there the 303\narrives as an error whose status is 303, and that status is the undo having gone through.\nWith nothing left to call back (the delay ran out and the message went, or none was held)\nHEY answers 400 and changes nothing. A scoped token needs write.\n\nNever sent again after a failure: a second undo calls back the next delayed entry.",
+        "operationId": "UndoTopicSend",
+        "parameters": [
+          {
+            "name": "topicId",
+            "in": "path",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "required": true
+          },
+          {
+            "name": "filtered_account_id",
+            "in": "query",
+            "description": "Optional account filter, an id from GetIdentity's accounts[].id. Reads that filter by account narrow to that account. Omit it to leave the filter unset, and what an unfiltered request returns depends on the operation. Some operations ignore it. To choose a sending address, use an operation's explicit sender-selection fields rather than relying on this filter. GetIdentity also lists accounts the filter does not accept, and an id HEY does not recognize or cannot use for this identity can leave the filter unset instead of returning an error.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "x-hey-account-scope": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "UndoTopicSend 200 response"
+          },
+          "400": {
+            "description": "BadRequestError 400 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestErrorResponseContent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UnauthorizedError 401 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnauthorizedErrorResponseContent"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "ForbiddenError 403 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForbiddenErrorResponseContent"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "NotFoundError 404 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotFoundErrorResponseContent"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "InternalServerError 500 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternalServerErrorResponseContent"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ServiceUnavailableError 503 response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceUnavailableErrorResponseContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Topics"
+        ],
+        "x-hey-destructive": false,
+        "x-hey-open-world": false,
+        "x-hey-retry": {
+          "maxAttempts": 1,
+          "baseDelayMs": 1000,
+          "backoff": "exponential",
+          "retryOn": []
+        },
+        "x-hey-untrusted-content": false
+      }
+    },
     "/topics/{topicId}/workflows/{workflowId}/stagings": {
       "patch": {
         "description": "Move a staged topic to a workflow stage.",
@@ -16823,7 +17026,7 @@
           },
           "undo_action": {
             "type": "string",
-            "description": "Where to POST to call the message back, present only while delayed, and never for a\ntoken narrower than full scope: HEY offers such a token no Undo Send."
+            "description": "Where to POST to call the message back (UndoTopicSend), present only while delayed,\nand only for a token that can follow it: a scoped token is offered Undo Send when it\nholds write, approved since HEY widened write to cover it."
           },
           "undo_timeout": {
             "type": "integer",

@@ -49,7 +49,7 @@ func TestRestoreHelpNamesThreadIDsAndTrash(t *testing.T) {
 		"long help":   command.Long,
 		"agent notes": command.Annotations["agent_notes"],
 	} {
-		for _, want := range []string{"topic_id", "hey search --in trash", "currently in Trash"} {
+		for _, want := range []string{"topic_id", "hey thread list --in trash", "hey search --in trash", "currently in Trash"} {
 			if !strings.Contains(text, want) {
 				t.Errorf("%s = %q, want %q", field, text, want)
 			}

@@ -1,7 +1,8 @@
 # API Coverage
 
 Mapping of HEY API endpoints used by the CLI. API interactions use the HEY SDK (`hey-sdk/go`).
-Every endpoint below is read as JSON through a typed SDK operation; nothing parses HTML.
+Every endpoint below is read as JSON through the SDK; the Client column names its typed
+operation except where a narrow generic document read is called out. Nothing parses HTML.
 
 **`/topics/{id}/entries.json` cannot be paged by number.** `Topics::EntriesController` uses
 `set_page_and_extract_portion_from`, so like every other list here its `page` is
@@ -11,6 +12,10 @@ is the SDK read that keeps that header; `hey thread read` and `hey attachment li
 through `internal/threadload`, and `mail.ReplyTarget` walks it for the message a reply or a
 forward answers. The drafts index (`/entries/drafts.json`) pages the same way, which is what
 `Entries().ListDraftsPage` and `hey draft list --page` exist for.
+
+The four system topic views also page by the cursor in `Link`. `hey thread list` reads them
+through `Topics().GetSpamPage`, `GetTrashPage`, `GetEverythingPage` and `GetSentPage`, which
+keep that cursor and, for every view but Sent, `X-Total-Count`.
 
 | Endpoint | Method | Client | CLI Command | Status |
 |----------|--------|--------|-------------|--------|
@@ -23,6 +28,10 @@ forward answers. The drafts index (`/entries/drafts.json`) pages the same way, w
 | `/asidebox.json` | GET | SDK `Boxes().GetAsidebox` | `hey box view asidebox` | covered |
 | `/laterbox.json` | GET | SDK `Boxes().GetLaterbox` | `hey box view laterbox` | covered |
 | `/bubblebox.json` | GET | SDK `Boxes().GetBubblebox` | `hey box view bubblebox`, `hey bubble list` (scheduled bucket) | covered |
+| `/topics/sent.json` | GET | SDK `Topics().GetSentPage` | `hey thread list --in sent` | covered |
+| `/topics/spam.json` | GET | SDK `Topics().GetSpamPage` | `hey thread list --in spam` | covered |
+| `/topics/trash.json` | GET | SDK `Topics().GetTrashPage` | `hey thread list --in trash` | covered |
+| `/topics/everything.json` | GET | SDK `Topics().GetEverythingPage` | `hey thread list --in everything` | covered |
 | `/imbox/bubbled_up` | GET | — | — | not served: HTML only; the Imbox JSON orders bubbled-up threads first, so `hey bubble list` reads that prefix instead |
 | `/my/navigation.json` | GET | SDK `Identity().GetNavigation` | `hey label list`, Mail TUI navigation | covered |
 | `/folders/{id}.json` | GET | SDK `Folders().GetPage` | `hey label view <id>`, Mail TUI labels | covered |
