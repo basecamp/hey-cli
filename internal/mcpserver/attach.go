@@ -198,6 +198,15 @@ func (a *attacher) handle(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		return gateway.ErrorResult("nothing attached: %d isn't a draft HEY can change", draftID), nil
 	}
 	draft := hey.DraftContentFromEdit(edit)
+	// The revision replaces every recipient, and a contact with no address can't be
+	// written back: it would be dropped from the draft. Refuse first, as send_draft does.
+	for _, contacts := range [][]generated.Contact{edit.Addressed.Directly, edit.Addressed.Copied, edit.Addressed.Blindcopied} {
+		for _, c := range contacts {
+			if normalizedAddress(c.EmailAddress) == "" {
+				return gateway.ErrorResult("nothing attached: a recipient of draft %d has no email address, and saving the file would drop them; attach it in HEY: %s", draftID, a.editURL(draftID)), nil
+			}
+		}
+	}
 	if draft.ActingSenderID == 0 {
 		return gateway.ErrorResult("nothing attached: HEY named no sender for draft %d", draftID), nil
 	}

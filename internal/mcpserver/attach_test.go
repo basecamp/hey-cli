@@ -226,6 +226,20 @@ func TestAttachFileReportsAnUnacknowledgedSaveUnconfirmed(t *testing.T) {
 	}
 }
 
+// A recipient with no address can't be written back, so the draft is left as it is
+// rather than saved without them.
+func TestAttachFileKeepsARecipientItCantWriteBack(t *testing.T) {
+	f := newFakeHEYFiles(t, strings.Replace(attachEdit, `"copied": [{"email_address": "cat@example.com"}]`, `"copied": [{"name": "Cat", "email_address": " "}]`, 1))
+	text, isError := attachCall(t, f.session(t), map[string]any{"content_base64": base64.StdEncoding.EncodeToString([]byte("hello"))})
+	if !isError {
+		t.Fatalf("attached and dropped a recipient: %s", text)
+	}
+	mustContain(t, text, "no email address")
+	if slices.Contains(f.called(), "POST /rails/active_storage/direct_uploads.json") || f.revision != nil {
+		t.Errorf("HEY was asked %v", f.called())
+	}
+}
+
 // A draft scheduled to send isn't changed here, and nothing is uploaded for it.
 func TestAttachFileLeavesAScheduledDraftToHEY(t *testing.T) {
 	f := newFakeHEYFiles(t, strings.Replace(attachEdit, `"subject": "Q3 plan",`, `"subject": "Q3 plan", "scheduled_delivery_at": "2026-12-01T09:00:00Z",`, 1))
