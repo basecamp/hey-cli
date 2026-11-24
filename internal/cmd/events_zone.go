@@ -36,3 +36,8 @@ func errInvalidTimeZone(name string) error {
 	return apierr.ErrUsageHint(fmt.Sprintf("invalid time-zone: %s", terminal.SanitizeLine(name)),
 		"an IANA time zone name, spelled exactly, for example America/New_York")
 }
+
+func errInvalidEndTimeZone(name string) error {
+	return apierr.ErrUsageHint(fmt.Sprintf("invalid end-time-zone: %s", terminal.SanitizeLine(name)),
+		"an IANA time zone name, spelled exactly, for example Asia/Singapore")
+}
