@@ -19,6 +19,11 @@ type pageRequest struct {
 	Limit    int
 	All      bool
 	MaxPages int
+	// FollowEmptyPages reads on past an empty page while it carries a cursor not read
+	// before. Only for a list whose cursor only moves forward: HEY's Sent numbers its
+	// pages and drops threads that are not active after taking each one, so a page can
+	// be empty with more after it.
+	FollowEmptyPages bool
 }
 
 // collectedPages is everything collectPages read, and where it stopped.
@@ -32,7 +37,7 @@ type collectedPages[T any] struct {
 
 // collectPages reads pages after the one the caller already has, until the request is
 // satisfied, the list runs out, or the page cap is reached. An empty page ends the list
-// whatever cursor came with it.
+// whatever cursor came with it, unless the request follows empty pages.
 func collectPages[T any](ctx context.Context, first pageResult[T], request pageRequest, read pageReader[T]) (collectedPages[T], error) {
 	collected := collectedPages[T]{
 		Items:  first.Items,
@@ -40,8 +45,16 @@ func collectPages[T any](ctx context.Context, first pageResult[T], request pageR
 		Total:  max(first.Total, len(first.Items)),
 		Read:   1,
 	}
+	requested := map[string]bool{"": true}
 
 	for collected.Read < request.MaxPages && collected.Cursor != "" && wantsMorePages(len(collected.Items), request) {
+		if request.FollowEmptyPages {
+			// A cursor already read would go round again.
+			if requested[collected.Cursor] {
+				break
+			}
+			requested[collected.Cursor] = true
+		}
 		next, err := read(ctx, collected.Cursor)
 		if err != nil {
 			return collectedPages[T]{Read: collected.Read}, err
@@ -51,6 +64,9 @@ func collectPages[T any](ctx context.Context, first pageResult[T], request pageR
 		collected.Total = max(collected.Total, next.Total)
 		collected.Read++
 		if len(next.Items) == 0 {
+			if request.FollowEmptyPages {
+				continue
+			}
 			return collected, nil
 		}
 		collected.Items = append(collected.Items, next.Items...)

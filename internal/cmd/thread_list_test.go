@@ -304,3 +304,47 @@ func TestThreadListHelpNamesThreadIDs(t *testing.T) {
 		}
 	}
 }
+
+// HEY takes each page of Sent and only then drops the threads that are not active, so a
+// Sent page can come back empty with more after it. --all reads on past it; every other
+// view still ends at an empty page.
+func TestThreadListAllReadsPastAnEmptySentPage(t *testing.T) {
+	for _, test := range []struct {
+		view      string
+		wantPages string
+		wantIDs   int
+	}{
+		{view: "sent", wantPages: ",2,3", wantIDs: 2},
+		{view: "trash", wantPages: ",2", wantIDs: 1},
+	} {
+		t.Run(test.view, func(t *testing.T) {
+			var pages []string
+			response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				page := r.URL.Query().Get("page")
+				pages = append(pages, page)
+				w.Header().Set("Content-Type", "application/json")
+				switch page {
+				case "":
+					w.Header().Set("Link", `</topics/`+test.view+`.json?page=2>; rel="next"`)
+					_, _ = io.WriteString(w, `{"title":"Sent","topics":[{"id":101,"name":"Quarterly planning notes"}]}`)
+				case "2":
+					w.Header().Set("Link", `</topics/`+test.view+`.json?page=3>; rel="next"`)
+					_, _ = io.WriteString(w, `{"title":"Sent","topics":[]}`)
+				case "3":
+					_, _ = io.WriteString(w, `{"title":"Sent","topics":[{"id":103,"name":"Offsite travel plans"}]}`)
+				default:
+					t.Errorf("unexpected page %q", page)
+				}
+			}), "thread", "list", "--in", test.view, "--all")
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			if got := strings.Join(pages, ","); got != test.wantPages {
+				t.Errorf("pages = %q, want %q", got, test.wantPages)
+			}
+			if items, ok := response.Data.([]any); !ok || len(items) != test.wantIDs {
+				t.Errorf("data = %#v, want %d rows", response.Data, test.wantIDs)
+			}
+		})
+	}
+}

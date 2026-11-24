@@ -28,6 +28,10 @@ type threadListCommand struct {
 type threadListView struct {
 	title string
 	read  func(context.Context, string) (*hey.TopicListPage, error)
+	// followsEmptyPages is set for Sent alone: HEY takes each page of Sent and only then
+	// drops the threads that are not active, so a page can come back short or empty with
+	// more after it.
+	followsEmptyPages bool
 }
 
 type threadListPage struct {
@@ -48,7 +52,7 @@ type threadListRow struct {
 }
 
 var threadListViews = map[string]threadListView{
-	"sent": {title: "Sent", read: readSentPage},
+	"sent": {title: "Sent", read: readSentPage, followsEmptyPages: true},
 	"spam": {title: "Spam", read: func(ctx context.Context, cursor string) (*hey.TopicListPage, error) {
 		return sdk.Topics().GetSpamPage(ctx, cursor)
 	}},
@@ -106,9 +110,10 @@ func (c *threadListCommand) run(cmd *cobra.Command, _ []string) error {
 		return page.page, pageErr
 	}
 	collected, err := collectPages(cmd.Context(), first.page, pageRequest{
-		Limit:    c.limit,
-		All:      c.all,
-		MaxPages: maxThreadListPages,
+		Limit:            c.limit,
+		All:              c.all,
+		MaxPages:         maxThreadListPages,
+		FollowEmptyPages: view.followsEmptyPages,
 	}, read)
 	if err != nil {
 		return err

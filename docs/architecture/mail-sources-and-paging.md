@@ -69,7 +69,11 @@ the one HEY says it is.
 
 On the CLI side `collectPages` in `internal/cmd/pages.go` is the other half: `mail.ReadPage`
 answers one page, and `collectPages` decides how many pages this invocation wants from
-`--limit`, `--all` and a page cap. An empty page ends the list whatever cursor came with it.
+`--limit`, `--all` and a page cap. An empty page ends the list whatever cursor came with it,
+because following that cursor can cycle back into pages already read. `hey thread list --in
+sent` is the one exception (`pageRequest.FollowEmptyPages`): HEY's Sent numbers its pages and
+drops the threads that are not active only after taking each one, so a page can be empty with
+more after it. It reads on while the cursor is one it has not read, up to the page cap.
 Search is the exception it does not cover the same way — `Search::Matches::Page` numbers its
 pages instead of handing out a cursor, so `searchPageReader` returns the next page's number
 as its cursor and owns the increment.
