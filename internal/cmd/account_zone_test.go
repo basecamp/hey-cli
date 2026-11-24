@@ -252,7 +252,6 @@ func TestAReadWithoutAnAccountZoneTakesTheMachinesToday(t *testing.T) {
 			}
 			t.Run(fixture.name+"/"+command.name, func(t *testing.T) {
 				atInstantOn(t, "2026-10-15T12:00:00Z", "Pacific/Kiritimati")
-				inLocalZone(t, 14)
 				handler, requests := todayServer(t, fixture.fixture)
 				stdout, stderr, err := runFormattedCommandWithStderr(t, handler, []string{"--json"}, command.args...)
 				if err != nil {

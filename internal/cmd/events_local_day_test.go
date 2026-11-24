@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -158,7 +157,6 @@ const (
 )
 
 func TestEventsDayPrintsTimesInTheAccountZone(t *testing.T) {
-	inLocalZone(t, 0)
 	server := &localDayServer{zone: "America/New_York", paths: map[string]string{
 		"/calendar/days/2026-09-21.json": localDayJSON("day", "2026-09-21", "2026-09-21", zonedSupper, ""),
 	}}
@@ -169,7 +167,6 @@ func TestEventsDayPrintsTimesInTheAccountZone(t *testing.T) {
 }
 
 func TestEventsDayInTokyoListsTheAllDayEventFirst(t *testing.T) {
-	inLocalZone(t, 0)
 	server := &localDayServer{zone: "Asia/Tokyo", paths: map[string]string{
 		"/calendar/days/2026-09-19.json": localDayJSON("day", "2026-09-19", "2026-09-19", zonedBreakfast, ""),
 		"/calendar/days/2026-09-20.json": localDayJSON("day", "2026-09-20", "2026-09-20", zonedHoliday, ""),
@@ -181,7 +178,6 @@ func TestEventsDayInTokyoListsTheAllDayEventFirst(t *testing.T) {
 }
 
 func TestEventsListPrintsTimesInTheAccountZone(t *testing.T) {
-	inLocalZone(t, 0)
 	server := &localDayServer{zone: "Asia/Tokyo", recordings: `{"Calendar::Event":[` + zonedBreakfast + `]}`}
 	stdout, _, err := runFormattedCommandWithStderr(t, server, []string{"--styled"}, "event", "list", "--calendar", "9102", "--starts-on", "2026-09-20", "--ends-on", "2026-09-20")
 	if err != nil || !strings.Contains(stdout, "2026-09-20T00:30") {
@@ -198,12 +194,11 @@ func TestEventsDayInUTCReadsNoNeighbourDay(t *testing.T) {
 }
 
 func TestEventsDayWithoutAnAccountZoneUsesTheMachinesZone(t *testing.T) {
-	inLocalZone(t, -4)
 	server := &localDayServer{paths: map[string]string{
 		"/calendar/days/2026-09-21.json": localDayJSON("day", "2026-09-21", "2026-09-21", localDayDinner, ""),
 	}}
 	previousClock := clockNow
-	clockNow = func() time.Time { return time.Date(2026, 9, 20, 15, 0, 0, 0, time.UTC) }
+	clockNow = func() time.Time { return time.Date(2026, 9, 20, 11, 0, 0, 0, time.FixedZone("UTC-4", -4*60*60)) }
 	t.Cleanup(func() { clockNow = previousClock })
 
 	stdout, stderr, err := runFormattedCommandWithStderr(t, server, []string{"--json"}, "event", "day")
@@ -224,12 +219,4 @@ func TestEventsDayFailsWhenTheZoneOrANeighbourCannotBeRead(t *testing.T) {
 			t.Errorf("a failed read of %s was ignored", server.failPath)
 		}
 	}
-}
-
-// inLocalZone pins the process's local zone so the suite reads the same wherever it runs.
-func inLocalZone(t *testing.T, offsetHours int) {
-	t.Helper()
-	local := time.Local
-	time.Local = time.FixedZone(fmt.Sprintf("UTC%+d", offsetHours), offsetHours*60*60)
-	t.Cleanup(func() { time.Local = local })
 }

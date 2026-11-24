@@ -106,7 +106,7 @@ func (a *accountZone) locationToRead(ctx context.Context, stderr io.Writer) (*ti
 			a.fellBack = true
 			fmt.Fprintf(stderr, "Notice: %s, so days are this machine's days\n", unknown.reason)
 		}
-		return time.Local, nil
+		return clockNow().Location(), nil
 	}
 	if err != nil {
 		return nil, accountZoneRefusal(err, "cannot tell which events fall on the days asked for", "retry the command")
