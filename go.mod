@@ -17,7 +17,7 @@ require (
 	github.com/gofrs/flock v0.13.2
 	github.com/itchyny/gojq v0.12.20
 	github.com/mattn/go-runewidth v0.0.31
-	github.com/modelcontextprotocol/go-sdk v1.8.1-0.20261014132652-7c486efa8223
+	github.com/modelcontextprotocol/go-sdk v1.9.0-pre.1
 	github.com/rivo/uniseg v0.4.7
 	github.com/sigstore/sigstore-go v1.4.0
 	github.com/spf13/cobra v1.10.2
