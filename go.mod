@@ -11,7 +11,7 @@ require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/basecamp/actioncable-client/go/v2 v2.0.2
 	github.com/basecamp/hey-sdk/go v0.35.1
-	github.com/basecamp/mcp v0.1.0
+	github.com/basecamp/mcp v0.2.0
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/gofrs/flock v0.13.2
@@ -37,6 +37,7 @@ require (
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
+	github.com/basecamp/surfguard/go v0.1.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect

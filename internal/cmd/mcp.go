@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -23,7 +24,8 @@ import (
 
 // mcpTransport is a seam so tests can drive the server over in-memory
 // transports instead of the process's stdin/stdout.
-var mcpTransport = func() mcp.Transport { return &mcp.StdioTransport{} }
+// The frame cap leaves room for hey_attach's largest file.
+var mcpTransport = func() mcp.Transport { return &mcp.StdioTransport{MaxLineLength: mcpserver.MaxFrameBytes} }
 
 type mcpCommand struct {
 	cmd      *cobra.Command
@@ -49,8 +51,10 @@ func newMCPCommand() *mcpCommand {
 			"recipients, subject and body and naming anything it can't show, and sends exactly\n" +
 			"what you approved, once. It is served only when the sign-in was granted sending,\n" +
 			"and listed only to a client that can show a confirmation; any other client is\n" +
-			"pointed at the draft's page in HEY. --read-only drops every write action, drafts\n" +
-			"and sending included.\n\n" +
+			"pointed at the draft's page in HEY. hey_attach's attach_file attaches a file\n" +
+			"(its bytes, base64) to a saved draft and sends nothing; the confirmation names\n" +
+			"each attachment and its size. --read-only drops every write action, drafts,\n" +
+			"attachments and sending included.\n\n" +
 			"Register it with an MCP client as a stdio server, e.g.:\n\n" +
 			"  claude mcp add hey -- hey mcp",
 		Args: cobra.NoArgs,
@@ -143,6 +147,13 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	readOnly := c.readOnly || !auth.HasScope(creds.Scope, "write")
 	serverCfg := mcpserver.Config{ReadOnly: readOnly, Domains: c.domains}
 	canSend := mcpCanSend(creds)
+	if !readOnly {
+		origin, originErr := config.Origin(cfg.BaseURL)
+		if originErr != nil {
+			return originErr
+		}
+		serverCfg.Attach = &mcpserver.AttachConfig{Files: mcpDraftFiles{reads: reads, writes: writes}, Origin: origin}
+	}
 	if canSend && !readOnly {
 		origin, originErr := config.Origin(cfg.BaseURL)
 		if originErr != nil {
@@ -195,7 +206,7 @@ func (c *mcpCommand) run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	logger.Info("MCP server running on stdio", "tools", len(srv.Domains()), "read_only", readOnly, "send_draft", srv.ServesSend())
+	logger.Info("MCP server running on stdio", "tools", len(srv.Domains()), "read_only", readOnly, "attach_file", srv.ServesAttach(), "send_draft", srv.ServesSend())
 	if !canSend {
 		logger.Info("send_draft isn't served: hey mcp's sign-in wasn't granted sending. To allow it, run `hey auth login --mcp` again and turn sending on.")
 	}
@@ -218,6 +229,24 @@ func newMCPSDKClient(extra ...hey.ClientOption) *hey.Client {
 // through one that never retries or resends, because a second request can deliver twice.
 type mcpDrafts struct {
 	reads, sends *hey.Client
+}
+
+// mcpDraftFiles is attach_file's slice of HEY: the draft read through the client that
+// may retry, its revision and the upload through the one that never does.
+type mcpDraftFiles struct {
+	reads, writes *hey.Client
+}
+
+func (d mcpDraftFiles) GetEdit(ctx context.Context, draftID int64) (*generated.MessageEditState, error) {
+	return d.reads.Messages().GetEdit(ctx, draftID)
+}
+
+func (d mcpDraftFiles) Put(ctx context.Context, path string, body any) (*hey.Response, error) {
+	return d.writes.Put(ctx, path, body)
+}
+
+func (d mcpDraftFiles) Upload(ctx context.Context, filename, contentType string, content io.ReadSeeker) (*generated.DirectUpload, error) {
+	return d.writes.Attachments().Upload(ctx, filename, contentType, content)
 }
 
 // onceAuthStrategy authenticates like cliAuthStrategy but offers the SDK no refresh,
