@@ -368,6 +368,9 @@ both `id` and `topic_id` on these rows are thread IDs for `hey thread read`, `he
 organization commands. `--limit` reads only enough pages for the requested result count,
 `--all` follows up to 100 pages, and `--page <next_page>` continues from the opaque cursor
 reported by an earlier listing of the same view. A page number does not name a position.
+HEY counts no total for Sent, so a Sent listing carries no `total_count`. A Sent page can
+come back short or empty with more after it, so `--all` and `--limit` read past an empty
+Sent page; every other view ends at one.
 
 `hey thread update <topic_id> --name <name>` renames a thread, as HEY's web app does: the new subject is what your boxes and the thread show, for everyone in your account with access to the thread; nothing is emailed, so the other people on it keep the subject they received, and messages already sent keep the subject they went out with. `rename` and `edit` are aliases. The name is trimmed and required — HEY would store a blank as "No subject" — and at most 1024 bytes, where HEY would otherwise cut it without saying so. A thread HEY merged into another is not renamed: the command fails rather than confirming a rename that did not happen, so rename the thread it was merged into instead. A collection's discussion thread is named after its collection — HEY accepts the rename but keeps showing the collection's name — so rename it with `hey collection update`.
 

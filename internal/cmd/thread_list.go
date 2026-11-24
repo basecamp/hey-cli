@@ -32,6 +32,8 @@ type threadListView struct {
 	// drops the threads that are not active, so a page can come back short or empty with
 	// more after it.
 	followsEmptyPages bool
+	// uncounted is set for Sent alone, the one view HEY sends no X-Total-Count for.
+	uncounted bool
 }
 
 type threadListPage struct {
@@ -52,7 +54,7 @@ type threadListRow struct {
 }
 
 var threadListViews = map[string]threadListView{
-	"sent": {title: "Sent", read: readSentPage, followsEmptyPages: true},
+	"sent": {title: "Sent", read: readSentPage, followsEmptyPages: true, uncounted: true},
 	"spam": {title: "Spam", read: func(ctx context.Context, cursor string) (*hey.TopicListPage, error) {
 		return sdk.Topics().GetSpamPage(ctx, cursor)
 	}},
@@ -105,6 +107,10 @@ func (c *threadListCommand) run(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	if len(first.page.Items) == 0 && !view.followsEmptyPages {
+		// An empty page ends a keyset-paged view whatever cursor came with it.
+		first.page.Cursor = ""
+	}
 	read := func(ctx context.Context, cursor string) (pageResult[generated.Topic], error) {
 		page, pageErr := readThreadListPage(ctx, view, cursor)
 		return page.page, pageErr
@@ -114,6 +120,7 @@ func (c *threadListCommand) run(cmd *cobra.Command, _ []string) error {
 		All:              c.all,
 		MaxPages:         maxThreadListPages,
 		FollowEmptyPages: view.followsEmptyPages,
+		StartCursor:      c.page,
 	}, read)
 	if err != nil {
 		return err
@@ -121,35 +128,47 @@ func (c *threadListCommand) run(cmd *cobra.Command, _ []string) error {
 
 	topics := collected.Items
 	nextPage := collected.Cursor
+	wantedMore := c.all || (c.limit > 0 && len(topics) < c.limit)
+	if wantedMore && nextPage != "" && !collected.Truncated {
+		// The read stopped at an empty page of a view that does not follow one, which
+		// ends the list: its cursor is not a continuation.
+		nextPage = ""
+	}
 	if c.limit > 0 && !c.all && len(topics) > c.limit {
 		topics = topics[:c.limit]
 		nextPage = ""
+	}
+	total := collected.Total
+	if view.uncounted {
+		total = len(topics)
 	}
 	title := first.title
 	if title == "" {
 		title = view.title
 	}
-	notice := threadListNotice(len(topics), collected.Total, nextPage != "", c.all, c.page != "")
+	notice := threadListNotice(len(topics), total, nextPage != "", collected.Truncated, c.all, c.page != "")
 
 	switch writer.EffectiveFormat() {
 	case output.FormatStyled:
-		return writeThreadListStyled(cmd, title, topics, notice)
+		return writeThreadListStyled(cmd, title, topics, nextPage, notice)
 	case output.FormatIDs, output.FormatCount, output.FormatQuiet:
 		writeThreadListPagination(cmd, notice, nextPage)
 		return writeOK(makeThreadListTopics(topics))
 	case output.FormatMarkdown:
-		return writeThreadListMarkdown(cmd, title, topics, nextPage, collected.Total, notice)
+		return writeThreadListMarkdown(cmd, title, topics, nextPage, total, !view.uncounted, notice)
 	default:
 		opts := []output.ResponseOption{
 			output.WithSummary(fmt.Sprintf("%d %s in %s", len(topics), threadNoun(len(topics)), title)),
 			output.WithNotice(notice),
 			output.WithMeta("pages_fetched", collected.Read),
-			output.WithMeta("total_count", collected.Total),
 			output.WithBreadcrumbs(output.Breadcrumb{
 				Action:      "read",
 				Command:     "hey thread read <thread-id>",
 				Description: "Read an email thread",
 			}),
+		}
+		if !view.uncounted {
+			opts = append(opts, output.WithMeta("total_count", total))
 		}
 		if nextPage != "" {
 			opts = append(opts, output.WithMeta("next_page", nextPage))
@@ -166,12 +185,13 @@ func (c *threadListCommand) selectedView() (threadListView, error) {
 	return view, nil
 }
 
-func writeThreadListStyled(cmd *cobra.Command, title string, topics []generated.Topic, notice string) error {
+func writeThreadListStyled(cmd *cobra.Command, title string, topics []generated.Topic, nextPage, notice string) error {
 	if len(topics) == 0 {
 		fmt.Fprintf(cmd.OutOrStdout(), "No threads in %s.\n", terminal.SanitizeLine(title))
 		if notice != "" {
 			fmt.Fprintln(cmd.OutOrStdout(), notice)
 		}
+		writeThreadListStyledNextPage(cmd, nextPage)
 		return nil
 	}
 
@@ -190,15 +210,26 @@ func writeThreadListStyled(cmd *cobra.Command, title string, topics []generated.
 	if notice != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "\n%s\n", notice)
 	}
+	writeThreadListStyledNextPage(cmd, nextPage)
 	return nil
 }
 
-func writeThreadListMarkdown(cmd *cobra.Command, title string, topics []generated.Topic, nextPage string, total int, notice string) error {
+func writeThreadListStyledNextPage(cmd *cobra.Command, nextPage string) {
+	if nextPage != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "Next page: %s\n", terminal.SanitizeLine(nextPage))
+	}
+}
+
+func writeThreadListMarkdown(cmd *cobra.Command, title string, topics []generated.Topic, nextPage string, total int, counted bool, notice string) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "# %s\n\n", markdownSafeText(title))
 	if err := writeOK(makeThreadListRows(topics)); err != nil {
 		return err
 	}
-	fmt.Fprintf(cmd.OutOrStdout(), "\n**Total threads:** %d\n", total)
+	if counted {
+		fmt.Fprintf(cmd.OutOrStdout(), "\n**Total threads:** %d\n", total)
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(), "\n**Threads listed:** %d\n", total)
+	}
 	if nextPage != "" {
 		fmt.Fprintf(cmd.OutOrStdout(), "**Next page:** `%s`\n", terminal.SanitizeLine(nextPage))
 	}
@@ -272,11 +303,11 @@ func writeThreadListPagination(cmd *cobra.Command, notice, nextPage string) {
 	}
 }
 
-func threadListNotice(shown, total int, hasMore, all, fromCursor bool) string {
+func threadListNotice(shown, total int, hasMore, truncated, all, fromCursor bool) string {
+	if truncated && hasMore {
+		return fmt.Sprintf("Showing %d results. Pagination limit reached; continue with --page using next_page.", shown)
+	}
 	if all {
-		if hasMore {
-			return fmt.Sprintf("Showing %d results. Pagination limit reached; continue with --page using next_page.", shown)
-		}
 		if shown < total {
 			if fromCursor {
 				return fmt.Sprintf("Showing %d remaining results from this cursor (%d threads in the view).", shown, total)

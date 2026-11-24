@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -22,18 +23,18 @@ const threadListFixture = `{
 
 func TestThreadListViews(t *testing.T) {
 	// HEY sends X-Total-Count on every view but Sent, which pages by offset and counts
-	// nothing; Sent's total is what was read.
+	// nothing, so Sent reports no total_count.
 	tests := []struct {
 		view       string
 		path       string
 		total      string
-		wantTotal  float64
+		wantTotal  any
 		wantNotice string
 	}{
-		{view: "sent", path: "/topics/sent.json", wantTotal: 1, wantNotice: "Showing 1 results. More available; use --all to fetch all."},
-		{view: "spam", path: "/topics/spam.json", total: "2", wantTotal: 2, wantNotice: "Showing 1 of 2 results. Use --all to see everything."},
-		{view: "trash", path: "/topics/trash.json", total: "2", wantTotal: 2, wantNotice: "Showing 1 of 2 results. Use --all to see everything."},
-		{view: "everything", path: "/topics/everything.json", total: "2", wantTotal: 2, wantNotice: "Showing 1 of 2 results. Use --all to see everything."},
+		{view: "sent", path: "/topics/sent.json", wantNotice: "Showing 1 results. More available; use --all to fetch all."},
+		{view: "spam", path: "/topics/spam.json", total: "2", wantTotal: float64(2), wantNotice: "Showing 1 of 2 results. Use --all to see everything."},
+		{view: "trash", path: "/topics/trash.json", total: "2", wantTotal: float64(2), wantNotice: "Showing 1 of 2 results. Use --all to see everything."},
+		{view: "everything", path: "/topics/everything.json", total: "2", wantTotal: float64(2), wantNotice: "Showing 1 of 2 results. Use --all to see everything."},
 	}
 
 	for _, test := range tests {
@@ -168,7 +169,7 @@ func TestThreadListLimitReadsEnoughPagesAndReportsContinuation(t *testing.T) {
 }
 
 func TestThreadListNoticeDistinguishesAllFromCursor(t *testing.T) {
-	got := threadListNotice(3, 8, false, true, true)
+	got := threadListNotice(3, 8, false, false, true, true)
 	want := "Showing 3 remaining results from this cursor (8 threads in the view)."
 	if got != want {
 		t.Errorf("notice = %q, want %q", got, want)
@@ -344,6 +345,131 @@ func TestThreadListAllReadsPastAnEmptySentPage(t *testing.T) {
 			}
 			if items, ok := response.Data.([]any); !ok || len(items) != test.wantIDs {
 				t.Errorf("data = %#v, want %d rows", response.Data, test.wantIDs)
+			}
+		})
+	}
+}
+
+// A Sent listing resumed at an empty page reads on until --limit is met, and reports
+// where to carry on from rather than the page it began at.
+func TestThreadListResumesSentPastAnEmptyPageToMeetTheLimit(t *testing.T) {
+	var pages []string
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+		w.Header().Set("Content-Type", "application/json")
+		switch page {
+		case "4":
+			w.Header().Set("Link", `</topics/sent.json?page=5>; rel="next"`)
+			_, _ = io.WriteString(w, `{"title":"Sent","topics":[]}`)
+		case "5":
+			w.Header().Set("Link", `</topics/sent.json?page=6>; rel="next"`)
+			_, _ = io.WriteString(w, `{"title":"Sent","topics":[{"id":205,"name":"Offsite travel plans"}]}`)
+		default:
+			t.Errorf("unexpected page %q", page)
+		}
+	}), "thread", "list", "--in", "sent", "--page", "4", "--limit", "1")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got := strings.Join(pages, ","); got != "4,5" {
+		t.Errorf("pages = %q, want 4,5", got)
+	}
+	items, ok := response.Data.([]any)
+	if !ok || len(items) != 1 || items[0].(map[string]any)["topic_id"] != float64(205) {
+		t.Fatalf("data = %#v, want thread 205", response.Data)
+	}
+	if got := response.Meta["next_page"]; got != "6" {
+		t.Errorf("next_page = %#v, want 6", got)
+	}
+	if got := response.Meta["total_count"]; got != nil {
+		t.Errorf("total_count = %#v, want none: HEY counts no total for Sent", got)
+	}
+	if response.Notice != "Showing 1 results. More available; use --all to fetch all." {
+		t.Errorf("notice = %q", response.Notice)
+	}
+}
+
+// A Sent cursor that leads back to the page the listing began at ends the listing: the
+// page is not read twice, and its cursor is not offered as a continuation.
+func TestThreadListSentEndsWhenItsCursorGoesRound(t *testing.T) {
+	var pages []string
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		pages = append(pages, page)
+		w.Header().Set("Content-Type", "application/json")
+		switch page {
+		case "7":
+			w.Header().Set("Link", `</topics/sent.json?page=8>; rel="next"`)
+			_, _ = io.WriteString(w, `{"title":"Sent","topics":[{"id":207,"name":"Quarterly planning notes"}]}`)
+		case "8":
+			w.Header().Set("Link", `</topics/sent.json?page=7>; rel="next"`)
+			_, _ = io.WriteString(w, `{"title":"Sent","topics":[]}`)
+		default:
+			t.Errorf("unexpected page %q", page)
+		}
+	}), "thread", "list", "--in", "sent", "--page", "7", "--all")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got := strings.Join(pages, ","); got != "7,8" {
+		t.Errorf("pages = %q, want 7,8", got)
+	}
+	if items, ok := response.Data.([]any); !ok || len(items) != 1 {
+		t.Errorf("data = %#v, want thread 207 once", response.Data)
+	}
+	if got := response.Meta["next_page"]; got != nil {
+		t.Errorf("next_page = %#v, want none", got)
+	}
+	if response.Notice != "" {
+		t.Errorf("notice = %q, want none", response.Notice)
+	}
+}
+
+// An empty page of a keyset-paged view ends it: --all offers no continuation and does not
+// claim it hit the page cap.
+func TestThreadListAllEndsTrashAtAnEmptyPage(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Total-Count", "1")
+		if r.URL.Query().Get("page") == "" {
+			w.Header().Set("Link", `</topics/trash.json?page=2>; rel="next"`)
+			_, _ = io.WriteString(w, `{"title":"Trash","topics":[{"id":301,"name":"Quarterly planning notes"}]}`)
+			return
+		}
+		w.Header().Set("Link", `</topics/trash.json?page=3>; rel="next"`)
+		_, _ = io.WriteString(w, `{"title":"Trash","topics":[]}`)
+	}), "thread", "list", "--in", "trash", "--all")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if got := response.Meta["next_page"]; got != nil {
+		t.Errorf("next_page = %#v, want none", got)
+	}
+	if response.Notice != "" {
+		t.Errorf("notice = %q, want none", response.Notice)
+	}
+}
+
+// The page cap is reported whether --all or --limit reached it, and styled output names
+// the cursor to continue from.
+func TestThreadListReportsThePageCapWithItsCursor(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", fmt.Sprintf(`</topics/sent.json?page=%d>; rel="next"`, page+1))
+		_, _ = io.WriteString(w, `{"title":"Sent","topics":[]}`)
+	})
+	for _, flag := range []string{"--all", "--limit=1"} {
+		t.Run(flag, func(t *testing.T) {
+			stdout, _, err := runFormattedCommandWithStderr(t, handler, []string{"--styled"}, "thread", "list", "--in", "sent", flag)
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			for _, want := range []string{"Pagination limit reached", "Next page: 100"} {
+				if !strings.Contains(stdout, want) {
+					t.Errorf("stdout missing %q:\n%s", want, stdout)
+				}
 			}
 		})
 	}

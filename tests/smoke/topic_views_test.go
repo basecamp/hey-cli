@@ -43,4 +43,16 @@ func TestThreadListPage(t *testing.T) {
 	if string(response.Data) == "null" {
 		t.Fatal("expected an array, got null")
 	}
+	if again, _ := response.Meta["next_page"].(string); again == nextPage {
+		t.Fatalf("--page %s answered the same cursor again", nextPage)
+	}
+	firstIDs := map[int64]bool{}
+	for _, topic := range dataAs[[]threadListItem](t, first) {
+		firstIDs[topic.ID] = true
+	}
+	for _, topic := range dataAs[[]threadListItem](t, response) {
+		if firstIDs[topic.ID] {
+			t.Errorf("thread %d is on both the first page and the next", topic.ID)
+		}
+	}
 }
