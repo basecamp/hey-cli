@@ -241,8 +241,8 @@ func (d mcpDraftFiles) GetEdit(ctx context.Context, draftID int64) (*generated.M
 	return d.reads.Messages().GetEdit(ctx, draftID)
 }
 
-func (d mcpDraftFiles) UpdateDraft(ctx context.Context, draftID int64, draft hey.DraftContent) error {
-	return d.writes.Messages().UpdateDraft(ctx, draftID, draft)
+func (d mcpDraftFiles) Put(ctx context.Context, path string, body any) (*hey.Response, error) {
+	return d.writes.Put(ctx, path, body)
 }
 
 func (d mcpDraftFiles) Upload(ctx context.Context, filename, contentType string, content io.ReadSeeker) (*generated.DirectUpload, error) {

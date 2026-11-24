@@ -36,7 +36,7 @@ import (
 // it. hey-mcp-server also takes ChatGPT's file object (fileParams); hey mcp runs on stdio,
 // where ChatGPT never connects, so it lists no file argument and the reader refuses one.
 // A shell agent with a file on disk has `hey compose --draft --attach` and
-// `hey reply --draft --attach`.
+// `hey reply <thread-id> --draft --attach`.
 //
 // The markup that carries the file is built here from what HEY answered for the upload
 // and the bytes counted, never from anything the caller wrote.
@@ -62,11 +62,13 @@ var attachmentMaxBytes int64 = 18 << 20
 // and one a little past it is answered "too large".
 const MaxFrameBytes = 32 << 20
 
-// DraftFiles is the slice of hey-sdk attach_file drives. UpdateDraft and Upload must go
-// through a client that never retries.
+// DraftFiles is the slice of hey-sdk attach_file drives. Put (the draft's revision) and
+// Upload must go through a client that never retries. The revision is a plain PUT, as
+// update_message's is, so its answer is read as update_message's is (savedAsDraft): the
+// SDK's UpdateDraft takes any 2xx as saved.
 type DraftFiles interface {
 	GetEdit(ctx context.Context, draftID int64) (*generated.MessageEditState, error)
-	UpdateDraft(ctx context.Context, draftID int64, draft hey.DraftContent) error
+	Put(ctx context.Context, path string, body any) (*hey.Response, error)
 	Upload(ctx context.Context, filename, contentType string, content io.ReadSeeker) (*generated.DirectUpload, error)
 }
 
@@ -94,7 +96,7 @@ func newAttacher(cfg AttachConfig) (*attacher, error) {
 const attachDescription = "Attach a file to a saved draft, after its body; the rest of the draft stays as it is. " +
 	"It isn't sent: the person sends the draft as any other, and the confirmation that sends it names each attachment and its size. " +
 	"A draft scheduled to send isn't changed here. A file on disk is attached with `hey compose --draft --attach <path>` or " +
-	"`hey reply --draft --attach <path>` instead, where a shell is at hand. " +
+	"`hey reply <thread-id> --draft --attach <path>` instead, where a shell is at hand. " +
 	"Actions: attach_file (params: draft_id, filename, content_type, and content_base64 with an optional sha256), describe."
 
 func (a *attacher) tool() *mcp.Tool {
@@ -196,6 +198,9 @@ func (a *attacher) handle(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 		return gateway.ErrorResult("nothing attached: %d isn't a draft HEY can change", draftID), nil
 	}
 	draft := hey.DraftContentFromEdit(edit)
+	if draft.ActingSenderID == 0 {
+		return gateway.ErrorResult("nothing attached: HEY named no sender for draft %d", draftID), nil
+	}
 	if draft.Schedule != nil {
 		return gateway.ErrorResult("nothing attached: this draft is scheduled to send, so a file is attached to it in HEY: %s", a.editURL(draftID)), nil
 	}
@@ -213,7 +218,8 @@ func (a *attacher) handle(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 	added := attachment{SGID: upload.AttachableSgid, Filename: filename, Size: int64(len(file.Data)), ContentType: contentType}
 	draft.Content = withAttachment(draft.Content, added)
 
-	if err := a.cfg.Files.UpdateDraft(ctx, draftID, draft); err != nil {
+	resp, err := a.cfg.Files.Put(ctx, fmt.Sprintf("/messages/%d.json", draftID), draftRevision(draft))
+	if err != nil {
 		if refusedByHEY(err) {
 			return gateway.ErrorResult("nothing attached: HEY refused the draft's revision: %s. The file was uploaded but isn't in the draft", heyReason(err)), nil
 		}
@@ -221,6 +227,9 @@ func (a *attacher) handle(ctx context.Context, req *mcp.CallToolRequest) (*mcp.C
 			return answer, nil
 		}
 		return gateway.ErrorResult("%s", unsettledDraft(attachFileName, err)), nil
+	}
+	if !savedAsDraft(resp) {
+		return gateway.ErrorResult("%s", unconfirmedDraft(attachFileName, resp)), nil
 	}
 	return gateway.JSONResult(map[string]any{
 		"draft_id": draftID,
@@ -313,4 +322,22 @@ func readAttachment(ctx context.Context, params map[string]any, maxSize int64) (
 		return nil, gateway.ErrorResult("nothing attached: %v", err)
 	}
 	return content, nil
+}
+
+// draftRevision is UpdateMessage's body for draft, held to a draft: what the SDK's
+// UpdateDraft sends for one with no schedule (attach_file refuses a scheduled draft).
+func draftRevision(draft hey.DraftContent) map[string]any {
+	return map[string]any{
+		"acting_sender_id": draft.ActingSenderID,
+		"message":          map[string]any{"subject": draft.Subject, "content": draft.Content},
+		"entry": map[string]any{"status": "drafted", "addressed": map[string]any{
+			"directly": nonNil(draft.To), "copied": nonNil(draft.CC), "blindcopied": nonNil(draft.BCC)}},
+	}
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }

@@ -39,7 +39,9 @@ type fakeHEYFiles struct {
 	stored     []byte
 	storedAuth string
 	revision   map[string]any
-	srv        *httptest.Server
+	// revise answers the revision; nil answers 204 and a Location.
+	revise func(http.ResponseWriter)
+	srv    *httptest.Server
 }
 
 func newFakeHEYFiles(t *testing.T, edit string) *fakeHEYFiles {
@@ -73,6 +75,10 @@ func (f *fakeHEYFiles) serve(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.revision = body
 		f.mu.Unlock()
+		if f.revise != nil {
+			f.revise(w)
+			return
+		}
 		w.Header().Set("Location", "/messages/9")
 		w.WriteHeader(http.StatusNoContent)
 	default:
@@ -94,8 +100,8 @@ func (d sdkDraftFiles) GetEdit(ctx context.Context, id int64) (*generated.Messag
 	return d.c.Messages().GetEdit(ctx, id)
 }
 
-func (d sdkDraftFiles) UpdateDraft(ctx context.Context, id int64, draft hey.DraftContent) error {
-	return d.c.Messages().UpdateDraft(ctx, id, draft)
+func (d sdkDraftFiles) Put(ctx context.Context, path string, body any) (*hey.Response, error) {
+	return d.c.Put(ctx, path, body)
 }
 
 func (d sdkDraftFiles) Upload(ctx context.Context, filename, contentType string, content io.ReadSeeker) (*generated.DirectUpload, error) {
@@ -155,6 +161,9 @@ func TestAttachFileSavesTheFileIntoTheDraft(t *testing.T) {
 	if entry["status"] != "drafted" {
 		t.Errorf("entry.status = %v, want drafted", entry["status"])
 	}
+	if got, _ := json.Marshal(entry["addressed"]); string(got) != `{"blindcopied":[],"copied":["cat@example.com"],"directly":["ann@example.com"]}` {
+		t.Errorf("entry.addressed = %s, want the draft's recipients", got)
+	}
 	if _, scheduled := entry["scheduled_delivery"]; scheduled {
 		t.Errorf("the revision schedules: %v", entry)
 	}
@@ -194,6 +203,25 @@ func TestAttachFileRefusesABadFileBeforeHEY(t *testing.T) {
 			if hits := f.called(); len(hits) != 0 {
 				t.Errorf("HEY was asked %v", hits)
 			}
+		})
+	}
+}
+
+// A revision HEY answers with anything but the 204 and Location a saved draft gets is
+// reported unconfirmed, as update_message's is, never attached.
+func TestAttachFileReportsAnUnacknowledgedSaveUnconfirmed(t *testing.T) {
+	for name, answer := range map[string]func(http.ResponseWriter){
+		"200":                  func(w http.ResponseWriter) { w.WriteHeader(http.StatusOK) },
+		"204 with no Location": func(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFakeHEYFiles(t, attachEdit)
+			f.revise = answer
+			text, isError := attachCall(t, f.session(t), map[string]any{"content_base64": base64.StdEncoding.EncodeToString([]byte("hello"))})
+			if !isError || strings.Contains(text, `"attached"`) {
+				t.Fatalf("an unacknowledged save was reported attached: %s", text)
+			}
+			mustContain(t, text, "may not have saved a draft")
 		})
 	}
 }
