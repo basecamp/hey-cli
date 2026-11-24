@@ -29,28 +29,29 @@ func TestThreadListSystemViews(t *testing.T) {
 	}
 }
 
+// Trash pages by a keyset cursor and filters in its query, so a full first page with a
+// next_page is a page that continues: the next page must hold other threads.
 func TestThreadListPage(t *testing.T) {
-	first := heyJSON(t, "thread", "list", "--in", "sent")
+	first := heyJSON(t, "thread", "list", "--in", "trash")
 	nextPage, _ := first.Meta["next_page"].(string)
-	if nextPage == "" {
-		skipf(t, "Sent has no next page in this fixture")
+	firstRows := dataAs[[]threadListItem](t, first)
+	if nextPage == "" || len(firstRows) == 0 {
+		skipf(t, "Trash has no second page in this fixture")
 	}
 
-	response := heyJSON(t, "thread", "list", "--in", "sent", "--page", nextPage)
+	response := heyJSON(t, "thread", "list", "--in", "trash", "--page", nextPage)
 	if strings.TrimSpace(response.Summary) == "" {
 		t.Fatal("expected a result summary")
 	}
-	if string(response.Data) == "null" {
-		t.Fatal("expected an array, got null")
-	}
-	if again, _ := response.Meta["next_page"].(string); again == nextPage {
-		t.Fatalf("--page %s answered the same cursor again", nextPage)
+	rows := dataAs[[]threadListItem](t, response)
+	if len(rows) == 0 {
+		t.Fatalf("--page %s answered no threads", nextPage)
 	}
 	firstIDs := map[int64]bool{}
-	for _, topic := range dataAs[[]threadListItem](t, first) {
+	for _, topic := range firstRows {
 		firstIDs[topic.ID] = true
 	}
-	for _, topic := range dataAs[[]threadListItem](t, response) {
+	for _, topic := range rows {
 		if firstIDs[topic.ID] {
 			t.Errorf("thread %d is on both the first page and the next", topic.ID)
 		}

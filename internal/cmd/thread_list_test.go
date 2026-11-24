@@ -474,3 +474,46 @@ func TestThreadListReportsThePageCapWithItsCursor(t *testing.T) {
 		})
 	}
 }
+
+// --limit hiding rows HEY already sent still says more is available, without inventing a
+// total for Sent.
+func TestThreadListSentLimitSaysMoreWhenItHidesRows(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"title":"Sent","topics":[{"id":401,"name":"Quarterly planning notes"},{"id":402,"name":"Offsite travel plans"}]}`)
+	}), "thread", "list", "--in", "sent", "--limit", "1")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.Notice != "Showing 1 results. More available; use --all to fetch all." {
+		t.Errorf("notice = %q", response.Notice)
+	}
+	if got := response.Meta["total_count"]; got != nil {
+		t.Errorf("total_count = %#v, want none", got)
+	}
+}
+
+// A --limit read that reaches the end of a view short of HEY's count says the list ended,
+// rather than sending the reader to --all, which would stop at the same page.
+func TestThreadListLimitThatReachesTheEndDoesNotSuggestAll(t *testing.T) {
+	response, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Total-Count", "5")
+		if r.URL.Query().Get("page") == "" {
+			w.Header().Set("Link", `</topics/trash.json?page=2>; rel="next"`)
+			_, _ = io.WriteString(w, `{"title":"Trash","topics":[{"id":501,"name":"Quarterly planning notes"}]}`)
+			return
+		}
+		w.Header().Set("Link", `</topics/trash.json?page=3>; rel="next"`)
+		_, _ = io.WriteString(w, `{"title":"Trash","topics":[]}`)
+	}), "thread", "list", "--in", "trash", "--limit", "10")
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if response.Notice != "Showing 1 of 5 results; HEY returned no additional page cursor." {
+		t.Errorf("notice = %q", response.Notice)
+	}
+	if got := response.Meta["next_page"]; got != nil {
+		t.Errorf("next_page = %#v, want none", got)
+	}
+}

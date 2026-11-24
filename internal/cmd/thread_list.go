@@ -134,19 +134,25 @@ func (c *threadListCommand) run(cmd *cobra.Command, _ []string) error {
 		// ends the list: its cursor is not a continuation.
 		nextPage = ""
 	}
+	clipped := false
 	if c.limit > 0 && !c.all && len(topics) > c.limit {
 		topics = topics[:c.limit]
 		nextPage = ""
+		clipped = true
 	}
+	// ended is a read that wanted more and found the list's end: --all would stop at the
+	// same place, so the notice must not send the reader there.
+	ended := wantedMore && nextPage == "" && !collected.Truncated
 	total := collected.Total
 	if view.uncounted {
+		// HEY counts no total for Sent: only what was shown, and whether more was read.
 		total = len(topics)
 	}
 	title := first.title
 	if title == "" {
 		title = view.title
 	}
-	notice := threadListNotice(len(topics), total, nextPage != "", collected.Truncated, c.all, c.page != "")
+	notice := threadListNotice(len(topics), total, nextPage != "" || clipped, collected.Truncated, c.all || ended, c.page != "")
 
 	switch writer.EffectiveFormat() {
 	case output.FormatStyled:
