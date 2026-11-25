@@ -51,15 +51,16 @@ type Options struct {
 // --- Model ---
 
 type model struct {
-	width          int
-	height         int
-	vc             *viewContext
-	rootSDK        *hey.Client
-	cancel         context.CancelFunc
-	theme          Theme
-	styles         styles
-	help           helpBar
-	saveHelpHidden func(bool) error
+	width      int
+	height     int
+	vc         *viewContext
+	rootSDK    *hey.Client
+	cancel     context.CancelFunc
+	theme      Theme
+	styles     styles
+	help       helpBar
+	helpOpen   bool
+	helpScroll int
 
 	// Navigation
 	section    section
@@ -681,6 +682,9 @@ func (m model) View() tea.View {
 	if m.mailAccountPicker {
 		content = renderMailAccountPicker(&m, content)
 	}
+	if m.helpOpen {
+		content = overlayModal(content, m.helpDialog(), m.width, m.contentHeight())
+	}
 	// The toast goes on last, over the modals too: it is the answer to what the reader
 	// just did, and a form open over the list does not make it less so.
 	if toast := m.toastView(); toast != "" {
@@ -690,6 +694,13 @@ func (m model) View() tea.View {
 	b.WriteString(content)
 
 	helpView := m.help.view()
+	if m.helpOpen {
+		footer := m.help
+		footer.notice = ""
+		footer.helpKey = ""
+		footer.bindings = []helpBinding{{"↑↓", "scroll"}, {"pgup/pgdn", "page"}, {"esc/?", "close help"}}
+		helpView = footer.view()
+	}
 	linkFooter, linkFooterVisible := m.linkFooter()
 	if helpView != "" || linkFooterVisible {
 		contentLines := strings.Count(b.String(), "\n")
@@ -789,9 +800,11 @@ func (m *model) updateHelpBindings() {
 			bindings = append(bindings, extra...)
 		}
 	}
-	if m.canToggleHelp() && !m.help.hidden {
-		bindings = append(bindings, helpBinding{"?", "toggle help"})
+	m.help.helpKey = "f1"
+	if m.canToggleHelp() {
+		m.help.helpKey = "?"
 	}
+	bindings = append(bindings, helpBinding{"f1", "help"})
 	// Keep the hint during writes; the key handler still waits for them to finish.
 	if m.canSwitchMailAccounts() && !m.loading && !m.activeView.InThread() && !m.mailAccountPicker {
 		if ic, ok := m.activeView.(inputCapturer); !ok || !ic.CapturingInput() {
@@ -863,7 +876,7 @@ func (m model) contentHeight() int {
 func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
-	if m.help.notice != "" {
+	if m.help.notice != "" && key != "f1" && key != "?" && !m.helpOpen {
 		m.help.setNotice("")
 		m.updateHelpBindings()
 	}
@@ -883,6 +896,14 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.updateHelpBindings()
 	}
 
+	if m.helpOpen {
+		return m.handleHelpKey(msg)
+	}
+	if key == "f1" || (key == "?" && m.canToggleHelp()) {
+		m.helpOpen = true
+		m.helpScroll = 0
+		return m, nil
+	}
 	if m.mailAccountPicker {
 		return m.handleMailAccountKey(msg)
 	}
@@ -895,10 +916,6 @@ func (m model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.updateHelpBindings()
 		}
 		return m, nil
-	}
-
-	if key == "?" && m.canToggleHelp() {
-		return m.toggleHelp()
 	}
 
 	// A view with an open text form gets every key (esc, tab, letters, ...).
@@ -1022,15 +1039,39 @@ func (m model) canToggleHelp() bool {
 	return !ok || !capturer.CapturingInput()
 }
 
-func (m model) toggleHelp() (tea.Model, tea.Cmd) {
-	hidden := !m.help.hidden
-	m.help.setHidden(hidden)
-	if m.saveHelpHidden != nil {
-		if err := m.saveHelpHidden(hidden); err != nil {
-			m.help.setNotice(errorNotice("Could not save the help preference", err))
-		}
+func (m model) helpDialog() string {
+	width := min(m.width, 90)
+	lines := m.help.dialogLines(modalContentWidth(width))
+	rows := modalContentRows(m.contentHeight())
+	start := min(m.helpScroll, max(len(lines)-rows, 0))
+	end := min(start+rows, len(lines))
+	title := "Keyboard shortcuts"
+	if len(lines) > rows {
+		title += fmt.Sprintf(" · %d–%d of %d", start+1, end, len(lines))
 	}
-	m.updateHelpBindings()
+	return modalFrame(title, strings.Join(lines[start:end], "\n"), width)
+}
+
+func (m model) handleHelpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	rows := modalContentRows(m.contentHeight())
+	switch msg.String() {
+	case "?", "f1", "esc", "q":
+		m.helpOpen = false
+	case "up", "k":
+		m.helpScroll--
+	case "down", "j":
+		m.helpScroll++
+	case "pgup":
+		m.helpScroll -= rows
+	case "pgdown":
+		m.helpScroll += rows
+	case "home":
+		m.helpScroll = 0
+	case "end":
+		m.helpScroll = len(m.help.dialogLines(modalContentWidth(min(m.width, 90))))
+	}
+	lines := m.help.dialogLines(modalContentWidth(min(m.width, 90)))
+	m.helpScroll = min(max(m.helpScroll, 0), max(len(lines)-rows, 0))
 	return m, nil
 }
 
@@ -1385,8 +1426,6 @@ func Run(rootSDK, sdk *hey.Client, selected string, watchers Watchers, options O
 		request := options.Open
 		m.pendingOpen = &request
 	}
-	m.help.setHidden(config.HelpHidden())
-	m.saveHelpHidden = config.SaveHelpHidden
 	p := tea.NewProgram(m)
 	listener, err := startOpenListener(options.Instance, p.Send)
 	if err != nil {

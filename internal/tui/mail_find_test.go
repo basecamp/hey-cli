@@ -95,7 +95,7 @@ func TestThreadFindCapturesShortcutsAndCancelKeepsThePreviousQuery(t *testing.T)
 		m = updated.(model)
 	}
 	v := m.mailView
-	if !v.CapturingInput() || !v.inThread || m.help.hidden || v.modal != nil {
+	if !v.CapturingInput() || !v.inThread || m.helpOpen || v.modal != nil {
 		t.Fatal("query keystrokes triggered an action outside the find prompt")
 	}
 	if got := v.bodyFind.input.Value(); !strings.Contains(got, "?1nqr") {

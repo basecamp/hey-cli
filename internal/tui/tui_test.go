@@ -224,61 +224,36 @@ func TestFooterLeavesOnlyTheTerminalSafetyRow(t *testing.T) {
 	}
 }
 
-func TestQuestionMarkTogglesHelpAndResizesContent(t *testing.T) {
+func TestQuestionMarkOpensHelpWithoutResizingOrLosingPlace(t *testing.T) {
 	m := modelWithBoxes()
-	visibleHeight := m.vc.height
-	visibleView := m.View().Content
-	var saved []bool
-	m.saveHelpHidden = func(hidden bool) error {
-		saved = append(saved, hidden)
-		return nil
-	}
-
+	height := m.vc.height
+	original := m.View().Content
 	updated, _ := m.Update(keyPress("?"))
 	m = updated.(model)
-	if !m.help.hidden || m.help.view() != "" {
-		t.Error("question mark should hide shortcut help")
+	if !m.helpOpen {
+		t.Fatal("question mark did not open help")
 	}
-	if want := m.height - headerHeight; m.vc.height != want {
-		t.Errorf("content height after hiding help = %d, want %d", m.vc.height, want)
+	if m.vc.height != height {
+		t.Fatal("help resized the underlying view")
 	}
-	lines := strings.Split(strings.TrimRight(stripANSI(m.View().Content), "\n"), "\n")
-	if last := lines[len(lines)-1]; last == strings.Repeat("─", m.width) {
-		t.Error("hiding help left its bottom divider on screen")
+	if !strings.Contains(stripANSI(m.View().Content), "Keyboard shortcuts") {
+		t.Fatal("help modal was not drawn")
 	}
-	if !slices.Equal(saved, []bool{true}) {
-		t.Errorf("saved preferences = %v, want [true]", saved)
+	updated, cmd := m.Update(keyPress("t"))
+	m = updated.(model)
+	if cmd != nil || !m.helpOpen {
+		t.Fatal("help let a mail action through")
 	}
-	if top := lines[0]; !strings.Contains(top, " ? help ") {
-		t.Errorf("hidden help left no way back on the top rule: %q", top)
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if m.helpOpen || m.View().Content != original {
+		t.Fatal("closing help did not restore the view")
 	}
 	m.err = errors.New("HEY is not answering")
-	if top := strings.SplitN(stripANSI(m.View().Content), "\n", 2)[0]; strings.Contains(top, "? help") {
-		t.Errorf("the top rule offers ? while an error box would swallow it: %q", top)
-	}
 	updated, _ = m.Update(keyPress("?"))
 	m = updated.(model)
-	if !m.help.hidden {
-		t.Error("? acted through an error box")
-	}
-	m.err = nil
-
-	updated, _ = m.Update(keyPress("?"))
-	m = updated.(model)
-	if m.help.hidden || m.help.view() == "" {
-		t.Error("question mark should restore shortcut help")
-	}
-	if m.vc.height != visibleHeight {
-		t.Errorf("content height after restoring help = %d, want %d", m.vc.height, visibleHeight)
-	}
-	if restored := m.View().Content; restored != visibleView {
-		t.Error("restoring help did not restore the original layout")
-	}
-	if !slices.Equal(saved, []bool{true, false}) {
-		t.Errorf("saved preferences = %v, want [true false]", saved)
-	}
-	if !slices.Contains(m.help.bindings, helpBinding{"?", "toggle help"}) {
-		t.Errorf("visible shortcut help does not explain its toggle: %v", m.help.bindings)
+	if m.helpOpen {
+		t.Fatal("question mark acted through an error")
 	}
 }
 
@@ -296,7 +271,7 @@ func TestQuestionMarkRemainsTextInsideSearch(t *testing.T) {
 	if form.input.Value() != "?" {
 		t.Errorf("search value = %q, want question mark", form.input.Value())
 	}
-	if m.help.hidden {
+	if m.helpOpen {
 		t.Error("typing a question mark in search should not toggle help")
 	}
 }
@@ -308,19 +283,26 @@ func TestQuestionMarkTogglesHelpInsideScreener(t *testing.T) {
 
 	updated, _ := m.Update(keyPress("?"))
 	m = updated.(model)
-	if !m.help.hidden {
-		t.Error("question mark should toggle help inside The Screener")
+	if !m.helpOpen {
+		t.Error("question mark should open help inside The Screener")
 	}
 }
 
-func TestHelpPreferenceFailureIsShown(t *testing.T) {
+func TestF1OpensHelpInAFormAndPreservesItsText(t *testing.T) {
 	m := modelWithBoxes()
-	m.saveHelpHidden = func(bool) error { return errors.New("read-only file system") }
-
-	updated, _ := m.Update(keyPress("?"))
+	updated, _ := m.Update(keyPress("/"))
 	m = updated.(model)
-	if !strings.Contains(stripANSI(m.help.view()), "Could not save the help preference") {
-		t.Errorf("help preference failure is not visible: %q", m.help.view())
+	updated, _ = m.Update(keyPress("?"))
+	m = updated.(model)
+	updated, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF1}))
+	m = updated.(model)
+	if !m.helpOpen || searchModal(m.mailView).input.Value() != "?" {
+		t.Fatal("F1 changed the search instead of opening help")
+	}
+	updated, _ = m.Update(keyPress("esc"))
+	m = updated.(model)
+	if m.helpOpen || searchModal(m.mailView).input.Value() != "?" {
+		t.Fatal("closing help changed the search")
 	}
 }
 
@@ -988,13 +970,13 @@ func TestContentListUsesRowsReleasedByScrolledOffHeader(t *testing.T) {
 
 	cl := &contentList{}
 	cl.setPostings(postings)
-	cl.setSize(80, 6)
+	cl.setSize(80, 3)
 	cl.moveDown()
 	cl.moveDown()
 	cl.moveDown()
 
 	if cl.scrollOff != 1 {
-		t.Errorf("scroll offset = %d, want 1 while three rows fit below the scrolled-off header", cl.scrollOff)
+		t.Errorf("scroll offset = %d, want 1 while three single-line rows fit below the scrolled-off header", cl.scrollOff)
 	}
 	view := stripANSI(cl.view())
 	for _, want := range []string{"Thread 2", "Thread 3", "Thread 4"} {
@@ -1008,13 +990,13 @@ func TestContentListUsesRowsReleasedByScrolledOffHeader(t *testing.T) {
 // shows is the reader's own day or the wrong one. A thread that arrived late in the
 // evening must not read as the day after.
 func TestFormatDisplayDateReadsTheDayInTheReadersZone(t *testing.T) {
-	lateEvening := time.Date(2026, 8, 20, 23, 30, 0, 0, time.Local)
+	lateEvening := time.Date(time.Now().Year(), 8, 20, 23, 30, 0, 0, time.Local)
 
-	if got := formatDisplayDate(lateEvening); got != "Aug 20, 2026" {
-		t.Errorf("date = %q, want Aug 20, 2026", got)
+	if got := formatDisplayDate(lateEvening); got != "Aug 20" {
+		t.Errorf("date = %q, want Aug 20", got)
 	}
-	if got := formatDisplayDate(lateEvening.UTC()); got != "Aug 20, 2026" {
-		t.Errorf("the same instant as HEY serves it = %q, want Aug 20, 2026", got)
+	if got := formatDisplayDate(lateEvening.UTC()); got != "Aug 20" {
+		t.Errorf("the same instant as HEY serves it = %q, want Aug 20", got)
 	}
 	if got := formatDisplayDate(time.Time{}); got != "" {
 		t.Errorf("a posting with no timestamp = %q, want no date", got)
@@ -1040,9 +1022,9 @@ func TestContentListStylesSeenAndUnseenRows(t *testing.T) {
 	lines := strings.Split(cl.view(), "\n")
 	newHeader := lines[0]
 	cursorLine1 := lines[1]
-	unseenLine1, unseenLine2 := lines[3], lines[4]
-	seenHeader := lines[5]
-	seenLine1, seenLine2 := lines[6], lines[7]
+	unseenLine1 := lines[2]
+	seenHeader := lines[3]
+	seenLine1 := lines[4]
 
 	if !strings.Contains(newHeader, "New for You") || !strings.Contains(newHeader, "\x1b[1;34m") {
 		t.Errorf("the unseen section should open with a bold chrome header: %q", newHeader)
@@ -1065,11 +1047,11 @@ func TestContentListStylesSeenAndUnseenRows(t *testing.T) {
 	if !strings.Contains(seenLine1, "\x1b[1;97m") || !strings.Contains(seenLine1, "\x1b[97m") {
 		t.Errorf("seen row should keep the full row styling: %q", seenLine1)
 	}
-	if !strings.Contains(unseenLine2, "\x1b[1;96m") || !strings.Contains(seenLine2, "\x1b[1;96m") {
-		t.Errorf("sender names should be bold hyperlink cyan in both sections: %q / %q", unseenLine2, seenLine2)
+	if !strings.Contains(unseenLine1, "\x1b[1;96m") || !strings.Contains(seenLine1, "\x1b[1;96m") {
+		t.Errorf("sender names should be bold hyperlink cyan in both sections")
 	}
-	if !strings.Contains(unseenLine2, "\x1b[2m") || !strings.Contains(seenLine2, "\x1b[2m") {
-		t.Errorf("second lines should be faint secondary text in both sections: %q / %q", unseenLine2, seenLine2)
+	if strings.Contains(cl.view(), unseen.Summary) {
+		t.Error("single-line rows should not render previews")
 	}
 }
 
@@ -1149,8 +1131,8 @@ func TestContentListOpensWithTheBubbledUpSection(t *testing.T) {
 	if !strings.Contains(lines[1], "Invoice for July hosting") || !strings.Contains(lines[1], "●") {
 		t.Errorf("a bubbled up row should show the unread dot: %q", lines[1])
 	}
-	if !strings.HasPrefix(lines[3], "New for You") || !strings.HasPrefix(lines[6], "Previously Seen") {
-		t.Errorf("the other sections should follow with their headers: %q / %q", lines[3], lines[6])
+	if !strings.HasPrefix(lines[2], "New for You") || !strings.HasPrefix(lines[4], "Previously Seen") {
+		t.Errorf("the other sections should follow with their headers: %q / %q", lines[2], lines[4])
 	}
 }
 
@@ -1410,24 +1392,15 @@ func TestContentListAlignsDateColumn(t *testing.T) {
 	cl.setPostings([]mail.Posting{long, short})
 	cl.setSize(60, 20)
 
-	// Lines: 0 "New for You", 1-2 long row, 3 "Previously Seen", 4-5 short row.
+	// Lines: 0 New for You, 1 long row, 2 Previously Seen, 3 short row.
 	lines := strings.Split(cl.view(), "\n")
-	firstWidth, secondWidth := lipgloss.Width(lines[1]), lipgloss.Width(lines[4])
-	if firstWidth != secondWidth {
-		t.Errorf("dates should end in the same column: row widths %d and %d", firstWidth, secondWidth)
+	for _, line := range []string{lines[1], lines[3]} {
+		if got := lipgloss.Width(line); got != 60 {
+			t.Errorf("row width = %d, want 60: %q", got, line)
+		}
 	}
-	if firstWidth > 60 {
-		t.Errorf("row width %d exceeds the list width 60", firstWidth)
-	}
-
-	dateCol := lipgloss.Width("Aug 20, 2026")
-	// The cursor row (row 0) pads its second line to the full row width so
-	// the selection background also covers the space under the date.
-	if lipgloss.Width(lines[2]) != firstWidth {
-		t.Errorf("cursor row second line width = %d, want the full row width %d", lipgloss.Width(lines[2]), firstWidth)
-	}
-	if lipgloss.Width(lines[5]) > firstWidth-dateCol-2 {
-		t.Errorf("second line text reaches into the date column: %q", lines[5])
+	if !strings.HasSuffix(stripANSI(lines[1]), formatDisplayDate(long.CreatedAt)) || !strings.HasSuffix(stripANSI(lines[3]), formatDisplayDate(short.CreatedAt)) {
+		t.Error("dates should end at the right edge")
 	}
 }
 
@@ -1849,7 +1822,7 @@ func TestThreadLinkSelectionSurvivesRebuildsAndClearsWhenOccurrenceDisappears(t 
 
 func TestThreadMessageAndAttachmentKeysRemainAvailableWithLinks(t *testing.T) {
 	m := openLinkThreadThroughModel(t)
-	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 11})
 	m = updated.(model)
 	updated, _ = m.Update(keyPress("tab"))
 	m = updated.(model)

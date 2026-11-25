@@ -370,12 +370,8 @@ func renderTopRule(width int, hint, account string) string {
 func renderHeader(m *model) string {
 	var b strings.Builder
 
-	// Row 1: section rule + items. Hidden help leaves the one key that brings it back.
-	hint := ""
-	if m.help.hidden && m.canToggleHelp() {
-		hint = "? help"
-	}
-	b.WriteString(renderTopRule(m.width, hint, m.mailAccount.label))
+	// Row 1: section rule + items.
+	b.WriteString(renderTopRule(m.width, "", m.mailAccount.label))
 	b.WriteString("\n")
 	b.WriteString(renderNavRow(sectionItems, int(m.section), m.focus == rowSection, m.width, true))
 	b.WriteString("\n")

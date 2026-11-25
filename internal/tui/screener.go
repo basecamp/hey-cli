@@ -545,7 +545,9 @@ func (v *screenerView) ExitThread() {}
 
 func (v *screenerView) Loading() bool { return v.loading }
 
-func (v *screenerView) Resize(int, int) {}
+func (v *screenerView) Resize(int, int) {
+	v.pane().ensureVisible(v.visibleRows())
+}
 
 func (v *screenerView) pane() *screenerPane {
 	if v.tab == screenerHistoryTab {
@@ -567,6 +569,7 @@ func (v *screenerView) switchTab(tab screenerTab) tea.Cmd {
 	}
 	v.tab = tab
 	v.notice = ""
+	v.pane().ensureVisible(v.visibleRows())
 	if v.pane().loaded {
 		return nil
 	}
@@ -709,13 +712,7 @@ func (v *screenerView) visibleRows() int {
 	if v.notice != "" {
 		headerLines++
 	}
-	// Pending rows take two lines (the second holds the subject); history
-	// rows take one.
-	rowHeight := 2
-	if v.tab == screenerHistoryTab {
-		rowHeight = 1
-	}
-	return max((v.vc.height-headerLines)/rowHeight, 1)
+	return max(v.vc.height-headerLines, 1)
 }
 
 func (v *screenerView) clearConfirmationView() string {
@@ -874,14 +871,8 @@ func screenerRowLabel(row screenerRow) string {
 }
 
 func renderScreenerRows(pane *screenerPane, visible, width int) string {
-	// Rows mirror the mail lists: a bright first line ("Name <address>", only
-	// the name bold so the address reads apart from it) with a bright trailing
-	// date, then an indented second line whose subject
-	// takes the hyperlink color and whose excerpt is faint. History rows have
-	// no second line — their label already carries the address — and lead the
-	// date with the decision, green for in and red for out. The cursor row
-	// uses the accent foreground that is checked against the selection
-	// background, with the bar and background spanning the whole row.
+	// Pending senders show their name, address, subject and right-aligned date.
+	// History keeps the sender and a colored decision alongside the date.
 	marker, selectedText := cursorStyles()
 	selectedGap := selectionStyle(lipgloss.NewStyle())
 	labelBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
@@ -890,17 +881,9 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 	screenedInBase := lipgloss.NewStyle().Foreground(colorPositive)
 	screenedOutBase := lipgloss.NewStyle().Foreground(colorNegative)
 	subjectBase := lipgloss.NewStyle().Foreground(colorLink).Bold(true)
-	summaryBase := styleMuted
 
 	var b strings.Builder
 	end := min(pane.scroll+visible, len(pane.rows))
-
-	// The trailing text gets its own right-hand column, as in the mail lists:
-	// the second line stops before it, so the right edge stays clean.
-	trailingCol := 0
-	for index := pane.scroll; index < end; index++ {
-		trailingCol = max(trailingCol, lipgloss.Width(truncateStr(pane.rows[index].trailing, max(width/2, 10))))
-	}
 
 	for index := pane.scroll; index < end; index++ {
 		row := pane.rows[index]
@@ -918,22 +901,51 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 		}
 
 		trailing := truncateStr(row.trailing, max(width/2, 10))
+		if row.verdict == "" {
+			// Unknown senders need their address as well as their name. Keep both
+			// beside the subject, with the date still at the right edge.
+			available := max(width-4-displayWidth(trailing), 0)
+			if available < 12 {
+				trailing = ""
+				available = max(width-2, 0)
+			}
+			nameWidth := min(18, available/4)
+			addressWidth := 0
+			if row.name != "" && row.email != "" && row.name != row.email {
+				addressWidth = min(32, available/3)
+			}
+			subjectWidth := max(available-nameWidth-2, 0)
+			if addressWidth > 0 {
+				subjectWidth = max(subjectWidth-addressWidth-2, 0)
+			}
+			if isCursor {
+				b.WriteString(marker.Render("│") + gapStyle.Render(" "))
+			} else {
+				b.WriteString("  ")
+			}
+			name := truncateToWidth(screenerRowName(row), nameWidth)
+			b.WriteString(emphasize(labelBase).Render(name))
+			b.WriteString(gapStyle.Render(strings.Repeat(" ", nameWidth-displayWidth(name)+2)))
+			if addressWidth > 0 {
+				address := truncateToWidth(row.email, addressWidth)
+				b.WriteString(emphasize(addressBase).Render(address))
+				b.WriteString(gapStyle.Render(strings.Repeat(" ", addressWidth-displayWidth(address)+2)))
+			}
+			subject := row.subject
+			if subject == "" {
+				subject = row.summary
+			}
+			subject = truncateToWidth(subject, subjectWidth)
+			b.WriteString(emphasize(subjectBase).Render(subject))
+			b.WriteString(gapStyle.Render(strings.Repeat(" ", subjectWidth-displayWidth(subject))))
+			if trailing != "" {
+				b.WriteString(gapStyle.Render("  ") + emphasize(trailingBase).Render(trailing))
+			}
+			b.WriteString("\n")
+			continue
+		}
 		label := truncateStr(screenerRowLabel(row), max(width-lipgloss.Width(trailing)-6, 10))
 		gap := strings.Repeat(" ", max(width-4-lipgloss.Width(label)-lipgloss.Width(trailing), 1))
-
-		// Line 2: Subject — excerpt, colored like a mail row's second line.
-		subject := row.subject
-		var summary string
-		if row.summary != "" {
-			summary = " — " + row.summary
-		}
-		detailWidth := max(width-8-trailingCol, 10)
-		if lipgloss.Width(subject) > detailWidth {
-			subject = truncateStr(subject, detailWidth)
-			summary = ""
-		} else {
-			summary = truncateStr(summary, max(detailWidth-lipgloss.Width(subject), 0))
-		}
 
 		if isCursor {
 			b.WriteString(marker.Render("│") + gapStyle.Render(" "))
@@ -968,25 +980,7 @@ func renderScreenerRows(pane *screenerPane, visible, width int) string {
 			b.WriteString(emphasize(trailingBase).Render(rest))
 		}
 		b.WriteString("\n")
-		if subject == "" && summary == "" {
-			continue
-		}
-		if isCursor {
-			b.WriteString(marker.Render("│") + gapStyle.Render("   "))
-		} else {
-			b.WriteString("    ")
-		}
-		b.WriteString(emphasize(subjectBase).Render(subject))
-		b.WriteString(emphasize(summaryBase).Render(summary))
-		if isCursor {
-			// Pad to the first line's width so the selection background
-			// covers the whole row.
-			pad := width - 6 - lipgloss.Width(subject) - lipgloss.Width(summary)
-			if pad > 0 {
-				b.WriteString(gapStyle.Render(strings.Repeat(" ", pad)))
-			}
-		}
-		b.WriteString("\n")
+
 	}
 	return b.String()
 }

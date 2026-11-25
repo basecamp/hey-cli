@@ -10,14 +10,20 @@ import (
 	"github.com/basecamp/hey-cli/internal/mail"
 )
 
-// formatDisplayDate renders a timestamp as "Nov 24, 2025" in the reader's own zone, which
-// is the only zone the day is right in: a thread that arrived at 23:30 UTC belongs to the
-// next day east of it.
+// formatDisplayDate uses the reader's local day and omits the current year.
 func formatDisplayDate(ts time.Time) string {
+	return formatDisplayDateAt(ts, time.Now())
+}
+
+func formatDisplayDateAt(ts, now time.Time) string {
 	if ts.IsZero() {
 		return ""
 	}
-	return ts.Local().Format("Jan 2, 2006")
+	local := ts.Local()
+	if local.Year() == now.Local().Year() {
+		return local.Format("Jan 2")
+	}
+	return local.Format("Jan 2, 2006")
 }
 
 // formatDisplayDateTime is for a thread's entries, where the day is not enough: a
@@ -96,7 +102,7 @@ type contentList struct {
 	cursor        int
 	scrollOff     int
 	width         int
-	height        int // visible rows (each posting takes 2 lines)
+	height        int // visible terminal rows
 	hideSeenState bool
 	selected      map[int64]struct{}
 	// selectionLost is a selection that went out from under the reader — a re-read took
@@ -535,7 +541,7 @@ func (c *contentList) listHeight() int {
 	if c.coveredFrom() < 0 {
 		return c.height
 	}
-	return max(c.height-1-coverMinRows, 2)
+	return max(c.height-1-coverMinRows, 1)
 }
 
 // visibleItemsFrom reports how many postings fit from start, including only
@@ -545,7 +551,7 @@ func (c *contentList) visibleItemsFrom(start int) int {
 	count := 0
 	height := c.listHeight()
 	for i := start; i < c.itemCount(); i++ {
-		postingRows := 2
+		postingRows := 1
 		if c.sectionLabelAt(i) != "" {
 			postingRows++
 		}
@@ -696,24 +702,21 @@ func (c *contentList) view() string {
 	selectedMark := lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
 
 	// Every row uses the same styles: bold bright subject, a bright date,
-	// bold sender in the hyperlink color, and the excerpt in the faint
-	// secondary style. Read state shows as the section a row sits in
+	// bold sender in the hyperlink color. Read state shows as the section a row sits in
 	// ("Bubbled Up" / "New for You" / "Previously Seen") plus the alert dot;
 	// the cursor row uses the accent foreground that the selection-background
 	// contrast gate guarantees remains legible.
 	subjectBase := lipgloss.NewStyle().Foreground(colorBright).Bold(true)
 	dateBase := lipgloss.NewStyle().Foreground(colorBright)
 	senderBase := lipgloss.NewStyle().Foreground(colorLink).Bold(true)
-	excerptBase := styleMuted
 
-	// The date gets its own right-hand column, as in the HEY web app. Both
-	// lines of a row stop before the column, so the right edge stays clean.
+	// The date gets its own right-hand column, as in the HEY web app. The
+	// sender and subject stop before the column, so the right edge stays clean.
 	dateCol := 0
 	for i := c.scrollOff; i < end; i++ {
 		dateCol = max(dateCol, lipgloss.Width(formatDisplayDate(c.postings[i].CreatedAt)))
 	}
 	prefixWidth := 4 // "│ ● " or "    "
-	textWidth := max(c.width-prefixWidth-2-dateCol, 10)
 
 	for i := c.scrollOff; i < end; i++ {
 		p := c.postings[i]
@@ -730,7 +733,7 @@ func (c *contentList) view() string {
 
 		// The cursor text takes the accent foreground that applyTheme checked
 		// against the selection background. Gaps keep only the background so the
-		// two lines read as one highlighted row.
+		// entire line reads as one highlighted row.
 		emphasize := func(base lipgloss.Style) lipgloss.Style {
 			if isCursor {
 				return cursorText
@@ -742,7 +745,7 @@ func (c *contentList) view() string {
 			gapStyle, dot, mark = selectedGap, selectionStyle(unseenDot), selectionStyle(selectedMark)
 		}
 
-		// Line 1: [│] [●] Subject (count)                Nov 24, 2025
+		// [│] [●] Sender  Subject (count)                Nov 24, 2025
 		// The cursor shows only as the bar on the left; the row keeps its
 		// seen/unseen colors.
 		var line1 strings.Builder
@@ -778,71 +781,50 @@ func (c *contentList) view() string {
 		}
 
 		date := formatDisplayDate(p.CreatedAt)
-		subject = truncateToWidth(subject, textWidth)
-		// Pad through the gap and right-align the date within its column.
-		gap := max(textWidth-displayWidth(subject)+2+dateCol-lipgloss.Width(date), 1)
-
+		// Fixed sender and date columns leave the subject the remaining room.
+		// Keep the state markers above: selection, unread and bundles still
+		// retain their meaning in the single-line layout.
+		available := max(c.width-prefixWidth-2-dateCol, 0)
+		if available < 12 {
+			date = ""
+			available = max(c.width-prefixWidth, 0)
+		}
+		senderWidth := min(18, available/4)
+		sender := truncateToWidth(postingSender(p), senderWidth)
+		gap := min(2, max(available-senderWidth, 0))
+		subjectWidth := max(available-senderWidth-gap, 0)
+		subject = truncateToWidth(subject, subjectWidth)
+		line1.WriteString(emphasize(senderBase).Render(sender))
+		line1.WriteString(gapStyle.Render(strings.Repeat(" ", senderWidth-displayWidth(sender)+gap)))
 		line1.WriteString(emphasize(subjectBase).Render(subject))
-		line1.WriteString(gapStyle.Render(strings.Repeat(" ", gap)))
-		line1.WriteString(emphasize(dateBase).Render(date))
-
-		// Line 2: [│]     extension@ Creator Name — excerpt...
-		// Indented two columns past the subject, as in The Screener.
-		var line2 strings.Builder
-		if isCursor {
-			line2.WriteString(cursorMarker.Render("│") + gapStyle.Render("     "))
+		if date != "" {
+			line1.WriteString(gapStyle.Render(strings.Repeat(" ", subjectWidth-displayWidth(subject)+2+dateCol-displayWidth(date))))
+			line1.WriteString(emphasize(dateBase).Render(date))
 		} else {
-			line2.WriteString("      ")
+			line1.WriteString(gapStyle.Render(strings.Repeat(" ", subjectWidth-displayWidth(subject))))
 		}
-
-		name := p.Creator.Name
-		if p.AlternativeSenderName != "" {
-			name = p.AlternativeSenderName
-		}
-		if name == "" {
-			name = p.Creator.EmailAddress
-		}
-
-		// Build: [extension@] Creator Name — Summary excerpt
-		sender := name
-		if len(p.Extenzions) > 0 {
-			sender = p.Extenzions[0].Name + "@ " + name
-		}
-
-		// Summary is the last message excerpt — always show it
-		var excerpt string
-		if p.Summary != "" && p.Summary != p.Name {
-			excerpt = " — " + p.Summary
-		}
-
-		detailWidth := max(textWidth-2, 1) // the indent narrows the second line
-		if displayWidth(sender) > detailWidth {
-			sender = truncateToWidth(sender, detailWidth)
-			excerpt = ""
-		} else {
-			excerpt = truncateToWidth(excerpt, detailWidth-displayWidth(sender))
-		}
-
-		line2.WriteString(emphasize(senderBase).Render(sender))
-		line2.WriteString(emphasize(excerptBase).Render(excerpt))
-		if isCursor {
-			// Pad to the full row width so the selection background also
-			// covers the space under the date.
-			pad := prefixWidth + textWidth + 2 + dateCol - 6 - displayWidth(sender) - displayWidth(excerpt)
-			if pad > 0 {
-				line2.WriteString(gapStyle.Render(strings.Repeat(" ", pad)))
-			}
-		}
-
 		fmt.Fprintln(&b, line1.String())
-		fmt.Fprintln(&b, line2.String())
-		rendered += 2
+		rendered++
 	}
 
 	if from := c.coveredFrom(); from >= 0 {
 		b.WriteString(c.coverView(len(c.postings)-from, rendered))
 	}
 	return b.String()
+}
+
+func postingSender(p mail.Posting) string {
+	name := p.Creator.Name
+	if p.AlternativeSenderName != "" {
+		name = p.AlternativeSenderName
+	}
+	if name == "" {
+		name = p.Creator.EmailAddress
+	}
+	if len(p.Extenzions) > 0 {
+		name = p.Extenzions[0].Name + "@ " + name
+	}
+	return name
 }
 
 // coverView is the lid over Previously Seen: its divider, saying how much is

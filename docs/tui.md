@@ -2,7 +2,7 @@
 
 `hey tui` is the interactive app: Mail, Contacts, Calendar and Journal in one terminal
 window, following HEY live. This page is the reference for how it starts, how to get
-around it, and what each key does. Press `?` inside the app for the shortcut bar.
+around it, and what each key does. Press `?` inside the app for the full keyboard help.
 
 ## Starting it
 
@@ -23,9 +23,20 @@ manually launched TUIs.
 ## Getting around
 
 The app has four sections: Mail, Contacts, Calendar and Journal. The context-sensitive
-shortcut bar is visible by default; press `?` to hide or restore it, and the choice is
-remembered across restarts. While it is hidden, `? help` at the left of the top bar says
-how to bring it back.
+shortcut footer stays on one line, showing the most useful actions for the current
+screen. Press `?` to open a modal with the complete context-sensitive keyboard help,
+or **F1** while typing in a form, search or find prompt (where `?` stays text).
+Help uses two columns when there is room and a single column in smaller terminals.
+Use Up/Down or PgUp/PgDn to scroll the help, and Escape, `q`, `?` or F1 to close it
+without changing the screen underneath. F1 also works in pickers and error dialogs.
+The former hidden-help preference no longer hides the compact footer.
+
+Mail lists show one line per thread, with a truncated sender, subject and
+right-aligned date. Dates omit the year when it is the current year in your local
+time zone. This layout applies across boxes, labels, collections, searches,
+bundles, Previously Seen and a contact's thread list. The Screener shows the
+sender's name, address, subject and date on one line; history shows the sender and
+screening decision. Email bodies and forms keep their usual layout.
 
 Mail navigation includes HEY's boxes plus separate Labels and Collections tabs: Shift+L
 opens Labels directly and Shift+K opens Collections. Previously Seen has its own tab after

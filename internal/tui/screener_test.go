@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -166,9 +167,8 @@ func TestScreenerViewCarriesHeyWording(t *testing.T) {
 	}
 }
 
-// A long excerpt stops before the date column instead of running under the
-// trailing date, as the second line of a mail list row does.
-func TestScreenerExcerptStopsBeforeTheDateColumn(t *testing.T) {
+// A pending sender stays on one line with its date aligned to the right.
+func TestScreenerRowKeepsDateAtTheRightEdge(t *testing.T) {
 	view, _ := screenerTestView(t)
 	view.pending.setRows([]screenerRow{{
 		id:       91,
@@ -192,10 +192,10 @@ func TestScreenerExcerptStopsBeforeTheDateColumn(t *testing.T) {
 	if detail == "" {
 		t.Fatalf("no excerpt line rendered:\n%s", strings.Join(lines, "\n"))
 	}
-	limit := view.vc.width - 4 - len("Jan 8, 2026")
-	if got := ansi.StringWidth(detail); got > limit {
-		t.Errorf("excerpt line width = %d, want at most %d: %q", got, limit, detail)
+	if got := ansi.StringWidth(detail); got != view.vc.width || !strings.HasSuffix(detail, "Jan 8, 2026") {
+		t.Errorf("sender row lost its right-aligned date: %q", detail)
 	}
+
 }
 
 func TestScreenerEmptyQueue(t *testing.T) {
@@ -340,7 +340,7 @@ func TestScreenerTabsOverToPreviousDecisions(t *testing.T) {
 	if len(view.history.rows) != 2 {
 		t.Fatalf("history rows = %+v", view.history.rows)
 	}
-	if view.history.rows[0].trailing != "Screened in · Aug 18, 2026" || view.history.rows[1].trailing != "Screened out · Aug 17, 2026" {
+	if view.history.rows[0].trailing != "Screened in · "+formatDisplayDate(time.Date(2026, 8, 18, 12, 0, 0, 0, time.Local)) || view.history.rows[1].trailing != "Screened out · "+formatDisplayDate(time.Date(2026, 8, 17, 12, 0, 0, 0, time.Local)) {
 		t.Errorf("history decisions = %q, %q", view.history.rows[0].trailing, view.history.rows[1].trailing)
 	}
 	if view.history.rows[0].verdict != "Screened in" || view.history.rows[0].denied {
@@ -351,7 +351,7 @@ func TestScreenerTabsOverToPreviousDecisions(t *testing.T) {
 	}
 
 	rendered := plainText(view.View())
-	for _, want := range []string{"All the contacts you've screened in or out.", "Alice Jones", "Aug 18, 2026"} {
+	for _, want := range []string{"All the contacts you've screened in or out.", "Alice Jones", formatDisplayDate(time.Date(2026, 8, 18, 12, 0, 0, 0, time.Local))} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("history view is missing %q:\n%s", want, rendered)
 		}

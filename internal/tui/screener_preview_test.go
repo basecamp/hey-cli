@@ -203,7 +203,7 @@ func TestScreenerFindPromptOwnsQuestionMarkAndScreeningKeys(t *testing.T) {
 		updated, _ := m.Update(keyPress(key))
 		m = updated.(model)
 	}
-	if view.preview == nil || !view.preview.find.editing || m.help.hidden {
+	if view.preview == nil || !view.preview.find.editing || m.helpOpen {
 		t.Fatal("typing a query toggled help, screened the sender, or closed the preview")
 	}
 	if got := view.preview.find.input.Value(); !strings.Contains(got, "?nyq") {

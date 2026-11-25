@@ -111,8 +111,9 @@ func TestModelShowsAndClearsATemporaryDisconnectAcrossSections(t *testing.T) {
 	m := newModel()
 	m.width, m.height = 80, 30
 	m.vc.width, m.vc.height = 80, 20
-	m.help.setHidden(true)
 	m.activeView = m.calendarView
+	m.help.setWidth(m.width)
+	m.updateHelpBindings()
 	m.mailWatchEvents = make(chan MailWatchEvent)
 	fullHeight := m.contentHeight()
 
