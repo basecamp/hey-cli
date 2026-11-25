@@ -24,9 +24,11 @@ manually launched TUIs.
 
 The app has four sections: Mail, Contacts, Calendar and Journal. The context-sensitive
 shortcut footer stays on one line, showing the most useful actions for the current
-screen. Press `?` to open a modal with the complete context-sensitive keyboard help,
+screen. The help hint stays visible even while a notice is shown. Press `?` to open a modal with the complete context-sensitive keyboard help,
 or **F1** while typing in a form, search or find prompt (where `?` stays text).
-Help uses two columns when there is room and a single column in smaller terminals.
+Help includes paging and context-appropriate section and box navigation. It uses two
+columns when there is room and a single column in smaller terminals. On very short
+terminals it drops the frame to keep the shortcuts visible.
 Use Up/Down or PgUp/PgDn to scroll the help, and Escape, `q`, `?` or F1 to close it
 without changing the screen underneath. F1 also works in pickers and error dialogs.
 The former hidden-help preference no longer hides the compact footer.

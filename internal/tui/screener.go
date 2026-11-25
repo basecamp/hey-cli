@@ -435,6 +435,7 @@ func (v *screenerView) HelpBindings() []helpBinding {
 		}
 		bindings := []helpBinding{
 			{"↑↓", "scroll"},
+			{"pgup/pgdown", "page up/down"},
 			{closeKey, "close preview"},
 		}
 		if v.preview.find.query == "" {
@@ -444,7 +445,7 @@ func (v *screenerView) HelpBindings() []helpBinding {
 		}
 		return append(bindings, v.preview.find.helpBindings()...)
 	}
-	bindings := []helpBinding{{"↑↓", "navigate"}}
+	bindings := []helpBinding{{"↑↓", "navigate"}, {"pgup/pgdown", "page up/down"}, {"j/k", "next/previous row"}}
 	if v.tab == screenerPendingTab {
 		bindings = append(bindings,
 			helpBinding{key: v.screenQuestion()},

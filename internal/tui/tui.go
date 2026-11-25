@@ -236,6 +236,11 @@ func (m *model) restyle(theme Theme) {
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		if m.helpOpen {
+			return m, nil
+		}
+
 	case viewGenerationMsg:
 		if msg.generation != m.viewGeneration {
 			return m, nil
@@ -683,7 +688,11 @@ func (m model) View() tea.View {
 		content = renderMailAccountPicker(&m, content)
 	}
 	if m.helpOpen {
-		content = overlayModal(content, m.helpDialog(), m.width, m.contentHeight())
+		if _, _, framed := m.helpLayout(); framed {
+			content = overlayModal(content, m.helpDialog(), m.width, m.contentHeight())
+		} else {
+			content = m.helpDialog()
+		}
 	}
 	// The toast goes on last, over the modals too: it is the answer to what the reader
 	// just did, and a form open over the list does not make it less so.
@@ -697,7 +706,7 @@ func (m model) View() tea.View {
 	if m.helpOpen {
 		footer := m.help
 		footer.notice = ""
-		footer.helpKey = ""
+		footer.helpKey = "?"
 		footer.bindings = []helpBinding{{"↑↓", "scroll"}, {"pgup/pgdn", "page"}, {"esc/?", "close help"}}
 		helpView = footer.view()
 	}
@@ -756,7 +765,7 @@ func (m *model) updateHelpBindings() {
 		}
 	} else if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
 		bindings = append(m.activeView.HelpBindings(), quitHint)
-	} else if m.activeView.InThread() {
+	} else if m.activeView.InThread() && (m.activeView != m.mailView || m.mailView.inThread) {
 		extra := m.activeView.HelpBindings()
 		bindings = make([]helpBinding, 0, 4+len(extra))
 		bindings = append(bindings, helpBinding{"↑↓", "scroll"})
@@ -800,6 +809,7 @@ func (m *model) updateHelpBindings() {
 			bindings = append(bindings, extra...)
 		}
 	}
+	bindings = append(bindings, m.navigationHelpBindings()...)
 	m.help.helpKey = "f1"
 	if m.canToggleHelp() {
 		m.help.helpKey = "?"
@@ -821,6 +831,55 @@ func (m *model) updateHelpBindings() {
 		m.vc.height = contentHeight
 		m.activeView.Resize(m.vc.width, contentHeight)
 	}
+}
+
+// Navigation shortcuts follow the same input ownership as handleKey: forms,
+// pickers and the Screener keep global section and box keys for themselves.
+func (m model) navigationHelpBindings() []helpBinding {
+	if m.loading || m.err != nil || m.mailAccountPicker {
+		return nil
+	}
+	if ic, ok := m.activeView.(inputCapturer); ok && ic.CapturingInput() {
+		return nil
+	}
+	bindings := []helpBinding{{"tab", "next row"}, {"shift+tab", "prev row"}}
+	if navigator, ok := m.activeView.(linkNavigator); ok && m.focus == rowContent && navigator.ClaimsLinkNavigation() {
+		bindings = nil // The thread's help names link navigation instead.
+	}
+	if !m.hasPendingMutation() {
+		for _, item := range sectionItems {
+			bindings = append(bindings, helpBinding{item.shortcut, item.label})
+		}
+	}
+	if m.section == sectionMail {
+		items, _, _, _ := m.mailView.SubnavItems()
+		for _, item := range items {
+			if item.shortcut != "" {
+				bindings = append(bindings, helpBinding{item.shortcut, item.label})
+			}
+		}
+		if m.canOpenScreener() {
+			bindings = append(bindings, helpBinding{"ctrl+s", "screener"})
+		}
+		if !m.mailView.inThread && (m.mailView.searchActive || m.mailView.bundleActive || m.mailView.seenActive) {
+			bindings = append(bindings, helpBinding{"esc/q", "back"})
+		}
+	}
+	if m.focus == rowContent {
+		switch m.activeView {
+		case m.mailView:
+			bindings = append(bindings, helpBinding{"pgup/pgdown", "page up/down"})
+			if !m.mailView.inThread {
+				bindings = append(bindings, helpBinding{"j/k", "next/previous row"})
+			}
+		case m.contactsView, m.journalView:
+			bindings = append(bindings, helpBinding{"pgup/pgdown", "page up/down"})
+			if !m.activeView.InThread() {
+				bindings = append(bindings, helpBinding{"j/k", "next/previous row"})
+			}
+		}
+	}
+	return bindings
 }
 
 // linkFooter is the link status as it goes on screen. A destination that wraps onto
@@ -1040,20 +1099,31 @@ func (m model) canToggleHelp() bool {
 }
 
 func (m model) helpDialog() string {
-	width := min(m.width, 90)
-	lines := m.help.dialogLines(modalContentWidth(width))
-	rows := modalContentRows(m.contentHeight())
+	width, rows, framed := m.helpLayout()
+	lines := m.help.dialogLines(width)
 	start := min(m.helpScroll, max(len(lines)-rows, 0))
 	end := min(start+rows, len(lines))
+	body := strings.Join(lines[start:end], "\n")
+	if !framed {
+		return body
+	}
 	title := "Keyboard shortcuts"
 	if len(lines) > rows {
 		title += fmt.Sprintf(" · %d–%d of %d", start+1, end, len(lines))
 	}
-	return modalFrame(title, strings.Join(lines[start:end], "\n"), width)
+	return modalFrame(title, body, width+modalChromeWidth)
+}
+
+func (m model) helpLayout() (width, rows int, framed bool) {
+	width, rows = min(m.width, 90), m.contentHeight()
+	if width > modalChromeWidth && rows > modalChromeRows {
+		return modalContentWidth(width), modalContentRows(rows), true
+	}
+	return max(m.width, 1), max(rows, 1), false
 }
 
 func (m model) handleHelpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
-	rows := modalContentRows(m.contentHeight())
+	width, rows, _ := m.helpLayout()
 	switch msg.String() {
 	case "?", "f1", "esc", "q":
 		m.helpOpen = false
@@ -1068,9 +1138,9 @@ func (m model) handleHelpKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "home":
 		m.helpScroll = 0
 	case "end":
-		m.helpScroll = len(m.help.dialogLines(modalContentWidth(min(m.width, 90))))
+		m.helpScroll = len(m.help.dialogLines(width))
 	}
-	lines := m.help.dialogLines(modalContentWidth(min(m.width, 90)))
+	lines := m.help.dialogLines(width)
 	m.helpScroll = min(max(m.helpScroll, 0), max(len(lines)-rows, 0))
 	return m, nil
 }

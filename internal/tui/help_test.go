@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +159,147 @@ func TestWideFooterKeepsCommonMailActionsContextual(t *testing.T) {
 	m.updateHelpBindings()
 	if strings.Contains(ansi.Strip(m.help.view()), "r reply") {
 		t.Fatal("contacts footer kept a mail-only action")
+	}
+}
+
+func TestHelpHintStaysVisibleWithNoticesAndForms(t *testing.T) {
+	m := modelWithBoxes()
+	for _, key := range []string{"?", "f1"} {
+		m.help.helpKey = key
+		m.help.setNotice(strings.Repeat("Could not reconnect. ", 20) + "\nTry again.")
+		for _, width := range []int{12, 24, 40, 80, 160} {
+			m.help.setWidth(width)
+			got := ansi.Strip(m.help.view())
+			if !strings.HasSuffix(got, key+" help") || strings.Contains(got, "\n") || displayWidth(got) > width {
+				t.Fatalf("footer at %d: %q", width, got)
+			}
+		}
+	}
+}
+
+func TestHelpBlocksPasteWithoutBlockingAsyncUpdates(t *testing.T) {
+	for _, context := range []string{"compose", "search", "find"} {
+		t.Run(context, func(t *testing.T) {
+			m := modelWithBoxes()
+			var value func() string
+			switch context {
+			case "compose":
+				m.mailView.startCompose()
+				value = func() string { return composeModal(m.mailView).inputs[fieldTo].Value() }
+			case "search":
+				m.mailView.startSearch()
+				value = func() string { return searchModal(m.mailView).input.Value() }
+			case "find":
+				m = bodyFindModel(t)
+				updated, _ := m.Update(keyPress("/"))
+				m = updated.(model)
+				value = func() string { return m.mailView.bodyFind.input.Value() }
+			}
+			m.updateHelpBindings()
+			updated, _ := m.Update(keyPress("q"))
+			m = updated.(model)
+			before := value()
+			updated, _ = m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyF1}))
+			m = updated.(model)
+			updated, cmd := m.Update(tea.PasteMsg{Content: "pasted behind help"})
+			m = updated.(model)
+			if cmd != nil || value() != before {
+				t.Fatal("paste changed the hidden input")
+			}
+			updated, _ = m.Update(errMsg{err: errors.New("connection interrupted")})
+			m = updated.(model)
+			if m.err == nil || !m.helpOpen {
+				t.Fatal("help blocked the asynchronous error update")
+			}
+			updated, _ = m.Update(keyPress("esc"))
+			m = updated.(model)
+			if m.helpOpen || value() != before {
+				t.Fatal("closing help changed the form")
+			}
+		})
+	}
+}
+
+func TestSmallHelpKeepsEveryBindingReachable(t *testing.T) {
+	m := modelWithBoxes()
+	m.mailView.screenerCount = 6
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+	m = updated.(model)
+	updated, _ = m.Update(keyPress("?"))
+	m = updated.(model)
+	if strings.Contains(m.helpDialog(), "╭") {
+		t.Fatal("small help should omit its frame")
+	}
+	seen := ""
+	for range 250 {
+		dialog := ansi.Strip(m.helpDialog())
+		screen := ansi.Strip(m.View().Content)
+		if strings.Contains(screen, "Screen 6") {
+			t.Fatal("mail content bled through the unframed help")
+		}
+		for _, line := range strings.Split(dialog, "\n") {
+			if !strings.Contains(screen, strings.TrimRight(line, " ")) {
+				t.Fatalf("screen clipped %q: %q", line, screen)
+			}
+		}
+		if strings.Contains(dialog, "enter") || strings.Contains(dialog, "pgup/pgdown") {
+			seen += dialog
+		}
+		previous := m.helpScroll
+		updated, _ = m.Update(keyPress("down"))
+		m = updated.(model)
+		if previous == m.helpScroll {
+			break
+		}
+	}
+	for _, want := range []string{"enter", "pgup/pgdown"} {
+		if !strings.Contains(seen, want) {
+			t.Fatalf("binding %q never appeared in small help", want)
+		}
+	}
+	if !strings.Contains(ansi.Strip(m.View().Content), "? help") {
+		t.Fatal("help hint disappeared while help was open")
+	}
+}
+
+func TestFullHelpIncludesContextualNavigation(t *testing.T) {
+	for _, context := range []string{"box", "search", "bundle", "seen", "contacts", "journal", "screener", "compose", "find", "thread"} {
+		t.Run(context, func(t *testing.T) {
+			m := modelWithBoxes()
+			switch context {
+			case "search":
+				m.mailView.searchActive = true
+			case "bundle":
+				m.mailView.bundleActive = true
+			case "seen":
+				m.mailView.seenActive = true
+			case "contacts":
+				m.activeView = m.contactsView
+				m.section = sectionContacts
+			case "journal":
+				m.activeView = m.journalView
+				m.section = sectionJournal
+			case "screener":
+				m.activeView = m.screenerView
+			case "compose":
+				m.mailView.startCompose()
+			case "find":
+				m = bodyFindModel(t)
+				updated, _ := m.Update(keyPress("/"))
+				m = updated.(model)
+			case "thread":
+				m = bodyFindModel(t)
+			}
+			m.updateHelpBindings()
+			full := ansi.Strip(strings.Join(m.help.dialogLines(84), "\n"))
+			paging := context != "compose" && context != "find"
+			if strings.Contains(full, "pgup/pgdown") != paging {
+				t.Fatalf("paging availability is wrong in %s: %s", context, full)
+			}
+			global := context != "compose" && context != "find" && context != "screener"
+			if strings.Contains(full, "Calendar") != global {
+				t.Fatalf("section navigation availability is wrong in %s", context)
+			}
+		})
 	}
 }

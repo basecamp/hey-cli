@@ -114,13 +114,25 @@ func (h helpBar) view() string {
 	if h.width <= 0 {
 		return ""
 	}
-	if h.notice != "" {
-		return ansi.Truncate(lipgloss.NewStyle().Foreground(colorError).Render(h.notice), h.width, "…")
-	}
 	separator := h.styles.helpSep.Render(" • ")
 	hint := ""
 	if h.helpKey != "" {
 		hint = h.renderBinding(helpBinding{h.helpKey, "help"})
+	}
+	if h.notice != "" {
+		width := h.width
+		if hint != "" {
+			width -= lipgloss.Width(hint) + lipgloss.Width(separator)
+			if width <= 0 {
+				return ansi.Truncate(hint, h.width, "…")
+			}
+		}
+		notice := lipgloss.NewStyle().Foreground(colorError).Render(strings.ReplaceAll(h.notice, "\n", " "))
+		notice = ansi.Truncate(notice, width, "…")
+		if hint != "" {
+			return notice + separator + hint
+		}
+		return notice
 	}
 	var parts []string
 	used := 0
@@ -166,7 +178,7 @@ func (h helpBar) dialogLines(width int) []string {
 		switch binding.key {
 		case "?", "f1", "ctrl+a", "ctrl+c", "ctrl+c ctrl+c":
 			group = 3
-		case "↑↓", "←→", "tab", "shift+tab", "esc", "esc/q", "q", "j/k", "tab/shift+tab":
+		case "↑↓", "←→", "tab", "shift+tab", "esc", "esc/q", "q", "j/k", "tab/shift+tab", "pgup/pgdown", "M", "o", "C", "J", "1", "2", "3", "4", "5", "6", "9", "L", "K":
 			group = 2
 		}
 		switch binding.desc {
