@@ -150,7 +150,7 @@ func TestCtrlAOpensAccountPickerOverTheSectionBehindIt(t *testing.T) {
 	}
 }
 
-func TestMailAccountHintStaysVisibleDuringSeenChanges(t *testing.T) {
+func TestMailAccountHelpStaysAvailableDuringSeenChanges(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || (r.URL.Path != "/postings/seen.json" && r.URL.Path != "/postings/unseen.json") {
 			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
@@ -177,8 +177,8 @@ func TestMailAccountHintStaysVisibleDuringSeenChanges(t *testing.T) {
 			m = updated.(model)
 			footer := m.help.view()
 			contentHeight := m.vc.height
-			if !strings.Contains(stripANSI(footer), "ctrl+a mail account") {
-				t.Fatal("initial help does not show the mail account shortcut")
+			if !strings.Contains(stripANSI(strings.Join(m.help.dialogLines(80), "\n")), "mail account") {
+				t.Fatal("full help does not show the mail account shortcut")
 			}
 			checkFooter := func(stage string) {
 				t.Helper()

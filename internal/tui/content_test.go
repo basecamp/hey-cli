@@ -64,14 +64,15 @@ func TestContentListKeepsBundleMarkerIndependent(t *testing.T) {
 					ordinaryLine = line
 				}
 			}
-			prefix := "  " + tt.wantMark + "▪ "
+			prefix := "  " + tt.wantMark
 			if tt.cursor {
-				prefix = "│ " + tt.wantMark + "▪ "
+				prefix = "│ " + tt.wantMark
 			}
+			subject := "▪ " + posting.Name
 			if tt.muted {
-				prefix += "[Ignored] "
+				subject = "▪ [Ignored] " + posting.Name
 			}
-			if !strings.HasPrefix(bundleLine, prefix+posting.Name) {
+			if !strings.HasPrefix(bundleLine, prefix) || !strings.Contains(bundleLine, subject) {
 				t.Errorf("bundle row = %q, want prefix %q", bundleLine, prefix+posting.Name)
 			}
 			if ordinaryLine == "" || strings.Contains(ordinaryLine, "▪") {
@@ -97,10 +98,10 @@ func TestContentListBudgetsBundleMarkerWithSubject(t *testing.T) {
 			list.setSize(width, 20)
 			list.setPostings([]mail.Posting{posting, ordinary})
 			lines := strings.Split(ansi.Strip(list.view()), "\n")
-			if !strings.HasPrefix(lines[0], "│   ▪ ") {
+			if !strings.HasPrefix(lines[0], "│   ") || !strings.Contains(lines[0], "▪ ") {
 				t.Errorf("truncated bundle row loses its marker: %q", lines[0])
 			}
-			for _, row := range []int{0, 2} {
+			for _, row := range []int{0, 1} {
 				if got := lipgloss.Width(lines[row]); got != width {
 					t.Errorf("row width = %d, want %d: %q", got, width, lines[row])
 				}

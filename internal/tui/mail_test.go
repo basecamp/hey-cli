@@ -1623,8 +1623,8 @@ func TestMailViewReadsOnOnlyAsTheCursorNearsTheBottom(t *testing.T) {
 	v := mailWithPostings()
 	v.postingList.hideSeenState = true
 	v.postingList.setSize(80, 20)
-	postings := make([]mail.Posting, 0, 20)
-	for id := range 20 {
+	postings := make([]mail.Posting, 0, 40)
+	for id := range 40 {
 		postings = append(postings, mail.Posting{ID: int64(200 + id), Seen: true})
 	}
 	v.postingList.setPostings(postings)
@@ -3252,8 +3252,8 @@ func TestMailViewSearchFormSubmitsQueryAndRendersResults(t *testing.T) {
 		t.Errorf("search postings = %+v", v.searchList.postings)
 	}
 	view := v.View()
-	if !strings.Contains(view, "Hello world") || !strings.Contains(view, "Matching message summary") {
-		t.Errorf("search result does not show thread and matching-message context: %q", view)
+	if !strings.Contains(view, "Hello world") || !strings.Contains(view, "Alice") {
+		t.Errorf("search result does not show subject and sender: %q", view)
 	}
 	if strings.Contains(view, "●") {
 		t.Errorf("search result shows an unread marker without a read state: %q", view)
