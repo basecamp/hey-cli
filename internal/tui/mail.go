@@ -953,6 +953,11 @@ func (v *mailView) View() string {
 	if v.modal != nil {
 		return v.modal.draw(v)
 	}
+	return v.contentView()
+}
+
+// contentView draws the current mail screen without its temporary picker.
+func (v *mailView) contentView() string {
 	if v.inThread {
 		v.fitThreadViewport()
 		var lines []string

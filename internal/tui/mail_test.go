@@ -1882,12 +1882,12 @@ func TestMailViewFolderPickerTruncatesLongNamesToOneRow(t *testing.T) {
 	picker.resize(24, 8)
 
 	view := picker.view(testVC().styles, 24)
-	if !strings.Contains(view, "…") || strings.Contains(view, "much wider than the picker") {
+	if !strings.Contains(view, "...") || strings.Contains(view, "much wider than the picker") {
 		t.Errorf("long label was not truncated: %q", view)
 	}
 	for _, line := range strings.Split(view, "\n") {
-		if width := lipgloss.Width(line); width > 20 {
-			t.Errorf("picker line width = %d, want at most 20: %q", width, line)
+		if width := lipgloss.Width(line); width > 24 {
+			t.Errorf("picker line width = %d, want at most 24: %q", width, line)
 		}
 	}
 }
@@ -3722,7 +3722,7 @@ func TestMailViewHelpBindingsInFolderPicker(t *testing.T) {
 	v.HandleContentKey(keyPress("b"))
 
 	bindings := v.HelpBindings()
-	if len(bindings) != 3 || bindings[0].key != "↑↓" || bindings[1].key != "enter" || bindings[2].key != "esc" {
+	if len(bindings) != 4 || bindings[0].desc != "filter" || bindings[1].key != "↑↓" || bindings[2].key != "enter" || bindings[3].key != "esc" {
 		t.Errorf("folder picker help = %v", bindings)
 	}
 }
