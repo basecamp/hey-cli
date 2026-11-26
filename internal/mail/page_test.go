@@ -272,3 +272,37 @@ func TestReadPageReadsAContactsThreads(t *testing.T) {
 		t.Errorf("page = %+v", page)
 	}
 }
+
+func TestReadTrashPagePreservesCursorCountAndTopicIdentity(t *testing.T) {
+	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/topics/trash.json" || r.URL.Query().Get("page") != "opaque-current" {
+			t.Errorf("unexpected Trash request: %s", r.URL)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Link", `<https://app.hey.com/topics/trash.json?page=opaque-next>; rel="next"`)
+		w.Header().Set("X-Total-Count", "42")
+		_, _ = io.WriteString(w, `{"topics":[{"id":701,"name":"Conference travel plans","app_url":"/topics/701","latest_entry":{"summary":"Flight details"}}]}`)
+	})
+	page, err := ReadPage(context.Background(), client, Source{Kind: KindTrash}, "opaque-current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Cursor != "opaque-next" || page.Total != 42 || len(page.Postings) != 1 {
+		t.Fatalf("Trash page = %+v", page)
+	}
+	row := page.Postings[0]
+	if row.Id != 701 || row.AppUrl != "/topics/701" || row.Summary != "Flight details" || !row.Seen {
+		t.Fatalf("Trash topic identity or read state lost: %+v", row)
+	}
+}
+
+func TestReadTrashPageAcceptsAnEmptyLastPage(t *testing.T) {
+	client := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"topics":[]}`)
+	})
+	page, err := ReadPage(context.Background(), client, Source{Kind: KindTrash}, "")
+	if err != nil || len(page.Postings) != 0 || page.Cursor != "" {
+		t.Fatalf("empty Trash page = %+v, %v", page, err)
+	}
+}

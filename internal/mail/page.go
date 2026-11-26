@@ -214,19 +214,15 @@ func readCollectionPage(ctx context.Context, client *hey.Client, source Source, 
 // Trash serves topics, rather than postings. Their topic IDs are list identities
 // only: callers must restore through Topics, never dispatch a posting mutation.
 func readTrashPage(ctx context.Context, client *hey.Client, cursor string) (Page, error) {
-	var params *generated.GetTrashTopicsParams
-	if cursor != "" {
-		params = &generated.GetTrashTopicsParams{Page: &cursor}
-	}
-	result, err := client.Topics().GetTrashPage(ctx, params)
+	result, err := client.Topics().GetTrashPage(ctx, cursor)
 	if err != nil {
 		return Page{}, err
 	}
-	if result == nil || result.Topics == nil {
+	if result == nil {
 		return Page{}, fmt.Errorf("mail: Trash answered no page")
 	}
-	page := Page{Cursor: result.NextPage}
-	for _, topic := range result.Topics.Topics {
+	page := Page{Cursor: result.NextPage, Total: result.TotalCount}
+	for _, topic := range result.Topics {
 		created := topic.LatestEntry.CreatedAt
 		if created.IsZero() {
 			created = topic.CreatedAt
