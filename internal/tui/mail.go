@@ -281,7 +281,9 @@ type mailLinkBody struct {
 }
 
 type mailView struct {
-	vc *viewContext
+	threadFromTrash bool
+	trashRestoreID  int64
+	vc              *viewContext
 
 	boxes    []mail.Source
 	boxIndex int
@@ -578,6 +580,7 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		if opened := v.openedPosting(msg.postingID); opened != nil {
 			v.threadPosting = *opened
 		}
+		v.threadFromTrash = msg.postingID != 0 && v.currentSourceKind() == mail.KindTrash && !v.searchActive && !v.bundleActive && !v.seenActive
 		v.threadBoxKind = v.postingBoxKind(v.threadPosting)
 		v.topicName = msg.title
 		v.entries = msg.entries
@@ -792,6 +795,9 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return nil, true
 		}
 		return notify("Opened attachment " + msg.filename), true
+
+	case trashRestoredMsg:
+		return v.trashRestored(msg), true
 
 	case postingActionDoneMsg:
 		v.finishMutation()
@@ -1104,7 +1110,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 				bindings = append(bindings, helpBinding{"enter", "open attachment"})
 			}
 		}
-		return bindings
+		return v.trashHelp(bindings)
 	}
 	if v.searchActive {
 		return []helpBinding{{"enter", "open"}, {"/", "new search"}}
@@ -1142,7 +1148,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 		if v.lastBulkReplyID != 0 {
 			bindings = append(bindings, helpBinding{"ctrl+u", "undo bulk reply"})
 		}
-		return modifiersLast(bindings)
+		return modifiersLast(v.trashHelp(bindings))
 	}
 	ignoreBinding := helpBinding{"-", "ignore"}
 	if selected := v.postingList.selectedPosting(); selected != nil && selected.Muted {
@@ -1196,7 +1202,7 @@ func (v *mailView) HelpBindings() []helpBinding {
 	if v.lastBulkReplyID != 0 {
 		bindings = append(bindings, helpBinding{"ctrl+u", "undo bulk reply"})
 	}
-	return modifiersLast(bindings)
+	return modifiersLast(v.trashHelp(bindings))
 }
 
 func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
@@ -1263,6 +1269,12 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 			selected = len(items) - 1
 		}
 	}
+	if v.trashIndex() >= 0 {
+		items = append(items, navItem{shortcut: "0", label: "Trash"})
+		if v.currentSourceKind() == mail.KindTrash && !v.seenActive {
+			selected = len(items) - 1
+		}
+	}
 	return items, selected, label, true
 }
 
@@ -1270,7 +1282,7 @@ func (v *mailView) SubnavItems() ([]navItem, int, string, bool) {
 func (v *mailView) tabBoxIndexes() []int {
 	indexes := make([]int, 0, len(v.boxes))
 	for i, source := range v.boxes {
-		if !isOrganizedMailSource(source.Kind) {
+		if source.Kind == mail.KindBox {
 			indexes = append(indexes, i)
 		}
 	}
@@ -1320,6 +1332,16 @@ func (v *mailView) SubnavLeft() tea.Cmd {
 		return nil
 	}
 	switch v.currentSourceKind() {
+	case mail.KindTrash:
+		if v.hasCollections() {
+			v.openCollections()
+			return nil
+		}
+		if v.hasLabels() {
+			v.openLabels()
+			return nil
+		}
+		return v.openPreviouslySeen()
 	case mail.KindCollection:
 		if v.hasLabels() {
 			v.openLabels()
@@ -1350,20 +1372,23 @@ func (v *mailView) SubnavRight() tea.Cmd {
 			v.openLabels()
 		} else if v.hasCollections() {
 			v.openCollections()
+		} else {
+			return v.switchBox(v.trashIndex())
 		}
 		return nil
 	}
 	switch v.currentSourceKind() {
+	case mail.KindTrash:
+		return nil
 	case mail.KindFolder:
 		if v.hasCollections() {
 			v.openCollections()
 		} else {
-			v.openLabels()
+			return v.switchBox(v.trashIndex())
 		}
 		return nil
 	case mail.KindCollection:
-		v.openCollections()
-		return nil
+		return v.switchBox(v.trashIndex())
 	case mail.KindBox:
 		tabIndexes := v.tabBoxIndexes()
 		for i, boxIndex := range tabIndexes {
@@ -1400,6 +1425,9 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 			return cmd
 		}
 		if cmd, handled := v.handleLinkKey(msg); handled {
+			return cmd
+		}
+		if cmd, handled := v.handleTrashKey(msg.String()); handled {
 			return cmd
 		}
 		// Enter opens what is selected: a link once Tab has picked one, which
@@ -1442,6 +1470,10 @@ func (v *mailView) HandleContentKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		var cmd tea.Cmd
 		v.topicViewport, cmd = v.topicViewport.Update(msg)
+		return cmd
+	}
+
+	if cmd, handled := v.handleTrashKey(msg.String()); handled {
 		return cmd
 	}
 
@@ -1883,6 +1915,8 @@ func (v *mailView) handleBoxShortcut(key string) tea.Cmd {
 			v.openCollections()
 			return func() tea.Msg { return nil }
 		}
+	case "0":
+		return v.switchBox(v.trashIndex())
 	case "9":
 		return v.openPreviouslySeen()
 	}
@@ -2016,6 +2050,9 @@ func sourceIndex(sources []mail.Source, id int64, kind mail.Kind) int {
 func (v *mailView) applySources(sources []mail.Source) tea.Cmd {
 	currentID, currentKind := v.currentSourceIdentity()
 	v.boxes = orderBoxes(sources)
+	if len(sources) > 0 && v.trashIndex() < 0 {
+		v.boxes = append(v.boxes, mail.Source{Kind: mail.KindTrash, Name: "Trash"})
+	}
 	v.requests.loading = false
 	if len(v.boxes) == 0 {
 		return nil
@@ -2225,6 +2262,11 @@ func (v *mailView) requestTopic(boxID, topicID, postingID int64, title string) t
 }
 
 func (v *mailView) postingIndex(postingID int64) int {
+	// Trash identities are topic IDs; a posting completion from an overlaid search
+	// must never match one just because its numeric ID happens to be the same.
+	if v.currentSourceKind() == mail.KindTrash {
+		return -1
+	}
 	return postingIndexIn(v.postingList.postings, postingID)
 }
 
@@ -2858,7 +2900,7 @@ func (v *mailView) openThreadPicker(key string) tea.Cmd {
 // label files out of the box it is actually in rather than out of whatever list is
 // behind it. Only a topic opened by its id has no row, and nothing to file.
 func (v *mailView) fileablePosting() *mail.Posting {
-	if v.threadPosting.ID == 0 {
+	if v.threadFromTrash || v.threadPosting.ID == 0 {
 		return nil
 	}
 	return &v.threadPosting
@@ -3183,7 +3225,7 @@ func threadNoun(count int) string {
 // for the same reason. An empty list keeps it, as it always has: there is nothing to
 // refuse yet.
 func (v *mailView) trashOffered() bool {
-	return bundlesIn(v.trashTargets()) == 0
+	return !v.inTrash() && bundlesIn(v.trashTargets()) == 0
 }
 
 func bundlesIn(postings []mail.Posting) int {
@@ -3519,7 +3561,13 @@ func (v *mailView) readPostingsPage(ctx context.Context, source mail.Source, pag
 	if err != nil {
 		return nil, "", err
 	}
-	return mail.Postings(read.Postings), read.Cursor, nil
+	postings := mail.Postings(read.Postings)
+	if source.Kind == mail.KindTrash {
+		for i := range postings {
+			postings[i].TopicID = read.Postings[i].Id
+		}
+	}
+	return postings, read.Cursor, nil
 }
 
 func (v *mailView) fetchSearchResults(ctx context.Context, requestID uint64, query string, page int) tea.Cmd {

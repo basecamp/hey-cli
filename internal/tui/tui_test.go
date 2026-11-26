@@ -393,7 +393,7 @@ func TestFolderDiscoveryCompletesWhileAnotherSectionIsActive(t *testing.T) {
 		},
 	})
 	m = updated.(model)
-	if len(m.mailView.boxes) != 2 || m.mailView.boxes[1].Name != "Receipts" {
+	if len(m.mailView.boxes) != 3 || m.mailView.boxes[1].Name != "Receipts" {
 		t.Errorf("mail sources = %+v", m.mailView.boxes)
 	}
 	if cmd == nil {

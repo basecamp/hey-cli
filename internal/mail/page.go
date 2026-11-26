@@ -10,8 +10,8 @@ import (
 )
 
 // Page is one page of a source's postings. Cursor is whatever the next read needs to
-// carry on where this page stopped — a geared_pagination cursor for a label or a
-// collection, HEY's own next_history_url for a box — and is empty at the end of the
+// carry on where this page stopped — a geared_pagination cursor for a label, a
+// collection or Trash, HEY's own next_history_url for a box — and is empty at the end of the
 // list. Total is HEY's count of everything in the source, zero where it does not say.
 type Page struct {
 	Postings []generated.Posting
@@ -23,6 +23,8 @@ type Page struct {
 // first page.
 func ReadPage(ctx context.Context, client *hey.Client, source Source, cursor string) (Page, error) {
 	switch source.Kind {
+	case KindTrash:
+		return readTrashPage(ctx, client, cursor)
 	case KindBox:
 		return readBoxPage(ctx, client, source, cursor)
 	case KindFolder:
@@ -207,4 +209,28 @@ func readCollectionPage(ctx context.Context, client *hey.Client, source Source, 
 		return Page{}, fmt.Errorf("mail: collection %d answered no page at cursor %q", source.ID, cursor)
 	}
 	return Page{Postings: result.Collection.Postings, Cursor: result.NextPage, Total: result.TotalCount}, nil
+}
+
+// Trash serves topics, rather than postings. Their topic IDs are list identities
+// only: callers must restore through Topics, never dispatch a posting mutation.
+func readTrashPage(ctx context.Context, client *hey.Client, cursor string) (Page, error) {
+	result, err := client.Topics().GetTrashPage(ctx, cursor)
+	if err != nil {
+		return Page{}, err
+	}
+	if result == nil {
+		return Page{}, fmt.Errorf("mail: Trash answered no page")
+	}
+	page := Page{Cursor: result.NextPage, Total: result.TotalCount}
+	for _, topic := range result.Topics {
+		created := topic.LatestEntry.CreatedAt
+		if created.IsZero() {
+			created = topic.CreatedAt
+		}
+		page.Postings = append(page.Postings, generated.Posting{
+			Id: topic.Id, AppUrl: topic.AppUrl, Name: topic.Name, Summary: topic.LatestEntry.Summary,
+			Creator: topic.Creator, CreatedAt: created, Seen: true,
+		})
+	}
+	return page, nil
 }

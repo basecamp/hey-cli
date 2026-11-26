@@ -28,7 +28,7 @@ func newMovePicker(posting mail.Posting, boxes []mail.Source, currentSource mail
 	destinations := make([]mail.Source, 0, len(boxes))
 	for _, box := range boxes {
 		isCurrentSource := box.ID == currentSource.ID && box.Kind == currentSource.Kind
-		if isOrganizedMailSource(box.Kind) || isCurrentSource || box.BoxKind == hey.BoxKindBubbleUp {
+		if box.Kind == mail.KindTrash || isOrganizedMailSource(box.Kind) || isCurrentSource || box.BoxKind == hey.BoxKindBubbleUp {
 			continue
 		}
 		destinations = append(destinations, box)
