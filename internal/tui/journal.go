@@ -57,11 +57,11 @@ type journalPageRefreshedMsg struct {
 
 type journalDetailMsg struct {
 	requestResult
-	date    string
-	content string
-	body    htmlutil.Markdown
-	images  [][]byte
-	edit    bool
+	date      string
+	content   string
+	body      htmlutil.Markdown
+	imageURLs []string
+	edit      bool
 }
 
 type journalSavedMsg struct {
@@ -139,6 +139,8 @@ type journalView struct {
 	detailContent string
 	detailBody    htmlutil.Markdown
 	detailView    viewport.Model
+
+	inlineImages  detailImages
 	inDetail      bool
 	form          *journalForm
 	prompt        *journalPrompt
@@ -211,9 +213,20 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.detailBody = msg.body
 		v.inDetail = true
 		v.confirmRemove = false
-		uploads := v.renderDetail(msg.images)
+		v.renderDetail()
+		images := v.inlineImages.start(v.vc, msg.imageURLs)
 		if msg.edit {
-			return tea.Batch(uploads, v.startEditor()), true
+			return tea.Batch(images, v.startEditor()), true
+		}
+		return images, true
+
+	case detailImagesLoadedMsg:
+		if !v.inlineImages.accept(msg) || !v.inDetail {
+			return nil, true
+		}
+		content, uploads := renderDetailImages(v.vc, msg.images)
+		if content != "" {
+			v.detailView.SetContent(v.detailView.GetContent() + content)
 		}
 		return uploads, true
 
@@ -233,6 +246,7 @@ func (v *journalView) Update(msg tea.Msg) (tea.Cmd, bool) {
 			return notifyError("Could not remove journal entry", msg.err), true
 		}
 		v.form = nil
+		v.inlineImages.cancel()
 		v.inDetail = false
 		v.query = ""
 		v.selectDate = msg.date
@@ -466,6 +480,7 @@ func (v *journalView) startEditor() tea.Cmd {
 func (v *journalView) InThread() bool { return v.inDetail }
 
 func (v *journalView) ExitThread() {
+	v.inlineImages.cancel()
 	v.inDetail = false
 	v.form = nil
 	v.confirmRemove = false
@@ -698,9 +713,9 @@ func (v *journalView) fetchJournalEntry(ctx context.Context, requestID uint64, d
 		} else {
 			editableContent = journalEditorContent(editableContent)
 		}
-		var images [][]byte
+		var imageURLs []string
 		if v.vc.imageRenderer.protocol() == imageProtocolKitty && v.vc.imageFetcher != nil {
-			images = newImageBudget().fetchImages(ctx, v.vc.imageFetcher, extractImageURLs(renderedContent))
+			imageURLs = extractImageURLs(renderedContent)
 		}
 
 		return journalDetailMsg{
@@ -708,32 +723,20 @@ func (v *journalView) fetchJournalEntry(ctx context.Context, requestID uint64, d
 			date:          date,
 			content:       editableContent,
 			body:          htmlToMarkdown(renderedContent),
-			images:        images,
+			imageURLs:     imageURLs,
 			edit:          edit,
 		}
 	}
 }
 
-func (v *journalView) renderDetail(images [][]byte) tea.Cmd {
+func (v *journalView) renderDetail() {
 	content := markdown.Render(v.detailBody, max(v.vc.width-4, 40))
 	if v.detailBody.IsEmpty() {
 		content = "No entry for this day · press e to write"
 	}
 	heading := friendlyDateFromString(v.detailDate)
-	content = v.vc.styles.title.Render(heading) + "\n\n" + content
-	uploads := make([]tea.Cmd, 0, len(images))
-	for _, imageData := range images {
-		imageID := nextImageID()
-		cols, rows := imageDimensions(imageData, v.vc.width-4)
-		content += "\n\n" + renderImagePlaceholder(imageID, cols, rows)
-		uploads = append(uploads, tea.Raw(kittyUploadAndPlace(imageData, imageID, cols, rows)))
-	}
-	v.detailView.SetContent(content)
+	v.detailView.SetContent(v.vc.styles.title.Render(heading) + "\n\n" + content)
 	v.detailView.GotoTop()
-	if len(uploads) == 0 {
-		return nil
-	}
-	return tea.Batch(uploads...)
 }
 
 func friendlyDateFromString(date string) string {

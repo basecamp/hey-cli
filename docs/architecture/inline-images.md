@@ -7,3 +7,10 @@ The TUI renders inline images using the Kitty graphics protocol's Unicode Placeh
 3. **Sizing** — `image.DecodeConfig` reads dimensions without full decoding. The terminal stretches the image over the cells it is placed in and scales each cell on its own, so an image placed in more cells than its pixels cover comes out smeared and seamed rather than merely soft. `imageDimensions` therefore treats the image's own size as the ceiling, and a tall image gives up columns instead of its proportions when it hits `maxImageRows`.
 
 This works in Kitty and Ghostty. Other terminals show the text content normally (placeholders are invisible).
+
+Mail threads and Journal entries open as soon as their text is ready. A separate,
+non-blocking read fetches eligible images within the existing per-view budget and
+appends them below the text without moving the viewport. Closing or replacing the
+detail cancels an unfinished image read; its late result is ignored. Switching
+sections leaves the detail open and lets its images finish. This does not defer
+individual downloads until their images enter the viewport.

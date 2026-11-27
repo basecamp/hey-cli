@@ -428,6 +428,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd, _ := m.mailView.Update(msg)
 		return m, m.stampViewCmd(cmd)
 
+	case detailImagesLoadedMsg:
+		// Switching sections leaves each detail open. Deliver the result to its
+		// owner even when that view is off screen; the other view rejects it.
+		mailCmd, _ := m.mailView.Update(msg)
+		journalCmd, _ := m.journalView.Update(msg)
+		return m, tea.Batch(mailCmd, journalCmd)
+
 	case recipientsLoadedMsg:
 		// Arriving mid-word opens the list under the field, and the help bar has
 		// to say what the list's keys do.
