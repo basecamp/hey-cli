@@ -42,7 +42,7 @@ type recordingFilter struct {
 // eventWindow reads from today forward, which is what somebody asking what is on their
 // calendar means.
 func eventWindow(today time.Time) (time.Time, time.Time) {
-	return today, today.AddDate(0, 0, 30)
+	return today, today.AddDate(0, 0, 29)
 }
 
 // personalWindow reads years back and a year forward. A to-do or a journal entry is looked up

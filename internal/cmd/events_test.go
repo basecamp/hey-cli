@@ -309,7 +309,7 @@ func TestEventsEditAllDayEventOmitsClockTimes(t *testing.T) {
 }
 
 // Giving a date reads that day rather than a window around today — as the window
-// [day, day+1), since HEY's recordings window is a pair of instants and the degenerate
+// [day-1, day+2), since HEY's recordings window is a pair of instants and the degenerate
 // same-day window can never contain a timed event.
 func TestEventsEditReadsTheDayItIsGiven(t *testing.T) {
 	_, err := runJSONCommand(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -318,11 +318,11 @@ func TestEventsEditReadsTheDayItIsGiven(t *testing.T) {
 		case r.URL.Path == "/calendars.json":
 			_, _ = io.WriteString(w, `{"calendars":[{"calendar":{"id":9,"name":"Work","owned":true}}]}`)
 		case r.URL.Path == "/calendars/9/recordings.json":
-			if got := r.URL.Query().Get("starts_on"); got != "2026-09-02" {
-				t.Errorf("starts_on = %q", got)
+			if got := r.URL.Query().Get("starts_on"); got != "2026-09-01" {
+				t.Errorf("starts_on = %q, want the day before", got)
 			}
-			if got := r.URL.Query().Get("ends_on"); got != "2026-09-03" {
-				t.Errorf("ends_on = %q, want the day after so a timed event is inside the window", got)
+			if got := r.URL.Query().Get("ends_on"); got != "2026-09-04" {
+				t.Errorf("ends_on = %q, want two days after so a timed event is inside the window", got)
 			}
 			_, _ = io.WriteString(w, `{"Calendar::Event":[{"id":4821,"title":"Design review","all_day":true,"starts_at":"2026-09-02T00:00:00Z","ends_at":"2026-09-02T00:00:00Z"}]}`)
 		case r.Method == http.MethodPatch:

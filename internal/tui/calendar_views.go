@@ -10,6 +10,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
+	"github.com/basecamp/hey-cli/internal/calendarday"
 	habitvalues "github.com/basecamp/hey-cli/internal/habit"
 	"github.com/basecamp/hey-cli/internal/terminal"
 )
@@ -696,11 +697,7 @@ func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time
 			et = st.Add(time.Hour)
 		}
 
-		startPos := (st.Hour()*60 + st.Minute()) * daySpan / (24 * 60)
-		endPos := (et.Hour()*60 + et.Minute()) * daySpan / (24 * 60)
-		if et.Day() != st.Day() || (et.Hour() == 0 && et.Minute() == 0 && et.After(st)) {
-			endPos = daySpan
-		}
+		startPos, endPos := dayColumns(st, et, anchor, daySpan)
 		if endPos <= startPos {
 			endPos = startPos + colWidth
 		}
@@ -769,6 +766,25 @@ func renderDayView(events, habits, countdowns []Recording, anchor, now time.Time
 	// Every section here ends its own last line, so the day would otherwise carry a
 	// blank line the viewport counts — one row of scroll on a day that fits exactly.
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// dayColumns is the grid columns an event fills on the day of anchor. An event that began
+// before the day starts at its first column, and one that ends after it runs to its last, so
+// a stay over several days is drawn whole on each day it touches.
+func dayColumns(starts, ends, anchor time.Time, daySpan int) (int, int) {
+	loc := anchor.Location()
+	y, m, d := anchor.Date()
+	dayStart := calendarday.StartOfDay(anchor, loc)
+	dayEnd := calendarday.StartOfDay(time.Date(y, m, d+1, 0, 0, 0, 0, time.UTC), loc)
+
+	startPos, endPos := 0, daySpan
+	if !starts.Before(dayStart) {
+		startPos = (starts.Hour()*60 + starts.Minute()) * daySpan / (24 * 60)
+	}
+	if ends.Before(dayEnd) {
+		endPos = (ends.Hour()*60 + ends.Minute()) * daySpan / (24 * 60)
+	}
+	return startPos, endPos
 }
 
 // renderDayGrid draws the day's hours as one canvas: the lanes of events stacked down
