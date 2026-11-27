@@ -28,7 +28,7 @@ type recordedBubble struct {
 
 func bubbleServer(t *testing.T) (*httptest.Server, *recordedBubble) {
 	t.Helper()
-	recorded := &recordedBubble{status: http.StatusNoContent}
+	recorded := &recordedBubble{status: http.StatusOK}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		recorded.requests++
 		recorded.method = r.Method

@@ -63,6 +63,7 @@ uppercase belongs to Labels:
 | `r` | reply |
 | `f` | forward |
 | `v` | move |
+| `w` | bubble up now, schedule a return, or cancel a bubble-up |
 | `b` | manage labels |
 | `n` | add to or remove from a collection |
 | `e` / `u` | mark seen / unseen — every selected thread when any are selected (Imbox only, as in HEY's web app), otherwise the one under the cursor |
@@ -117,6 +118,24 @@ query is active.
 Sending a reply or a forward from a thread closes the thread and returns you to the list you opened it from — the Imbox, a search, a bundle. A send that fails keeps the form open — except one HEY refused and kept as a draft (usually the account's sending limit): that closes the form, since sending again would only make another draft, and says "Not sent" with the draft it was saved as. An address HEY would not deliver to keeps the form open too: the form names it (`Not a valid email address: a`) rather than sending a message HEY would quietly keep as a draft, or send without that recipient.
 
 While reading a thread, the From header shows the actual send-as address when HEY records one separately from the account user.
+
+Press `w` from the mail list or an open thread for the **Bubble up** menu. Use the
+arrow keys and Enter to choose Now, Later today, Tomorrow, This weekend, Next week,
+or Choose a date. Presets show the scheduled time in your local zone. HEY schedules
+on its UTC calendar: morning is 08:00 UTC and Later today is 18:00 UTC. The menu
+omits Later today once that time has passed. A custom date uses 08:00 UTC, or
+18:00 UTC if you choose today's UTC date; past slots are refused. In the date field,
+type YYYY-MM-DD or use Up/Down to change the day. Escape returns to the menu;
+Escape again closes it without changing the thread.
+
+For scheduled or already bubbled-up threads, the menu also offers Cancel bubble-up.
+HEY returns a canceled thread to the Imbox, marked seen. A successful action closes
+the open thread and refreshes its list. A failed action keeps the menu open for retry.
+From search, the menu first checks whether the thread has a bubble-up to cancel.
+Escape cancels the lookup; if it fails, Ctrl+R retries it.
+
+Bubble up acts on one thread at a time; clear a bulk selection in the visible list
+first, and open a bundle to choose an individual thread.
 
 While reading a thread, links can be selected without a mouse. Tab selects the next link in document order and Shift+Tab selects the previous one; both wrap at the ends. A fixed row above the shortcut bar shows the selected destination without moving the thread. A destination too long for one row wraps onto as many rows as it needs, so you always see all of it. Press Enter to open it; opening stays unavailable until the terminal is tall enough to show the whole destination. Press Escape once to clear the selection, and Escape again to leave the thread. A thread with no selectable links keeps the normal global Tab focus behavior. Existing OSC 8 mouse links remain available.
 
