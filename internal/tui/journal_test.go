@@ -286,6 +286,35 @@ func TestJournalFailedReadDoesNotOpenEditor(t *testing.T) {
 	}
 }
 
+func TestJournalShowsTextBeforeSlowInlineImages(t *testing.T) {
+	gate := newInlineImageGate(t)
+	v := newJournalView(inlineImageTestContext(t, gate, serveInlineImageJournal))
+	v.Resize(v.vc.width, v.vc.height)
+	loaded := awaitInlineImageMessage(t, runInlineImageCommand(v.requestDate("2026-08-19", false)), "journal text (while image response was held)")
+	cmd, consumed := v.Update(loaded)
+	if !consumed || !v.InThread() || v.Loading() || !strings.Contains(v.detailView.View(), "Readable before the photo") {
+		t.Fatal("journal text did not open without the loading spinner")
+	}
+	images := runInlineImageCommand(cmd)
+	gate.await(t, gate.started, "image request")
+	v.detailView.SetYOffset(10)
+	y, before := v.detailView.YOffset(), v.detailView.View()
+	if y == 0 {
+		t.Fatal("journal fixture did not scroll")
+	}
+	gate.release()
+	if upload, _ := v.Update(awaitInlineImageMessage(t, images, "journal images")); upload == nil {
+		t.Fatal("journal did not return an image upload")
+	}
+	if v.detailView.YOffset() != y || v.detailView.View() != before {
+		t.Fatal("journal images moved the reader's viewport")
+	}
+	v.detailView.GotoBottom()
+	if !strings.Contains(v.detailView.View(), "\U0010EEEE") {
+		t.Fatal("journal image did not add a Kitty placeholder")
+	}
+}
+
 func TestJournalFetchKeepsRichContentForEditing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

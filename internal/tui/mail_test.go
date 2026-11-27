@@ -2208,6 +2208,31 @@ func TestMailViewDirectTopicDerivesItsTitleAndIgnoresTheCurrentBox(t *testing.T)
 	}
 }
 
+func TestMailViewShowsTextBeforeSlowInlineImages(t *testing.T) {
+	gate := newInlineImageGate(t)
+	v := newMailView(inlineImageTestContext(t, gate, serveInlineImageMail))
+	v.Resize(v.vc.width, v.vc.height)
+	loaded := awaitInlineImageMessage(t, runInlineImageCommand(v.requestTopic(0, 100, 0, "Mail with images")), "mail text (while image response was held)")
+	cmd, consumed := v.Update(loaded)
+	if !consumed || !v.InThread() || v.Loading() || !strings.Contains(v.topicViewport.View(), "Readable before the photo") {
+		t.Fatalf("mail text: consumed=%v open=%v loading=%v viewport=%q", consumed, v.InThread(), v.Loading(), v.topicViewport.View())
+	}
+	images := runInlineImageCommand(cmd)
+	gate.await(t, gate.started, "image request")
+	v.topicViewport.SetYOffset(10)
+	y, before := v.topicViewport.YOffset(), v.topicViewport.View()
+	if y == 0 {
+		t.Fatal("mail fixture did not scroll")
+	}
+	gate.release()
+	if upload, _ := v.Update(awaitInlineImageMessage(t, images, "mail images")); upload == nil || !strings.Contains(v.topicContent, "\U0010EEEE") {
+		t.Fatal("mail image did not add a Kitty placeholder and return an upload")
+	}
+	if v.topicViewport.YOffset() != y || v.topicViewport.View() != before {
+		t.Fatal("mail images moved the reader's viewport")
+	}
+}
+
 func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 	var imageRequests atomic.Int64
 	imageData := testPNG(t)
@@ -2238,20 +2263,22 @@ func TestMailViewDownloadsImageDataOnlyForKittyRenderer(t *testing.T) {
 	vc.sdk = client
 	vc.imageFetcher = newTrustedImageFetcher(client)
 	v := newMailView(vc)
-	loaded := v.fetchTopic(context.Background(), 1, 1, 100, 500, "Latest image")().(topicLoadedMsg)
+	loaded := v.requestTopic(0, 100, 0, "Latest image")().(topicLoadedMsg)
 
 	if loaded.err != nil || len(loaded.attachments) != 1 {
 		t.Fatalf("text fallback topic = attachments:%d error:%v", len(loaded.attachments), loaded.err)
 	}
-	if len(loaded.images) != 0 || imageRequests.Load() != 0 {
-		t.Errorf("text fallback downloaded %d discarded images and returned %d", imageRequests.Load(), len(loaded.images))
+	if cmd, _ := v.Update(loaded); cmd != nil || imageRequests.Load() != 0 {
+		t.Errorf("text fallback scheduled images: %v; requests: %d", cmd != nil, imageRequests.Load())
 	}
 
 	vc.imageRenderer = kittyImageRenderer{}
 	v = newMailView(vc)
-	loaded = v.fetchTopic(context.Background(), 2, 1, 100, 500, "Latest image")().(topicLoadedMsg)
-	if loaded.err != nil || len(loaded.images) != 1 || imageRequests.Load() != 1 {
-		t.Errorf("Kitty topic = images:%d requests:%d error:%v", len(loaded.images), imageRequests.Load(), loaded.err)
+	loaded = v.requestTopic(0, 100, 0, "Latest image")().(topicLoadedMsg)
+	cmd, _ := v.Update(loaded)
+	images, ok := runCmd(cmd).(detailImagesLoadedMsg)
+	if !ok || loaded.err != nil || len(images.images) != 1 || imageRequests.Load() != 1 {
+		t.Errorf("Kitty topic = images:%d requests:%d error:%v", len(images.images), imageRequests.Load(), loaded.err)
 	}
 }
 
@@ -2291,16 +2318,21 @@ func TestMailViewDoesNotFetchImagesOutsideHEYOrGopher(t *testing.T) {
 	vc.imageFetcher = newTrustedImageFetcher(client)
 	v := newMailView(vc)
 
-	loaded := v.fetchTopic(context.Background(), 1, 1, 100, 500, "Untrusted image")().(topicLoadedMsg)
+	loaded := v.requestTopic(0, 100, 0, "Untrusted image")().(topicLoadedMsg)
 
 	if loaded.err != nil {
 		t.Fatalf("fetch topic: %v", loaded.err)
 	}
+	cmd, _ := v.Update(loaded)
+	images, ok := runCmd(cmd).(detailImagesLoadedMsg)
+	if !ok {
+		t.Fatal("missing image result")
+	}
 	if got := untrustedRequests.Load(); got != 0 {
 		t.Fatalf("opening a message fetched an untrusted image %d time(s)", got)
 	}
-	if len(loaded.images) != 0 {
-		t.Fatalf("topic returned %d untrusted images", len(loaded.images))
+	if len(images.images) != 0 {
+		t.Fatalf("topic returned %d untrusted images", len(images.images))
 	}
 }
 

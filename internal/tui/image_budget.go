@@ -18,8 +18,8 @@ import (
 // live.
 //
 // Lazy loading — fetching an image as the viewport reaches it — is not done here; every
-// image within the budget is fetched before the view renders, and the budget is what
-// keeps that bounded (#262 is the follow-up). The limits are literal numbers for the
+// eligible image within the budget is fetched in the background after the text opens
+// (#262 is the viewport-loading follow-up). The limits are literal numbers for the
 // same reason threadload's are: a reader should be able to say what the TUI will and
 // will not do.
 const (

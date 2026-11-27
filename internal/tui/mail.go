@@ -98,7 +98,7 @@ type topicLoadedMsg struct {
 	title       string
 	entries     []mail.Entry
 	attachments []messageAttachment
-	images      [][]byte
+	imageURLs   []string
 	// notice says what the read did not get, or is empty; complete is whether it got
 	// everything — every entry in the index, every body within the limits.
 	notice   string
@@ -300,6 +300,7 @@ type mailView struct {
 	attachments      []messageAttachment
 	attachmentCursor int
 	imageContent     string
+	inlineImages     detailImages
 	entryOffsets     []int // line where each message starts in the thread content
 	links            []mailLink
 	linkBodies       []mailLinkBody
@@ -587,28 +588,32 @@ func (v *mailView) Update(msg tea.Msg) (tea.Cmd, bool) {
 		v.selectedLink = -1
 		v.selectedLinkKey = ""
 		v.fitThreadViewport()
-		var imageContent strings.Builder
-		var uploadCmds []tea.Cmd
-		for _, imgData := range msg.images {
-			rendered := v.vc.imageRenderer.render(imgData, nextImageID(), v.vc.width-4)
-			if rendered.content != "" {
-				imageContent.WriteString("\n\n")
-				imageContent.WriteString(rendered.content)
-			}
-			if rendered.raw != "" {
-				uploadCmds = append(uploadCmds, tea.Raw(rendered.raw))
-			}
-		}
-		v.imageContent = imageContent.String()
+		v.imageContent = ""
 		v.rebuildTopicContent()
 		v.showLatestEntry()
 		// A thread read only in part is not marked seen by being opened: the reader has
 		// not had all of it, and seen would slide it under the Imbox's cover. The seen
 		// key is there for a thread they are done with anyway.
+		images := v.inlineImages.start(v.vc, msg.imageURLs)
 		if msg.complete {
-			uploadCmds = append(uploadCmds, v.markPostingSeen(msg.boxID, msg.postingID))
+			return tea.Batch(images, v.markPostingSeen(msg.boxID, msg.postingID)), true
 		}
-		return tea.Batch(uploadCmds...), true
+		return images, true
+
+	case detailImagesLoadedMsg:
+		if !v.inlineImages.accept(msg) || !v.inThread {
+			return nil, true
+		}
+		content, uploads := renderDetailImages(v.vc, msg.images)
+		if content != "" {
+			v.imageContent = content
+			v.topicContent += content
+			// The image block starts with a newline. Only append its lines so a
+			// selected text link keeps its highlight and the viewport stays put.
+			v.topicLines = append(v.topicLines, strings.Split(content, "\n")[1:]...)
+			v.topicViewport.SetContentLines(v.bodyFind.highlight(v.topicLines))
+		}
+		return uploads, true
 
 	case replyContextLoadedMsg:
 		if msg.boxID != v.currentBoxID() {
@@ -1648,6 +1653,7 @@ func (v *mailView) ExitDetail(key string) {
 }
 
 func (v *mailView) ExitThread() {
+	v.inlineImages.cancel()
 	if (v.searchActive || v.bundleActive || v.seenActive) && !v.inThread && (v.requests.kind == mailRequestTopic || v.requests.kind == mailRequestSearch) {
 		v.requests.cancel()
 		return
@@ -1919,6 +1925,7 @@ func (v *mailView) switchBox(index int) tea.Cmd {
 // closeOverlays puts away everything a box's list can have open over it — a thread, a
 // search, a bundle, the Previously Seen screen — leaving the list itself.
 func (v *mailView) closeOverlays() {
+	v.inlineImages.cancel()
 	v.bodyFind = bodyFind{}
 	v.followFind = false
 	v.inThread = false
@@ -1945,6 +1952,7 @@ func (v *mailView) openPreviouslySeen() tea.Cmd {
 		v.ExitThread()
 		return func() tea.Msg { return nil }
 	}
+	v.inlineImages.cancel()
 	v.bodyFind = bodyFind{}
 	v.followFind = false
 	v.inThread = false
@@ -3652,7 +3660,7 @@ var tuiThreadLimits = func() threadload.Limits {
 }()
 
 // fetchTopic reads a whole thread through threadload — every page of the index, every
-// body within the limits — and then its inline images within the image budget. A
+// body within the limits. Image URLs are handed off for a separate read. A
 // thread read only in part is shown with a notice rather than refused: the reader is
 // looking at it, and can see what is missing.
 func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topicID, postingID int64, title string) tea.Cmd {
@@ -3696,10 +3704,6 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 			thread.Entries[i].Message = nil
 		}
 
-		var images [][]byte
-		if wantImages {
-			images = newImageBudget().fetchImages(ctx, v.vc.imageFetcher, imageURLs)
-		}
 		if title == "" {
 			title = entries[0].Summary
 		}
@@ -3712,7 +3716,7 @@ func (v *mailView) fetchTopic(ctx context.Context, requestID uint64, boxID, topi
 			title:       title,
 			entries:     entries,
 			attachments: attachments,
-			images:      images,
+			imageURLs:   imageURLs,
 			notice:      thread.Notice(tuiThreadLimits),
 			complete:    thread.Complete(),
 		}
